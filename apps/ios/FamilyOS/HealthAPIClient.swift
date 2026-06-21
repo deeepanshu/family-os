@@ -13,6 +13,21 @@ struct SessionResponse: Decodable {
     let userId: String
 }
 
+struct FamilyResponse: Decodable {
+    let family: Family
+    let membership: FamilyMembership
+}
+
+struct Family: Decodable {
+    let id: String
+    let name: String
+}
+
+struct FamilyMembership: Decodable {
+    let role: String
+    let status: String
+}
+
 enum HealthAPIError: LocalizedError {
     case invalidURL
     case missingToken
@@ -40,6 +55,39 @@ struct HealthAPIClient {
             throw HealthAPIError.missingToken
         }
         return try await get(path: "me", baseURL: baseURL, accessToken: accessToken)
+    }
+
+    func currentFamily(baseURL: String, accessToken: String) async throws -> FamilyResponse? {
+        guard !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw HealthAPIError.missingToken
+        }
+        return try await get(path: "families/current", baseURL: baseURL, accessToken: accessToken)
+    }
+
+    func createFamily(baseURL: String, accessToken: String, name: String) async throws -> FamilyResponse {
+        guard !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw HealthAPIError.missingToken
+        }
+        guard let url = URL(string: baseURL)?.appending(path: "families") else {
+            throw HealthAPIError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.setValue("application/json", forHTTPHeaderField: "accept")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "authorization")
+        request.httpBody = try JSONEncoder().encode(["name": name])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw HealthAPIError.badStatus(-1)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw HealthAPIError.badStatus(http.statusCode)
+        }
+
+        return try JSONDecoder().decode(APIEnvelope<FamilyResponse>.self, from: data).data
     }
 
     private func get<T: Decodable>(path: String, baseURL: String, accessToken: String?) async throws -> T {

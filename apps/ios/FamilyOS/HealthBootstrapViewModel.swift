@@ -5,6 +5,9 @@ import Combine
 final class HealthBootstrapViewModel: ObservableObject {
     @Published var baseURL = "https://api.deepanshujain.com/health/v1"
     @Published var accessToken = ""
+    @Published var familyName = ""
+    @Published private(set) var currentFamilyName: String?
+    @Published private(set) var currentFamilyRole: String?
     @Published private(set) var statusMessage = "Online-only Phase 1 bootstrap is ready."
     @Published private(set) var isError = false
 
@@ -21,6 +24,28 @@ final class HealthBootstrapViewModel: ObservableObject {
         await request {
             let response = try await client.session(baseURL: baseURL, accessToken: accessToken)
             return "Authenticated as \(response.userId)."
+        }
+    }
+
+    func loadCurrentFamily() async {
+        await request {
+            let response = try await client.currentFamily(baseURL: baseURL, accessToken: accessToken)
+            currentFamilyName = response?.family.name
+            currentFamilyRole = response?.membership.role
+            guard let response else {
+                return "No active family yet. Create one to continue."
+            }
+            return "Current family: \(response.family.name)."
+        }
+    }
+
+    func createFamily() async {
+        await request {
+            let trimmedName = familyName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let response = try await client.createFamily(baseURL: baseURL, accessToken: accessToken, name: trimmedName)
+            currentFamilyName = response.family.name
+            currentFamilyRole = response.membership.role
+            return "Created \(response.family.name); you are \(response.membership.role)."
         }
     }
 

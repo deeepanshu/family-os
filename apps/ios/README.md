@@ -39,3 +39,5 @@ The current bootstrap screen can call:
 
 - `GET /health/v1/healthcheck`
 - `GET /health/v1/me` with `Authorization: Bearer <supabase_access_token>`
+- `GET /health/v1/families/current`
+- `POST /health/v1/families`

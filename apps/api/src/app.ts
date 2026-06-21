@@ -4,13 +4,20 @@ import type { AppConfig } from "./config";
 import { loadConfig } from "./config";
 import { HttpError, jsonError } from "./errors";
 import { requireAuth, type AppVariables } from "./auth";
+import { InMemoryFamilyRepository, type FamilyRepository } from "./repositories/families";
+import { createFamilyRoutes } from "./routes/families";
 
 export type AppOptions = {
   config?: AppConfig;
+  familyRepository?: FamilyRepository;
 };
 
 export function createApp(options: AppOptions = {}) {
   const config = options.config ?? loadConfig();
+  if (config.NODE_ENV === "production" && !options.familyRepository) {
+    throw new Error("FamilyRepository must be configured in production.");
+  }
+  const familyRepository = options.familyRepository ?? new InMemoryFamilyRepository();
   const app = new Hono<{ Variables: AppVariables }>();
   const health = new Hono<{ Variables: AppVariables }>();
 
@@ -32,6 +39,8 @@ export function createApp(options: AppOptions = {}) {
     const body: AuthSessionResponse = { userId: user.id };
     return c.json({ data: body });
   });
+
+  health.route("/families", createFamilyRoutes(familyRepository));
 
   app.route(HEALTH_API_PREFIX, health);
 

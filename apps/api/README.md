@@ -48,6 +48,23 @@ curl -H "Authorization: Bearer <supabase_access_token>" \
   http://localhost:3001/health/v1/me
 ```
 
+Create a family:
+
+```sh
+curl -X POST \
+  -H "Authorization: Bearer <supabase_access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Jain Family"}' \
+  http://localhost:3001/health/v1/families
+```
+
+Load the signed-in user's active family:
+
+```sh
+curl -H "Authorization: Bearer <supabase_access_token>" \
+  http://localhost:3001/health/v1/families/current
+```
+
 For local smoke tests only, set both `HEALTH_API_ENABLE_DEV_AUTH=true` and
 `HEALTH_API_DEV_AUTH_USER_ID=<uuid>`, then call `/me` with
 `Authorization: Bearer dev-token`. This bypass is rejected in production.

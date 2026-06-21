@@ -26,6 +26,21 @@ struct ContentView: View {
                     }
                 }
 
+                Section("Family") {
+                    if let familyName = viewModel.currentFamilyName {
+                        LabeledContent("Current family", value: familyName)
+                        LabeledContent("Role", value: viewModel.currentFamilyRole ?? "unknown")
+                    } else {
+                        TextField("Family name", text: $viewModel.familyName)
+                        Button("Create Family") {
+                            Task { await viewModel.createFamily() }
+                        }
+                    }
+                    Button("Load Current Family") {
+                        Task { await viewModel.loadCurrentFamily() }
+                    }
+                }
+
                 Section("Status") {
                     Text(viewModel.statusMessage)
                         .foregroundStyle(viewModel.isError ? .red : .primary)

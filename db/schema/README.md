@@ -15,3 +15,6 @@ Core Phase 1 tables:
 - `reminder_recipients`
 - `notification_deliveries`
 - `audit_logs`
+
+Current Drizzle schema starts in `health.ts` with `families` and
+`family_memberships`. Later Phase 1 issues extend the same file.

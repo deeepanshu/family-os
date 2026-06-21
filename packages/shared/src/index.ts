@@ -19,3 +19,30 @@ export type HealthcheckResponse = {
 export type AuthSessionResponse = {
   userId: string;
 };
+
+export type FamilyRole = "manager" | "member";
+
+export type MembershipStatus = "active" | "invited" | "removed";
+
+export type Family = {
+  id: string;
+  name: string;
+  createdByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type FamilyMembership = {
+  id: string;
+  familyId: string;
+  userId: string;
+  role: FamilyRole;
+  status: MembershipStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CurrentFamilyResponse = {
+  family: Family;
+  membership: FamilyMembership;
+} | null;
