@@ -4,6 +4,8 @@ import type {
   BloodPressureReading,
   BloodGlucoseReading,
   Reminder,
+  NotificationDelivery,
+  NotificationDevice,
   ReminderRecipient,
   ReminderScheduleKind,
   ReminderType,
@@ -100,6 +102,11 @@ export type UpdateReminderInput = Partial<Omit<CreateReminderInput, "actorUserId
   recipientUserIds: string[];
 }>;
 
+export type RegisterDeviceInput = {
+  userId: string;
+  deviceToken: string;
+};
+
 export interface FamilyRepository {
   createFamily(input: CreateFamilyInput): Promise<CurrentFamilyResponse>;
   getCurrentFamily(userId: string): Promise<CurrentFamilyResponse>;
@@ -127,6 +134,11 @@ export interface FamilyRepository {
   updateReminder(actorUserId: string, reminderId: string, input: UpdateReminderInput): Promise<Reminder>;
   deleteReminder(actorUserId: string, reminderId: string): Promise<void>;
   disableReminderForSelf(actorUserId: string, reminderId: string): Promise<ReminderRecipient>;
+  registerDevice(input: RegisterDeviceInput): Promise<NotificationDevice>;
+  deleteDevice(actorUserId: string, deviceId: string): Promise<void>;
+  listDueReminderDeliveries(now: Date): Promise<Array<{ reminder: Reminder; recipient: ReminderRecipient; devices: NotificationDevice[]; delivery: NotificationDelivery }>>;
+  markDeliverySent(deliveryId: string): Promise<void>;
+  markDeliveryFailed(deliveryId: string, error: string): Promise<void>;
 }
 
 export class InMemoryFamilyRepository implements FamilyRepository {
@@ -137,6 +149,8 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   private readonly bloodPressureReadings = new Map<string, BloodPressureReading & { deletedAt?: string }>();
   private readonly bloodGlucoseReadings = new Map<string, BloodGlucoseReading & { deletedAt?: string }>();
   private readonly reminders = new Map<string, Reminder & { deletedAt?: string }>();
+  private readonly devices = new Map<string, NotificationDevice>();
+  private readonly deliveries = new Map<string, NotificationDelivery>();
 
   async createFamily(input: CreateFamilyInput): Promise<CurrentFamilyResponse> {
     const existing = await this.getCurrentFamily(input.userId);
@@ -574,6 +588,68 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     return updated;
   }
 
+  async registerDevice(input: RegisterDeviceInput): Promise<NotificationDevice> {
+    const now = new Date().toISOString();
+    const existing = [...this.devices.values()].find(
+      (device) => device.userId === input.userId && device.deviceToken === input.deviceToken
+    );
+    if (existing) {
+      const updated = { ...existing, lastSeenAt: now };
+      this.devices.set(existing.id, updated);
+      return updated;
+    }
+    const device: NotificationDevice = {
+      id: crypto.randomUUID(),
+      userId: input.userId,
+      deviceToken: input.deviceToken,
+      platform: "ios",
+      createdAt: now,
+      lastSeenAt: now
+    };
+    this.devices.set(device.id, device);
+    return device;
+  }
+
+  async deleteDevice(actorUserId: string, deviceId: string): Promise<void> {
+    const device = this.devices.get(deviceId);
+    if (!device || device.userId !== actorUserId) {
+      throw new HttpError(404, "device_not_found", "Device was not found.");
+    }
+    this.devices.delete(deviceId);
+  }
+
+  async listDueReminderDeliveries(now: Date) {
+    const scheduledFor = now.toISOString();
+    const due: Array<{ reminder: Reminder; recipient: ReminderRecipient; devices: NotificationDevice[]; delivery: NotificationDelivery }> = [];
+    for (const reminder of this.reminders.values()) {
+      if (reminder.deletedAt || !reminder.enabled || !isReminderDue(reminder, now)) continue;
+      for (const recipient of reminder.recipients.filter((candidate) => candidate.enabled)) {
+        const devices = [...this.devices.values()].filter((device) => device.userId === recipient.userId);
+        const delivery: NotificationDelivery = {
+          id: crypto.randomUUID(),
+          reminderId: reminder.id,
+          recipientUserId: recipient.userId,
+          status: "pending",
+          scheduledFor,
+          createdAt: scheduledFor
+        };
+        this.deliveries.set(delivery.id, delivery);
+        due.push({ reminder: stripDeleted(reminder), recipient, devices, delivery });
+      }
+    }
+    return due;
+  }
+
+  async markDeliverySent(deliveryId: string): Promise<void> {
+    const delivery = this.deliveries.get(deliveryId);
+    if (delivery) this.deliveries.set(deliveryId, { ...delivery, status: "sent", sentAt: new Date().toISOString() });
+  }
+
+  async markDeliveryFailed(deliveryId: string, error: string): Promise<void> {
+    const delivery = this.deliveries.get(deliveryId);
+    if (delivery) this.deliveries.set(deliveryId, { ...delivery, status: "failed", error });
+  }
+
   private buildRecipients(userIds: string[], familyId: string, reminderId: string): ReminderRecipient[] {
     const uniqueIds = [...new Set(userIds)];
     if (uniqueIds.length === 0) {
@@ -629,6 +705,21 @@ function defined<T extends object>(input: T): Partial<T> {
 function stripDeleted<T extends { deletedAt?: string }>(input: T): Omit<T, "deletedAt"> {
   const { deletedAt: _deletedAt, ...rest } = input;
   return rest;
+}
+
+function isReminderDue(reminder: Reminder, now: Date): boolean {
+  if (!reminder.timeOfDay) return false;
+  const hhmm = now.toISOString().slice(11, 16);
+  if (hhmm !== reminder.timeOfDay) return false;
+  const day = now.getUTCDay();
+  if (reminder.scheduleKind === "daily") return true;
+  if (reminder.scheduleKind === "weekly" || reminder.scheduleKind === "custom_days") {
+    return reminder.daysOfWeek?.includes(day) ?? false;
+  }
+  if (reminder.scheduleKind === "once") {
+    return reminder.startsOn === now.toISOString().slice(0, 10);
+  }
+  return false;
 }
 
 function hashToken(token: string) {

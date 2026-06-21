@@ -195,3 +195,34 @@ export const reminderRecipients = pgTable(
   },
   (table) => [uniqueIndex("reminder_recipients_reminder_user_idx").on(table.reminderId, table.userId)]
 );
+
+export const notificationDevices = pgTable(
+  "notification_devices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => authUsers.id),
+    deviceToken: text("device_token").notNull(),
+    platform: text("platform", { enum: ["ios"] }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [uniqueIndex("notification_devices_user_token_idx").on(table.userId, table.deviceToken)]
+);
+
+export const notificationDeliveries = pgTable("notification_deliveries", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  reminderId: uuid("reminder_id")
+    .notNull()
+    .references(() => reminders.id, { onDelete: "cascade" }),
+  recipientUserId: uuid("recipient_user_id")
+    .notNull()
+    .references(() => authUsers.id),
+  status: text("status", { enum: ["pending", "sent", "failed", "opened"] }).notNull(),
+  scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  openedAt: timestamp("opened_at", { withTimezone: true }),
+  error: text("error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+});

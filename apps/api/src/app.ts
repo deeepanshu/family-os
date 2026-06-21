@@ -11,6 +11,7 @@ import { createPeopleRoutes } from "./routes/people";
 import { createBloodPressureRoutes } from "./routes/bloodPressure";
 import { createBloodGlucoseRoutes } from "./routes/bloodGlucose";
 import { createReminderRoutes } from "./routes/reminders";
+import { createDeviceRoutes } from "./routes/devices";
 
 export type AppOptions = {
   config?: AppConfig;
@@ -51,6 +52,7 @@ export function createApp(options: AppOptions = {}) {
   health.route("/readings/blood-pressure", createBloodPressureRoutes(familyRepository));
   health.route("/readings/blood-glucose", createBloodGlucoseRoutes(familyRepository));
   health.route("/reminders", createReminderRoutes(familyRepository));
+  health.route("/devices", createDeviceRoutes(familyRepository));
 
   app.route(HEALTH_API_PREFIX, health);
 

@@ -146,3 +146,24 @@ export type Reminder = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type NotificationDevice = {
+  id: string;
+  userId: string;
+  deviceToken: string;
+  platform: "ios";
+  createdAt: string;
+  lastSeenAt: string;
+};
+
+export type NotificationDelivery = {
+  id: string;
+  reminderId: string;
+  recipientUserId: string;
+  status: "pending" | "sent" | "failed" | "opened";
+  scheduledFor: string;
+  sentAt?: string;
+  openedAt?: string;
+  error?: string;
+  createdAt: string;
+};
