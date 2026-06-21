@@ -1,8 +1,8 @@
-# Family Health PRD
+# Family OS PRD
 
 ## Overview
 
-Family Health is an iOS-only app for managing family health readings and reminders. Phase 1 focuses on blood pressure and blood sugar tracking for family members, with shared family visibility and flexible reminders.
+Family OS is an iOS-only app for managing family needs across multiple facets. Health is the first facet. Phase 1 focuses on blood pressure and blood sugar tracking for family members, with shared family visibility and flexible reminders.
 
 The app is intended for private family use first, distributed through TestFlight.
 

@@ -1,4 +1,4 @@
-# Family Health Technical Design
+# Family OS Technical Design
 
 ## Locked Stack
 
@@ -22,7 +22,7 @@
 ## Repository Structure
 
 ```text
-family-health/
+family-os/
   apps/
     ios/
     api/
@@ -89,7 +89,7 @@ Public API hostname:
 https://api.deepanshujain.com
 ```
 
-Family Health API prefix:
+Health facet API prefix:
 
 ```text
 /health/v1
@@ -449,7 +449,7 @@ The backend runs on the Raspberry Pi and is exposed through Cloudflare Tunnel.
 Recommended local ports:
 
 ```text
-family-health-api: localhost:3001
+family-os-health-api: localhost:3001
 ```
 
 Cloudflare/Caddy style routing:

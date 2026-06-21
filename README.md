@@ -1,6 +1,6 @@
-# Family Health
+# Family OS
 
-iOS-only family health tracking app.
+iOS-only family management app. Health is the first facet.
 
 ## Locked Stack
 
