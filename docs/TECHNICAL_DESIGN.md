@@ -33,7 +33,7 @@ family-os/
     schema/
 
   docs/
-    PRD.md
+    ask.md
     TECHNICAL_DESIGN.md
 
   infra/

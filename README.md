@@ -32,5 +32,5 @@ https://api.deepanshujain.com/health/v1
 
 See:
 
-- [PRD](docs/PRD.md)
+- [Ask](docs/ask.md)
 - [Technical Design](docs/TECHNICAL_DESIGN.md)
