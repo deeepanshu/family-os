@@ -11,6 +11,7 @@ The app is intended for private family use first, distributed through TestFlight
 - Let a user sign in with Apple.
 - Let a user create and manage a family.
 - Let managers create family member health profiles.
+- Let managers invite family members from day one.
 - Let active family members record blood pressure readings.
 - Let active family members record blood sugar readings.
 - Let active family members view family health readings.
@@ -31,7 +32,7 @@ The app is intended for private family use first, distributed through TestFlight
 ## Target Users
 
 - Family manager: a family member who sets up and administers the family.
-- Family member: a user who can view family readings and add their own readings/reminders.
+- Family member: a user who can view family readings and add readings/reminders for any person in the family.
 - Health profile subject: a person whose readings are tracked. This may or may not be a logged-in user.
 
 ## Phase 1 Scope
@@ -47,7 +48,8 @@ The app is intended for private family use first, distributed through TestFlight
 - An authenticated user can create a family.
 - The creator becomes a family manager.
 - Managers can add/edit/delete family member health profiles.
-- Managers can invite users to join the family in a later iteration.
+- Managers can invite users to join the family.
+- Phase 1 is multi-user from day one.
 
 ### Health Profiles
 
@@ -95,8 +97,9 @@ Users can view:
 - Family dashboard.
 - Latest BP and blood sugar readings per profile.
 - Reading history by profile.
-- Basic trends/charts.
 - Reminder list.
+
+Charts are deferred. Phase 1 ships with latest values and history lists first.
 
 ### Reminders
 
@@ -123,6 +126,14 @@ Reminder fields:
 
 When a reminder is due, the backend sends APNs push notifications to selected recipients.
 
+Reminder behavior:
+
+- Any active family member can create a reminder for any family profile.
+- Any active family member can select any active family member as a recipient.
+- Recipients can disable reminders for themselves.
+- Tapping a reminder notification opens the relevant logging screen with person and context prefilled when available.
+- Reminders are visible to active family members.
+
 ## Permissions
 
 ### Family Manager
@@ -147,8 +158,10 @@ An active family member can:
 - Create blood pressure readings.
 - Create blood sugar readings.
 - Create reminders.
+- Create readings/reminders for any person in the family.
 - Edit/delete readings they created.
 - Edit/delete reminders they created.
+- Disable reminders for themselves.
 
 An active family member cannot:
 
@@ -166,7 +179,6 @@ An active family member cannot:
 - Add Blood Pressure Reading.
 - Add Blood Sugar Reading.
 - Reading History.
-- Trend Chart.
 - Reminders.
 - Create/Edit Reminder.
 - Settings.
@@ -176,11 +188,17 @@ An active family member cannot:
 - A user can sign in with Apple.
 - A user can create a family and become manager.
 - A manager can create at least one profile.
-- A family member can add BP and blood sugar readings.
+- A manager can invite another user to the family.
+- An invited user can join the family.
+- A family member can add BP and blood sugar readings for any family profile.
 - Family members can view all readings.
 - Non-manager users can edit/delete only their own readings/reminders.
 - Managers can edit/delete all family data.
 - Custom reminders send APNs notifications to selected recipients.
+- Recipients can disable reminder notifications for themselves.
+- Tapping a reminder opens the relevant add-reading screen when the reminder type is BP or blood sugar.
+- Deleted readings and reminders disappear from normal app views.
+- Phase 1 is online-only.
 - The backend is reachable at `https://api.deepanshujain.com/health/v1`.
 
 ## Future Phases
@@ -192,5 +210,7 @@ An active family member cannot:
 - HealthKit import normalization.
 - OCR and AI summaries.
 - Missed-reading escalation.
+- Offline entry and sync.
+- Basic trends/charts for BP and glucose.
 - CSV/PDF export.
 - Web dashboard.

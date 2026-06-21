@@ -25,6 +25,7 @@ https://api.deepanshujain.com/health/v1
 
 - Family setup.
 - Family profiles.
+- Family invites.
 - Blood pressure readings.
 - Blood sugar readings.
 - Custom reminders.

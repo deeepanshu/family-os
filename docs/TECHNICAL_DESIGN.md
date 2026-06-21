@@ -103,6 +103,10 @@ GET    /health/v1/healthcheck
 POST   /health/v1/families
 GET    /health/v1/families/current
 
+POST   /health/v1/invites
+GET    /health/v1/invites/:token
+POST   /health/v1/invites/:token/accept
+
 POST   /health/v1/people
 GET    /health/v1/people
 GET    /health/v1/people/:id
@@ -178,10 +182,12 @@ Active family member:
 
 ```text
 Can view all family data.
-Can create readings.
-Can create reminders.
+Can create readings for any family profile.
+Can create reminders for any family profile.
+Can select any active family member as a reminder recipient.
 Can edit/delete readings they created.
 Can edit/delete reminders they created.
+Can disable reminder notifications for themselves.
 Cannot manage family roles, memberships, or profiles.
 ```
 
@@ -226,6 +232,25 @@ updated_at timestamptz
 unique (family_id, user_id)
 ```
 
+### family_invites
+
+```text
+id uuid primary key
+family_id uuid not null references families(id)
+invited_by_user_id uuid not null references auth.users(id)
+email text
+token_hash text not null
+role text not null check role in ('manager', 'member')
+status text not null check status in ('pending', 'accepted', 'revoked', 'expired')
+expires_at timestamptz not null
+accepted_by_user_id uuid references auth.users(id)
+accepted_at timestamptz
+created_at timestamptz
+updated_at timestamptz
+
+unique (token_hash)
+```
+
 ### people
 
 Health profiles tracked inside a family.
@@ -258,7 +283,6 @@ context text
 notes text
 created_at timestamptz
 updated_at timestamptz
-deleted_at timestamptz
 ```
 
 Suggested validation:
@@ -283,7 +307,6 @@ context text not null check context in ('fasting', 'before_meal', 'after_meal', 
 notes text
 created_at timestamptz
 updated_at timestamptz
-deleted_at timestamptz
 ```
 
 Suggested validation:
@@ -324,7 +347,6 @@ ends_on date
 enabled boolean not null default true
 created_at timestamptz
 updated_at timestamptz
-deleted_at timestamptz
 ```
 
 ### reminder_recipients
@@ -333,6 +355,8 @@ deleted_at timestamptz
 id uuid primary key
 reminder_id uuid not null references reminders(id)
 user_id uuid not null references auth.users(id)
+enabled boolean not null default true
+disabled_at timestamptz
 created_at timestamptz
 
 unique (reminder_id, user_id)
@@ -425,6 +449,14 @@ Reminder scheduler:
 5. Sends APNs pushes to active recipient devices.
 6. Updates delivery status.
 
+Reminder tap behavior:
+
+```text
+blood_glucose -> open add blood sugar screen with subject/context prefilled
+blood_pressure -> open add blood pressure screen with subject prefilled
+generic -> open reminder detail
+```
+
 Push payload example:
 
 ```json
@@ -490,7 +522,8 @@ APNS_PRIVATE_KEY_PATH=
 - Add basic rate limiting on write endpoints.
 - Validate all request bodies with Zod.
 - Write audit logs for important health/family changes.
-- Soft-delete readings and reminders where useful.
+- Deleted readings and reminders disappear from normal app views.
+- Phase 1 is online-only.
 
 ## Phase 1 Implementation Order
 
@@ -500,12 +533,12 @@ APNS_PRIVATE_KEY_PATH=
 4. Configure Supabase Auth with Sign in with Apple.
 5. Build Bun/Hono backend skeleton.
 6. Add JWT auth middleware.
-7. Add family/profile APIs.
+7. Add family/invite/profile APIs.
 8. Add BP/glucose APIs.
 9. Add reminder/device APIs.
 10. Add APNs sender and scheduler.
 11. Build SwiftUI sign-in flow.
-12. Build dashboard/profile/readings UI.
+12. Build home/profile/readings UI.
 13. Build reminders UI.
 14. Deploy backend to Raspberry Pi behind Cloudflare Tunnel.
 15. Distribute through TestFlight.
@@ -514,6 +547,5 @@ APNS_PRIVATE_KEY_PATH=
 
 - Whether to use Docker Compose or systemd for the first Pi deployment.
 - Whether to use Caddy/Nginx in front of the Bun service or route tunnel directly.
-- Exact charting library for SwiftUI.
-- Exact invite flow for family members.
 - Export format and retention policy.
+- Exact invite delivery channel beyond link/token.
