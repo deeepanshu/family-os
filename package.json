@@ -1,0 +1,17 @@
+{
+  "name": "family-os",
+  "private": true,
+  "workspaces": [
+    "apps/api",
+    "packages/shared"
+  ],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "api:dev": "npm run dev -w @family-os/health-api",
+    "api:test": "npm run test -w @family-os/health-api"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

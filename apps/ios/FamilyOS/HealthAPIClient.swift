@@ -1,0 +1,67 @@
+import Foundation
+
+struct APIEnvelope<T: Decodable>: Decodable {
+    let data: T
+}
+
+struct HealthcheckResponse: Decodable {
+    let service: String
+    let status: String
+}
+
+struct SessionResponse: Decodable {
+    let userId: String
+}
+
+enum HealthAPIError: LocalizedError {
+    case invalidURL
+    case missingToken
+    case badStatus(Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidURL:
+            return "The Health API base URL is invalid."
+        case .missingToken:
+            return "Paste a Supabase access token first."
+        case .badStatus(let status):
+            return "Health API returned HTTP \(status)."
+        }
+    }
+}
+
+struct HealthAPIClient {
+    func healthcheck(baseURL: String) async throws -> HealthcheckResponse {
+        try await get(path: "healthcheck", baseURL: baseURL, accessToken: nil)
+    }
+
+    func session(baseURL: String, accessToken: String) async throws -> SessionResponse {
+        guard !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw HealthAPIError.missingToken
+        }
+        return try await get(path: "me", baseURL: baseURL, accessToken: accessToken)
+    }
+
+    private func get<T: Decodable>(path: String, baseURL: String, accessToken: String?) async throws -> T {
+        guard let url = URL(string: baseURL)?.appending(path: path) else {
+            throw HealthAPIError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "accept")
+        if let accessToken {
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "authorization")
+        }
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw HealthAPIError.badStatus(-1)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw HealthAPIError.badStatus(http.statusCode)
+        }
+
+        return try JSONDecoder().decode(APIEnvelope<T>.self, from: data).data
+    }
+}

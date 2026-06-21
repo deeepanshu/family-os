@@ -8,7 +8,7 @@ iOS app stack:
 - Supabase Auth.
 - APNs remote notifications.
 
-Phase 1 screens:
+Phase 1 planned screens:
 
 - Sign In.
 - Family Setup.
@@ -20,3 +20,22 @@ Phase 1 screens:
 - Reminders.
 - Create/Edit Reminder.
 - Settings.
+
+## Local Build
+
+Open `FamilyOS.xcodeproj` in Xcode or build from the repository root:
+
+```sh
+xcodebuild \
+  -project apps/ios/FamilyOS.xcodeproj \
+  -scheme FamilyOS \
+  -sdk iphonesimulator \
+  -destination 'generic/platform=iOS Simulator' \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
+
+The current bootstrap screen can call:
+
+- `GET /health/v1/healthcheck`
+- `GET /health/v1/me` with `Authorization: Bearer <supabase_access_token>`

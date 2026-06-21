@@ -1,0 +1,67 @@
+import { HEALTH_API_PREFIX, type AuthSessionResponse, type HealthcheckResponse } from "@family-os/shared";
+import { Hono } from "hono";
+import type { AppConfig } from "./config";
+import { loadConfig } from "./config";
+import { HttpError, jsonError } from "./errors";
+import { requireAuth, type AppVariables } from "./auth";
+
+export type AppOptions = {
+  config?: AppConfig;
+};
+
+export function createApp(options: AppOptions = {}) {
+  const config = options.config ?? loadConfig();
+  const app = new Hono<{ Variables: AppVariables }>();
+  const health = new Hono<{ Variables: AppVariables }>();
+
+  app.use("*", async (c, next) => {
+    c.set("config", config);
+    await next();
+  });
+
+  health.get("/healthcheck", (c) => {
+    const body: HealthcheckResponse = {
+      service: "family-os-health-api",
+      status: "ok"
+    };
+    return c.json({ data: body });
+  });
+
+  health.get("/me", requireAuth(), (c) => {
+    const user = c.get("user");
+    const body: AuthSessionResponse = { userId: user.id };
+    return c.json({ data: body });
+  });
+
+  app.route(HEALTH_API_PREFIX, health);
+
+  app.notFound((c) =>
+    c.json(
+      {
+        error: {
+          code: "not_found",
+          message: "Route not found."
+        }
+      },
+      404
+    )
+  );
+
+  app.onError((error, c) => {
+    if (error instanceof HttpError) {
+      return jsonError(c, error);
+    }
+    console.error(error);
+    return c.json(
+      {
+        error: {
+          code: "internal_error",
+          message: "Internal server error."
+        }
+      },
+      500
+    );
+  });
+
+  return app;
+}
