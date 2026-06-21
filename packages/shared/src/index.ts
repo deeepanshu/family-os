@@ -70,3 +70,16 @@ export type PublicInviteResponse = {
   status: FamilyInviteStatus;
   expiresAt: string;
 };
+
+export type PersonStatus = "active" | "inactive";
+
+export type HealthProfile = {
+  id: string;
+  familyId: string;
+  displayName: string;
+  relationshipLabel?: string;
+  dateOfBirth?: string;
+  status: PersonStatus;
+  createdAt: string;
+  updatedAt: string;
+};

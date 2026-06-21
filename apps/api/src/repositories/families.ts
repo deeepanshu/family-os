@@ -6,6 +6,8 @@ import type {
   FamilyInvite,
   FamilyMembership,
   FamilyRole,
+  HealthProfile,
+  PersonStatus,
   PublicInviteResponse
 } from "@family-os/shared";
 import { HttpError } from "../errors";
@@ -21,18 +23,38 @@ export type CreateInviteInput = {
   role: FamilyRole;
 };
 
+export type CreateProfileInput = {
+  actorUserId: string;
+  displayName: string;
+  relationshipLabel?: string;
+  dateOfBirth?: string;
+};
+
+export type UpdateProfileInput = Partial<{
+  displayName: string;
+  relationshipLabel: string;
+  dateOfBirth: string;
+  status: PersonStatus;
+}>;
+
 export interface FamilyRepository {
   createFamily(input: CreateFamilyInput): Promise<CurrentFamilyResponse>;
   getCurrentFamily(userId: string): Promise<CurrentFamilyResponse>;
   createInvite(input: CreateInviteInput): Promise<CreateInviteResponse>;
   getInviteByToken(token: string): Promise<PublicInviteResponse>;
   acceptInvite(token: string, userId: string, userEmail?: string): Promise<CurrentFamilyResponse>;
+  listProfiles(actorUserId: string): Promise<HealthProfile[]>;
+  getProfile(actorUserId: string, profileId: string): Promise<HealthProfile>;
+  createProfile(input: CreateProfileInput): Promise<HealthProfile>;
+  updateProfile(actorUserId: string, profileId: string, input: UpdateProfileInput): Promise<HealthProfile>;
+  deleteProfile(actorUserId: string, profileId: string): Promise<void>;
 }
 
 export class InMemoryFamilyRepository implements FamilyRepository {
   private readonly families = new Map<string, Family>();
   private readonly memberships = new Map<string, FamilyMembership>();
   private readonly invites = new Map<string, FamilyInvite & { tokenHash: string }>();
+  private readonly profiles = new Map<string, HealthProfile>();
 
   async createFamily(input: CreateFamilyInput): Promise<CurrentFamilyResponse> {
     const existing = await this.getCurrentFamily(input.userId);
@@ -162,6 +184,75 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     return invite;
   }
 
+  async listProfiles(actorUserId: string): Promise<HealthProfile[]> {
+    const current = this.requireActiveMember(actorUserId);
+    return [...this.profiles.values()].filter(
+      (profile) => profile.familyId === current.family.id && profile.status === "active"
+    );
+  }
+
+  async getProfile(actorUserId: string, profileId: string): Promise<HealthProfile> {
+    const current = this.requireActiveMember(actorUserId);
+    const profile = this.profiles.get(profileId);
+    if (!profile || profile.familyId !== current.family.id || profile.status !== "active") {
+      throw new HttpError(404, "profile_not_found", "Health profile was not found.");
+    }
+    return profile;
+  }
+
+  async createProfile(input: CreateProfileInput): Promise<HealthProfile> {
+    const current = this.requireManager(input.actorUserId);
+    const now = new Date().toISOString();
+    const profile: HealthProfile = {
+      id: crypto.randomUUID(),
+      familyId: current.family.id,
+      displayName: input.displayName,
+      relationshipLabel: input.relationshipLabel,
+      dateOfBirth: input.dateOfBirth,
+      status: "active",
+      createdAt: now,
+      updatedAt: now
+    };
+    this.profiles.set(profile.id, profile);
+    return profile;
+  }
+
+  async updateProfile(actorUserId: string, profileId: string, input: UpdateProfileInput): Promise<HealthProfile> {
+    const current = this.requireManager(actorUserId);
+    const profile = this.profiles.get(profileId);
+    if (!profile || profile.familyId !== current.family.id) {
+      throw new HttpError(404, "profile_not_found", "Health profile was not found.");
+    }
+
+    const updated: HealthProfile = {
+      ...profile,
+      ...defined(input),
+      updatedAt: new Date().toISOString()
+    };
+    this.profiles.set(profileId, updated);
+    return updated;
+  }
+
+  async deleteProfile(actorUserId: string, profileId: string): Promise<void> {
+    await this.updateProfile(actorUserId, profileId, { status: "inactive" });
+  }
+
+  private requireActiveMember(userId: string): NonNullable<CurrentFamilyResponse> {
+    const current = this.getCurrentFamilySync(userId);
+    if (!current) {
+      throw new HttpError(403, "active_member_required", "Active family membership is required.");
+    }
+    return current;
+  }
+
+  private requireManager(userId: string): NonNullable<CurrentFamilyResponse> {
+    const current = this.requireActiveMember(userId);
+    if (current.membership.role !== "manager") {
+      throw new HttpError(403, "manager_required", "Only family managers can manage health profiles.");
+    }
+    return current;
+  }
+
   private getCurrentFamilySync(userId: string): CurrentFamilyResponse {
     const membership = [...this.memberships.values()].find(
       (candidate) => candidate.userId === userId && candidate.status === "active"
@@ -177,6 +268,10 @@ export class InMemoryFamilyRepository implements FamilyRepository {
 
     return { family, membership };
   }
+}
+
+function defined<T extends object>(input: T): Partial<T> {
+  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)) as Partial<T>;
 }
 
 function hashToken(token: string) {

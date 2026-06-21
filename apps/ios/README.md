@@ -44,3 +44,5 @@ The current bootstrap screen can call:
 - `GET /health/v1/invites/{token}`
 - `POST /health/v1/invites`
 - `POST /health/v1/invites/{token}/accept`
+- `GET /health/v1/people`
+- `POST /health/v1/people`

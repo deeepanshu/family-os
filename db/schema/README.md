@@ -17,5 +17,5 @@ Core Phase 1 tables:
 - `audit_logs`
 
 Current Drizzle schema starts in `health.ts` with `families`,
-`family_memberships`, and `family_invites`. Later Phase 1 issues extend the
-same file.
+`family_memberships`, `family_invites`, and `people`. Later Phase 1 issues
+extend the same file.

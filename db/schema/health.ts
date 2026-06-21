@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, pgSchema, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { check, date, pgSchema, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 const authSchema = pgSchema("auth");
 
@@ -64,5 +64,28 @@ export const familyInvites = pgTable(
     uniqueIndex("family_invites_token_hash_idx").on(table.tokenHash),
     check("family_invites_role_check", sql`${table.role} in ('manager', 'member')`),
     check("family_invites_status_check", sql`${table.status} in ('pending', 'accepted', 'revoked', 'expired')`)
+  ]
+);
+
+export const people = pgTable(
+  "people",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    familyId: uuid("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    linkedUserId: uuid("linked_user_id").references(() => authUsers.id),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => authUsers.id),
+    displayName: text("display_name").notNull(),
+    relationshipLabel: text("relationship_label"),
+    dateOfBirth: date("date_of_birth"),
+    status: text("status", { enum: ["active", "inactive"] }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    check("people_status_check", sql`${table.status} in ('active', 'inactive')`)
   ]
 );

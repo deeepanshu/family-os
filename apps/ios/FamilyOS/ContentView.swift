@@ -54,6 +54,32 @@ struct ContentView: View {
                     }
                 }
 
+                Section("Health Profiles") {
+                    if viewModel.currentFamilyName == nil {
+                        Text("Create or join a family before managing profiles.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        TextField("Profile name", text: $viewModel.profileName)
+                        TextField("Relationship", text: $viewModel.profileRelationship)
+                        Button("Create Profile") {
+                            Task { await viewModel.createProfile() }
+                        }
+                        Button("Load Profiles") {
+                            Task { await viewModel.loadProfiles() }
+                        }
+                        ForEach(viewModel.profiles) { profile in
+                            VStack(alignment: .leading) {
+                                Text(profile.displayName)
+                                if let relationship = profile.relationshipLabel {
+                                    Text(relationship)
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Section("Status") {
                     Text(viewModel.statusMessage)
                         .foregroundStyle(viewModel.isError ? .red : .primary)

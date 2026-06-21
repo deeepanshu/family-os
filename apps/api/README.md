@@ -79,6 +79,23 @@ curl -X POST \
   http://localhost:3001/health/v1/invites/<token>/accept
 ```
 
+List health profiles:
+
+```sh
+curl -H "Authorization: Bearer <supabase_access_token>" \
+  http://localhost:3001/health/v1/people
+```
+
+Create a health profile as a manager:
+
+```sh
+curl -X POST \
+  -H "Authorization: Bearer <supabase_access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"displayName":"Mom","relationshipLabel":"Mother"}' \
+  http://localhost:3001/health/v1/people
+```
+
 For local smoke tests only, set both `HEALTH_API_ENABLE_DEV_AUTH=true` and
 `HEALTH_API_DEV_AUTH_USER_ID=<uuid>`, then call `/me` with
 `Authorization: Bearer dev-token`. This bypass is rejected in production.

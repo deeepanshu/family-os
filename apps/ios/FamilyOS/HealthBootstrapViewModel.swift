@@ -7,9 +7,12 @@ final class HealthBootstrapViewModel: ObservableObject {
     @Published var accessToken = ""
     @Published var familyName = ""
     @Published var inviteToken = ""
+    @Published var profileName = ""
+    @Published var profileRelationship = ""
     @Published private(set) var lastCreatedInviteToken: String?
     @Published private(set) var currentFamilyName: String?
     @Published private(set) var currentFamilyRole: String?
+    @Published private(set) var profiles: [HealthProfile] = []
     @Published private(set) var statusMessage = "Online-only Phase 1 bootstrap is ready."
     @Published private(set) var isError = false
 
@@ -69,6 +72,28 @@ final class HealthBootstrapViewModel: ObservableObject {
             currentFamilyName = response.family.name
             currentFamilyRole = response.membership.role
             return "Joined \(response.family.name) as \(response.membership.role)."
+        }
+    }
+
+    func loadProfiles() async {
+        await request {
+            profiles = try await client.listProfiles(baseURL: baseURL, accessToken: accessToken)
+            return "Loaded \(profiles.count) health profiles."
+        }
+    }
+
+    func createProfile() async {
+        await request {
+            let profile = try await client.createProfile(
+                baseURL: baseURL,
+                accessToken: accessToken,
+                displayName: profileName.trimmingCharacters(in: .whitespacesAndNewlines),
+                relationshipLabel: profileRelationship.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            profiles.append(profile)
+            profileName = ""
+            profileRelationship = ""
+            return "Created profile for \(profile.displayName)."
         }
     }
 

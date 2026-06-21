@@ -7,6 +7,7 @@ import { requireAuth, type AppVariables } from "./auth";
 import { InMemoryFamilyRepository, type FamilyRepository } from "./repositories/families";
 import { createFamilyRoutes } from "./routes/families";
 import { createInviteRoutes } from "./routes/invites";
+import { createPeopleRoutes } from "./routes/people";
 
 export type AppOptions = {
   config?: AppConfig;
@@ -43,6 +44,7 @@ export function createApp(options: AppOptions = {}) {
 
   health.route("/families", createFamilyRoutes(familyRepository));
   health.route("/invites", createInviteRoutes(familyRepository));
+  health.route("/people", createPeopleRoutes(familyRepository));
 
   app.route(HEALTH_API_PREFIX, health);
 

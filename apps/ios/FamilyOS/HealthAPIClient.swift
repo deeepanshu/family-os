@@ -32,6 +32,12 @@ struct CreateInviteResponse: Decodable {
     let token: String
 }
 
+struct HealthProfile: Decodable, Identifiable {
+    let id: String
+    let displayName: String
+    let relationshipLabel: String?
+}
+
 enum HealthAPIError: LocalizedError {
     case invalidURL
     case missingToken
@@ -95,7 +101,7 @@ struct HealthAPIClient {
     }
 
     func createInvite(baseURL: String, accessToken: String) async throws -> CreateInviteResponse {
-        try await post(
+        return try await post(
             path: "invites",
             baseURL: baseURL,
             accessToken: accessToken,
@@ -113,6 +119,28 @@ struct HealthAPIClient {
             baseURL: baseURL,
             accessToken: accessToken,
             body: [String: String]()
+        )
+    }
+
+    func listProfiles(baseURL: String, accessToken: String) async throws -> [HealthProfile] {
+        try await get(path: "people", baseURL: baseURL, accessToken: accessToken)
+    }
+
+    func createProfile(
+        baseURL: String,
+        accessToken: String,
+        displayName: String,
+        relationshipLabel: String
+    ) async throws -> HealthProfile {
+        var body = ["displayName": displayName]
+        if !relationshipLabel.isEmpty {
+            body["relationshipLabel"] = relationshipLabel
+        }
+        return try await post(
+            path: "people",
+            baseURL: baseURL,
+            accessToken: accessToken,
+            body: body
         )
     }
 
