@@ -9,10 +9,15 @@ final class HealthBootstrapViewModel: ObservableObject {
     @Published var inviteToken = ""
     @Published var profileName = ""
     @Published var profileRelationship = ""
+    @Published var selectedProfileId = ""
+    @Published var systolic = "120"
+    @Published var diastolic = "80"
+    @Published var pulse = ""
     @Published private(set) var lastCreatedInviteToken: String?
     @Published private(set) var currentFamilyName: String?
     @Published private(set) var currentFamilyRole: String?
     @Published private(set) var profiles: [HealthProfile] = []
+    @Published private(set) var bloodPressureReadings: [BloodPressureReading] = []
     @Published private(set) var statusMessage = "Online-only Phase 1 bootstrap is ready."
     @Published private(set) var isError = false
 
@@ -79,6 +84,50 @@ final class HealthBootstrapViewModel: ObservableObject {
         await request {
             profiles = try await client.listProfiles(baseURL: baseURL, accessToken: accessToken)
             return "Loaded \(profiles.count) health profiles."
+        }
+    }
+
+    func createBloodPressure() async {
+        await request {
+            guard !selectedProfileId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return "Select or paste a profile ID first."
+            }
+            guard let systolicValue = Int(systolic), let diastolicValue = Int(diastolic) else {
+                return "Enter numeric systolic and diastolic values."
+            }
+            guard (50...260).contains(systolicValue), (30...180).contains(diastolicValue) else {
+                return "BP must be systolic 50-260 and diastolic 30-180."
+            }
+            let trimmedPulse = pulse.trimmingCharacters(in: .whitespacesAndNewlines)
+            let pulseValue: Int?
+            if trimmedPulse.isEmpty {
+                pulseValue = nil
+            } else if let parsedPulse = Int(trimmedPulse), (30...220).contains(parsedPulse) {
+                pulseValue = parsedPulse
+            } else {
+                return "Pulse must be a number from 30-220."
+            }
+            let reading = try await client.createBloodPressure(
+                baseURL: baseURL,
+                accessToken: accessToken,
+                personId: selectedProfileId,
+                systolic: systolicValue,
+                diastolic: diastolicValue,
+                pulse: pulseValue
+            )
+            bloodPressureReadings.insert(reading, at: 0)
+            return "Logged BP \(reading.systolic)/\(reading.diastolic)."
+        }
+    }
+
+    func loadBloodPressure() async {
+        await request {
+            bloodPressureReadings = try await client.listBloodPressure(
+                baseURL: baseURL,
+                accessToken: accessToken,
+                personId: selectedProfileId
+            )
+            return "Loaded \(bloodPressureReadings.count) BP readings."
         }
     }
 

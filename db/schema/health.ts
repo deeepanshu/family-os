@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, date, pgSchema, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { check, date, index, integer, pgSchema, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 const authSchema = pgSchema("auth");
 
@@ -87,5 +87,38 @@ export const people = pgTable(
   },
   (table) => [
     check("people_status_check", sql`${table.status} in ('active', 'inactive')`)
+  ]
+);
+
+export const bloodPressureReadings = pgTable(
+  "blood_pressure_readings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    familyId: uuid("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    recordedByUserId: uuid("recorded_by_user_id")
+      .notNull()
+      .references(() => authUsers.id),
+    systolic: integer("systolic").notNull(),
+    diastolic: integer("diastolic").notNull(),
+    pulse: integer("pulse"),
+    measuredAt: timestamp("measured_at", { withTimezone: true }).notNull(),
+    context: text("context"),
+    notes: text("notes"),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    check("bp_systolic_check", sql`${table.systolic} between 50 and 260`),
+    check("bp_diastolic_check", sql`${table.diastolic} between 30 and 180`),
+    check("bp_pulse_check", sql`${table.pulse} is null or ${table.pulse} between 30 and 220`),
+    index("bp_family_person_measured_idx")
+      .on(table.familyId, table.personId, table.measuredAt)
+      .where(sql`${table.deletedAt} is null`)
   ]
 );

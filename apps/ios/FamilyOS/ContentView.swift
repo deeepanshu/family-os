@@ -80,6 +80,26 @@ struct ContentView: View {
                     }
                 }
 
+                Section("Blood Pressure") {
+                    TextField("Profile ID", text: $viewModel.selectedProfileId)
+                        .textInputAutocapitalization(.never)
+                    TextField("Systolic", text: $viewModel.systolic)
+                        .keyboardType(.numberPad)
+                    TextField("Diastolic", text: $viewModel.diastolic)
+                        .keyboardType(.numberPad)
+                    TextField("Pulse", text: $viewModel.pulse)
+                        .keyboardType(.numberPad)
+                    Button("Log Blood Pressure") {
+                        Task { await viewModel.createBloodPressure() }
+                    }
+                    Button("Load BP History") {
+                        Task { await viewModel.loadBloodPressure() }
+                    }
+                    ForEach(viewModel.bloodPressureReadings) { reading in
+                        Text("\(reading.systolic)/\(reading.diastolic)")
+                    }
+                }
+
                 Section("Status") {
                     Text(viewModel.statusMessage)
                         .foregroundStyle(viewModel.isError ? .red : .primary)

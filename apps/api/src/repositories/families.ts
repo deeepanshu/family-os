@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type {
   CreateInviteResponse,
+  BloodPressureReading,
   CurrentFamilyResponse,
   Family,
   FamilyInvite,
@@ -37,6 +38,26 @@ export type UpdateProfileInput = Partial<{
   status: PersonStatus;
 }>;
 
+export type CreateBloodPressureInput = {
+  actorUserId: string;
+  personId: string;
+  systolic: number;
+  diastolic: number;
+  pulse?: number;
+  measuredAt: string;
+  context?: string;
+  notes?: string;
+};
+
+export type UpdateBloodPressureInput = Partial<{
+  systolic: number;
+  diastolic: number;
+  pulse: number;
+  measuredAt: string;
+  context: string;
+  notes: string;
+}>;
+
 export interface FamilyRepository {
   createFamily(input: CreateFamilyInput): Promise<CurrentFamilyResponse>;
   getCurrentFamily(userId: string): Promise<CurrentFamilyResponse>;
@@ -48,6 +69,11 @@ export interface FamilyRepository {
   createProfile(input: CreateProfileInput): Promise<HealthProfile>;
   updateProfile(actorUserId: string, profileId: string, input: UpdateProfileInput): Promise<HealthProfile>;
   deleteProfile(actorUserId: string, profileId: string): Promise<void>;
+  createBloodPressure(input: CreateBloodPressureInput): Promise<BloodPressureReading>;
+  listBloodPressure(actorUserId: string, personId?: string, limit?: number): Promise<BloodPressureReading[]>;
+  getBloodPressure(actorUserId: string, readingId: string): Promise<BloodPressureReading>;
+  updateBloodPressure(actorUserId: string, readingId: string, input: UpdateBloodPressureInput): Promise<BloodPressureReading>;
+  deleteBloodPressure(actorUserId: string, readingId: string): Promise<void>;
 }
 
 export class InMemoryFamilyRepository implements FamilyRepository {
@@ -55,6 +81,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   private readonly memberships = new Map<string, FamilyMembership>();
   private readonly invites = new Map<string, FamilyInvite & { tokenHash: string }>();
   private readonly profiles = new Map<string, HealthProfile>();
+  private readonly bloodPressureReadings = new Map<string, BloodPressureReading & { deletedAt?: string }>();
 
   async createFamily(input: CreateFamilyInput): Promise<CurrentFamilyResponse> {
     const existing = await this.getCurrentFamily(input.userId);
@@ -253,6 +280,80 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     return current;
   }
 
+  async createBloodPressure(input: CreateBloodPressureInput): Promise<BloodPressureReading> {
+    const current = this.requireActiveMember(input.actorUserId);
+    const profile = this.profiles.get(input.personId);
+    if (!profile || profile.familyId !== current.family.id || profile.status !== "active") {
+      throw new HttpError(404, "profile_not_found", "Health profile was not found.");
+    }
+    const now = new Date().toISOString();
+    const reading: BloodPressureReading = {
+      id: crypto.randomUUID(),
+      familyId: current.family.id,
+      personId: input.personId,
+      recordedByUserId: input.actorUserId,
+      systolic: input.systolic,
+      diastolic: input.diastolic,
+      pulse: input.pulse,
+      measuredAt: input.measuredAt,
+      context: input.context,
+      notes: input.notes,
+      createdAt: now,
+      updatedAt: now
+    };
+    this.bloodPressureReadings.set(reading.id, reading);
+    return reading;
+  }
+
+  async listBloodPressure(actorUserId: string, personId?: string, limit = 50): Promise<BloodPressureReading[]> {
+    const current = this.requireActiveMember(actorUserId);
+    return [...this.bloodPressureReadings.values()]
+      .filter((reading) => reading.familyId === current.family.id && !reading.deletedAt)
+      .filter((reading) => !personId || reading.personId === personId)
+      .sort((a, b) => Date.parse(b.measuredAt) - Date.parse(a.measuredAt))
+      .slice(0, limit)
+      .map(stripDeleted);
+  }
+
+  async getBloodPressure(actorUserId: string, readingId: string): Promise<BloodPressureReading> {
+    const current = this.requireActiveMember(actorUserId);
+    const reading = this.bloodPressureReadings.get(readingId);
+    if (!reading || reading.familyId !== current.family.id || reading.deletedAt) {
+      throw new HttpError(404, "bp_reading_not_found", "Blood pressure reading was not found.");
+    }
+    return stripDeleted(reading);
+  }
+
+  async updateBloodPressure(
+    actorUserId: string,
+    readingId: string,
+    input: UpdateBloodPressureInput
+  ): Promise<BloodPressureReading> {
+    const current = this.requireActiveMember(actorUserId);
+    const reading = this.bloodPressureReadings.get(readingId);
+    if (!reading || reading.familyId !== current.family.id || reading.deletedAt) {
+      throw new HttpError(404, "bp_reading_not_found", "Blood pressure reading was not found.");
+    }
+    if (reading.recordedByUserId !== actorUserId && current.membership.role !== "manager") {
+      throw new HttpError(403, "reading_owner_or_manager_required", "Only the recorder or a manager can change this reading.");
+    }
+    const updated = { ...reading, ...defined(input), updatedAt: new Date().toISOString() };
+    this.bloodPressureReadings.set(readingId, updated);
+    return stripDeleted(updated);
+  }
+
+  async deleteBloodPressure(actorUserId: string, readingId: string): Promise<void> {
+    const current = this.requireActiveMember(actorUserId);
+    const reading = this.bloodPressureReadings.get(readingId);
+    if (!reading || reading.familyId !== current.family.id || reading.deletedAt) {
+      throw new HttpError(404, "bp_reading_not_found", "Blood pressure reading was not found.");
+    }
+    if (reading.recordedByUserId !== actorUserId && current.membership.role !== "manager") {
+      throw new HttpError(403, "reading_owner_or_manager_required", "Only the recorder or a manager can delete this reading.");
+    }
+    this.bloodPressureReadings.set(readingId, { ...reading, deletedAt: new Date().toISOString() });
+  }
+
   private getCurrentFamilySync(userId: string): CurrentFamilyResponse {
     const membership = [...this.memberships.values()].find(
       (candidate) => candidate.userId === userId && candidate.status === "active"
@@ -272,6 +373,11 @@ export class InMemoryFamilyRepository implements FamilyRepository {
 
 function defined<T extends object>(input: T): Partial<T> {
   return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)) as Partial<T>;
+}
+
+function stripDeleted<T extends { deletedAt?: string }>(input: T): Omit<T, "deletedAt"> {
+  const { deletedAt: _deletedAt, ...rest } = input;
+  return rest;
 }
 
 function hashToken(token: string) {

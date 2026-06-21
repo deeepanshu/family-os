@@ -38,6 +38,13 @@ struct HealthProfile: Decodable, Identifiable {
     let relationshipLabel: String?
 }
 
+struct BloodPressureReading: Decodable, Identifiable {
+    let id: String
+    let systolic: Int
+    let diastolic: Int
+    let pulse: Int?
+}
+
 enum HealthAPIError: LocalizedError {
     case invalidURL
     case missingToken
@@ -78,7 +85,7 @@ struct HealthAPIClient {
         guard !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw HealthAPIError.missingToken
         }
-        guard let url = URL(string: baseURL)?.appending(path: "families") else {
+        guard let url = endpointURL(baseURL: baseURL, path: "families") else {
             throw HealthAPIError.invalidURL
         }
 
@@ -144,6 +151,31 @@ struct HealthAPIClient {
         )
     }
 
+    func listBloodPressure(baseURL: String, accessToken: String, personId: String) async throws -> [BloodPressureReading] {
+        let encodedPersonId = personId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? personId
+        return try await get(path: "readings/blood-pressure?personId=\(encodedPersonId)", baseURL: baseURL, accessToken: accessToken)
+    }
+
+    func createBloodPressure(
+        baseURL: String,
+        accessToken: String,
+        personId: String,
+        systolic: Int,
+        diastolic: Int,
+        pulse: Int?
+    ) async throws -> BloodPressureReading {
+        var body: [String: AnyEncodable] = [
+            "personId": AnyEncodable(personId),
+            "systolic": AnyEncodable(systolic),
+            "diastolic": AnyEncodable(diastolic),
+            "measuredAt": AnyEncodable(ISO8601DateFormatter().string(from: Date()))
+        ]
+        if let pulse {
+            body["pulse"] = AnyEncodable(pulse)
+        }
+        return try await post(path: "readings/blood-pressure", baseURL: baseURL, accessToken: accessToken, body: body)
+    }
+
     private func post<T: Decodable, Body: Encodable>(
         path: String,
         baseURL: String,
@@ -153,7 +185,7 @@ struct HealthAPIClient {
         guard !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw HealthAPIError.missingToken
         }
-        guard let url = URL(string: baseURL)?.appending(path: path) else {
+        guard let url = endpointURL(baseURL: baseURL, path: path) else {
             throw HealthAPIError.invalidURL
         }
 
@@ -176,7 +208,7 @@ struct HealthAPIClient {
     }
 
     private func get<T: Decodable>(path: String, baseURL: String, accessToken: String?) async throws -> T {
-        guard let url = URL(string: baseURL)?.appending(path: path) else {
+        guard let url = endpointURL(baseURL: baseURL, path: path) else {
             throw HealthAPIError.invalidURL
         }
 
@@ -196,5 +228,23 @@ struct HealthAPIClient {
         }
 
         return try JSONDecoder().decode(APIEnvelope<T>.self, from: data).data
+    }
+
+    private func endpointURL(baseURL: String, path: String) -> URL? {
+        let trimmedBase = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let trimmedPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return URL(string: "\(trimmedBase)/\(trimmedPath)")
+    }
+}
+
+struct AnyEncodable: Encodable {
+    private let encodeValue: (Encoder) throws -> Void
+
+    init<T: Encodable>(_ value: T) {
+        self.encodeValue = value.encode
+    }
+
+    func encode(to encoder: Encoder) throws {
+        try encodeValue(encoder)
     }
 }

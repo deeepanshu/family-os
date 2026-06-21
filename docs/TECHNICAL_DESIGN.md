@@ -281,6 +281,7 @@ pulse integer
 measured_at timestamptz not null
 context text
 notes text
+deleted_at timestamptz
 created_at timestamptz
 updated_at timestamptz
 ```

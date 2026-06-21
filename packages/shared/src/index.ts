@@ -83,3 +83,18 @@ export type HealthProfile = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type BloodPressureReading = {
+  id: string;
+  familyId: string;
+  personId: string;
+  recordedByUserId: string;
+  systolic: number;
+  diastolic: number;
+  pulse?: number;
+  measuredAt: string;
+  context?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+};

@@ -8,6 +8,7 @@ import { InMemoryFamilyRepository, type FamilyRepository } from "./repositories/
 import { createFamilyRoutes } from "./routes/families";
 import { createInviteRoutes } from "./routes/invites";
 import { createPeopleRoutes } from "./routes/people";
+import { createBloodPressureRoutes } from "./routes/bloodPressure";
 
 export type AppOptions = {
   config?: AppConfig;
@@ -45,6 +46,7 @@ export function createApp(options: AppOptions = {}) {
   health.route("/families", createFamilyRoutes(familyRepository));
   health.route("/invites", createInviteRoutes(familyRepository));
   health.route("/people", createPeopleRoutes(familyRepository));
+  health.route("/readings/blood-pressure", createBloodPressureRoutes(familyRepository));
 
   app.route(HEALTH_API_PREFIX, health);
 

@@ -96,6 +96,23 @@ curl -X POST \
   http://localhost:3001/health/v1/people
 ```
 
+Log a blood pressure reading:
+
+```sh
+curl -X POST \
+  -H "Authorization: Bearer <supabase_access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"personId":"<profile_id>","systolic":121,"diastolic":79,"measuredAt":"2026-06-21T10:00:00.000Z"}' \
+  http://localhost:3001/health/v1/readings/blood-pressure
+```
+
+List BP history:
+
+```sh
+curl -H "Authorization: Bearer <supabase_access_token>" \
+  "http://localhost:3001/health/v1/readings/blood-pressure?personId=<profile_id>"
+```
+
 For local smoke tests only, set both `HEALTH_API_ENABLE_DEV_AUTH=true` and
 `HEALTH_API_DEV_AUTH_USER_ID=<uuid>`, then call `/me` with
 `Authorization: Bearer dev-token`. This bypass is rejected in production.
