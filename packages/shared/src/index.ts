@@ -114,3 +114,35 @@ export type BloodGlucoseReading = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type ReminderType = "generic" | "blood_glucose" | "blood_pressure";
+export type ReminderScheduleKind = "once" | "daily" | "weekly" | "custom_days";
+
+export type ReminderRecipient = {
+  id: string;
+  reminderId: string;
+  userId: string;
+  enabled: boolean;
+  disabledAt?: string;
+  createdAt: string;
+};
+
+export type Reminder = {
+  id: string;
+  familyId: string;
+  subjectPersonId?: string;
+  createdByUserId: string;
+  type: ReminderType;
+  title: string;
+  message: string;
+  scheduleKind: ReminderScheduleKind;
+  timeOfDay?: string;
+  timezone: string;
+  daysOfWeek?: number[];
+  startsOn?: string;
+  endsOn?: string;
+  enabled: boolean;
+  recipients: ReminderRecipient[];
+  createdAt: string;
+  updatedAt: string;
+};

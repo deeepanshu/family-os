@@ -50,3 +50,5 @@ The current bootstrap screen can call:
 - `GET /health/v1/readings/blood-pressure`
 - `POST /health/v1/readings/blood-glucose`
 - `GET /health/v1/readings/blood-glucose`
+- `POST /health/v1/reminders`
+- `GET /health/v1/reminders`

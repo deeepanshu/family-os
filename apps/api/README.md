@@ -130,6 +130,24 @@ curl -H "Authorization: Bearer <supabase_access_token>" \
   "http://localhost:3001/health/v1/readings/blood-glucose?personId=<profile_id>"
 ```
 
+Create a reminder:
+
+```sh
+curl -X POST \
+  -H "Authorization: Bearer <supabase_access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"blood_pressure","title":"BP check","message":"Please check BP","scheduleKind":"daily","timeOfDay":"08:00","timezone":"Asia/Bangkok","recipientUserIds":["<user_id>"]}' \
+  http://localhost:3001/health/v1/reminders
+```
+
+Disable a reminder for yourself:
+
+```sh
+curl -X POST \
+  -H "Authorization: Bearer <supabase_access_token>" \
+  http://localhost:3001/health/v1/reminders/<reminder_id>/disable-for-me
+```
+
 For local smoke tests only, set both `HEALTH_API_ENABLE_DEV_AUTH=true` and
 `HEALTH_API_DEV_AUTH_USER_ID=<uuid>`, then call `/me` with
 `Authorization: Bearer dev-token`. This bypass is rejected in production.

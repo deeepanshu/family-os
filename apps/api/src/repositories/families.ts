@@ -3,6 +3,10 @@ import type {
   CreateInviteResponse,
   BloodPressureReading,
   BloodGlucoseReading,
+  Reminder,
+  ReminderRecipient,
+  ReminderScheduleKind,
+  ReminderType,
   CurrentFamilyResponse,
   Family,
   FamilyInvite,
@@ -76,6 +80,26 @@ export type UpdateBloodGlucoseInput = Partial<{
   notes: string;
 }>;
 
+export type CreateReminderInput = {
+  actorUserId: string;
+  subjectPersonId?: string;
+  type: ReminderType;
+  title: string;
+  message: string;
+  scheduleKind: ReminderScheduleKind;
+  timeOfDay?: string;
+  timezone: string;
+  daysOfWeek?: number[];
+  startsOn?: string;
+  endsOn?: string;
+  recipientUserIds: string[];
+};
+
+export type UpdateReminderInput = Partial<Omit<CreateReminderInput, "actorUserId" | "recipientUserIds"> & {
+  enabled: boolean;
+  recipientUserIds: string[];
+}>;
+
 export interface FamilyRepository {
   createFamily(input: CreateFamilyInput): Promise<CurrentFamilyResponse>;
   getCurrentFamily(userId: string): Promise<CurrentFamilyResponse>;
@@ -97,6 +121,12 @@ export interface FamilyRepository {
   getBloodGlucose(actorUserId: string, readingId: string): Promise<BloodGlucoseReading>;
   updateBloodGlucose(actorUserId: string, readingId: string, input: UpdateBloodGlucoseInput): Promise<BloodGlucoseReading>;
   deleteBloodGlucose(actorUserId: string, readingId: string): Promise<void>;
+  createReminder(input: CreateReminderInput): Promise<Reminder>;
+  listReminders(actorUserId: string): Promise<Reminder[]>;
+  getReminder(actorUserId: string, reminderId: string): Promise<Reminder>;
+  updateReminder(actorUserId: string, reminderId: string, input: UpdateReminderInput): Promise<Reminder>;
+  deleteReminder(actorUserId: string, reminderId: string): Promise<void>;
+  disableReminderForSelf(actorUserId: string, reminderId: string): Promise<ReminderRecipient>;
 }
 
 export class InMemoryFamilyRepository implements FamilyRepository {
@@ -106,6 +136,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   private readonly profiles = new Map<string, HealthProfile>();
   private readonly bloodPressureReadings = new Map<string, BloodPressureReading & { deletedAt?: string }>();
   private readonly bloodGlucoseReadings = new Map<string, BloodGlucoseReading & { deletedAt?: string }>();
+  private readonly reminders = new Map<string, Reminder & { deletedAt?: string }>();
 
   async createFamily(input: CreateFamilyInput): Promise<CurrentFamilyResponse> {
     const existing = await this.getCurrentFamily(input.userId);
@@ -449,6 +480,129 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       throw new HttpError(403, "reading_owner_or_manager_required", "Only the recorder or a manager can delete this reading.");
     }
     this.bloodGlucoseReadings.set(readingId, { ...reading, deletedAt: new Date().toISOString() });
+  }
+
+  async createReminder(input: CreateReminderInput): Promise<Reminder> {
+    const current = this.requireActiveMember(input.actorUserId);
+    this.assertProfileInFamily(input.subjectPersonId, current.family.id);
+    const recipients = this.buildRecipients(input.recipientUserIds, current.family.id, crypto.randomUUID());
+    const now = new Date().toISOString();
+    const reminder: Reminder = {
+      id: recipients[0]?.reminderId ?? crypto.randomUUID(),
+      familyId: current.family.id,
+      subjectPersonId: input.subjectPersonId,
+      createdByUserId: input.actorUserId,
+      type: input.type,
+      title: input.title,
+      message: input.message,
+      scheduleKind: input.scheduleKind,
+      timeOfDay: input.timeOfDay,
+      timezone: input.timezone,
+      daysOfWeek: input.daysOfWeek,
+      startsOn: input.startsOn,
+      endsOn: input.endsOn,
+      enabled: true,
+      recipients,
+      createdAt: now,
+      updatedAt: now
+    };
+    this.reminders.set(reminder.id, reminder);
+    return reminder;
+  }
+
+  async listReminders(actorUserId: string): Promise<Reminder[]> {
+    const current = this.requireActiveMember(actorUserId);
+    return [...this.reminders.values()]
+      .filter((reminder) => reminder.familyId === current.family.id && !reminder.deletedAt)
+      .map(stripDeleted);
+  }
+
+  async getReminder(actorUserId: string, reminderId: string): Promise<Reminder> {
+    const current = this.requireActiveMember(actorUserId);
+    const reminder = this.reminders.get(reminderId);
+    if (!reminder || reminder.familyId !== current.family.id || reminder.deletedAt) {
+      throw new HttpError(404, "reminder_not_found", "Reminder was not found.");
+    }
+    return stripDeleted(reminder);
+  }
+
+  async updateReminder(actorUserId: string, reminderId: string, input: UpdateReminderInput): Promise<Reminder> {
+    const current = this.requireActiveMember(actorUserId);
+    const reminder = this.reminders.get(reminderId);
+    if (!reminder || reminder.familyId !== current.family.id || reminder.deletedAt) {
+      throw new HttpError(404, "reminder_not_found", "Reminder was not found.");
+    }
+    if (reminder.createdByUserId !== actorUserId && current.membership.role !== "manager") {
+      throw new HttpError(403, "reminder_owner_or_manager_required", "Only the creator or a manager can change this reminder.");
+    }
+    this.assertProfileInFamily(input.subjectPersonId, current.family.id);
+    const updated: Reminder & { deletedAt?: string } = {
+      ...reminder,
+      ...defined(input),
+      recipients: input.recipientUserIds
+        ? this.buildRecipients(input.recipientUserIds, current.family.id, reminder.id)
+        : reminder.recipients,
+      updatedAt: new Date().toISOString()
+    };
+    this.reminders.set(reminderId, updated);
+    return stripDeleted(updated);
+  }
+
+  async deleteReminder(actorUserId: string, reminderId: string): Promise<void> {
+    const current = this.requireActiveMember(actorUserId);
+    const reminder = this.reminders.get(reminderId);
+    if (!reminder || reminder.familyId !== current.family.id || reminder.deletedAt) {
+      throw new HttpError(404, "reminder_not_found", "Reminder was not found.");
+    }
+    if (reminder.createdByUserId !== actorUserId && current.membership.role !== "manager") {
+      throw new HttpError(403, "reminder_owner_or_manager_required", "Only the creator or a manager can delete this reminder.");
+    }
+    this.reminders.set(reminderId, { ...reminder, deletedAt: new Date().toISOString() });
+  }
+
+  async disableReminderForSelf(actorUserId: string, reminderId: string): Promise<ReminderRecipient> {
+    const reminder = await this.getReminder(actorUserId, reminderId);
+    const recipient = reminder.recipients.find((candidate) => candidate.userId === actorUserId);
+    if (!recipient) {
+      throw new HttpError(404, "reminder_recipient_not_found", "Reminder recipient was not found.");
+    }
+    const updated = { ...recipient, enabled: false, disabledAt: new Date().toISOString() };
+    const stored = this.reminders.get(reminderId);
+    if (stored) {
+      stored.recipients = stored.recipients.map((candidate) => (candidate.id === updated.id ? updated : candidate));
+    }
+    return updated;
+  }
+
+  private buildRecipients(userIds: string[], familyId: string, reminderId: string): ReminderRecipient[] {
+    const uniqueIds = [...new Set(userIds)];
+    if (uniqueIds.length === 0) {
+      throw new HttpError(400, "recipients_required", "At least one reminder recipient is required.");
+    }
+    const now = new Date().toISOString();
+    return uniqueIds.map((userId) => {
+      const membership = [...this.memberships.values()].find(
+        (candidate) => candidate.familyId === familyId && candidate.userId === userId && candidate.status === "active"
+      );
+      if (!membership) {
+        throw new HttpError(400, "invalid_recipient", "Reminder recipients must be active family members.");
+      }
+      return {
+        id: crypto.randomUUID(),
+        reminderId,
+        userId,
+        enabled: true,
+        createdAt: now
+      };
+    });
+  }
+
+  private assertProfileInFamily(profileId: string | undefined, familyId: string) {
+    if (!profileId) return;
+    const profile = this.profiles.get(profileId);
+    if (!profile || profile.familyId !== familyId || profile.status !== "active") {
+      throw new HttpError(404, "profile_not_found", "Health profile was not found.");
+    }
   }
 
   private getCurrentFamilySync(userId: string): CurrentFamilyResponse {

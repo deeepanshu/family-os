@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, date, index, integer, numeric, pgSchema, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, check, date, index, integer, numeric, pgSchema, pgTable, text, time, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 const authSchema = pgSchema("auth");
 
@@ -153,4 +153,45 @@ export const bloodGlucoseReadings = pgTable(
       .on(table.familyId, table.personId, table.measuredAt)
       .where(sql`${table.deletedAt} is null`)
   ]
+);
+
+export const reminders = pgTable("reminders", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  familyId: uuid("family_id")
+    .notNull()
+    .references(() => families.id, { onDelete: "cascade" }),
+  subjectPersonId: uuid("subject_person_id").references(() => people.id),
+  createdByUserId: uuid("created_by_user_id")
+    .notNull()
+    .references(() => authUsers.id),
+  type: text("type", { enum: ["generic", "blood_glucose", "blood_pressure"] }).notNull(),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  scheduleKind: text("schedule_kind", { enum: ["once", "daily", "weekly", "custom_days"] }).notNull(),
+  timeOfDay: time("time_of_day"),
+  timezone: text("timezone").notNull(),
+  daysOfWeek: integer("days_of_week").array(),
+  startsOn: date("starts_on"),
+  endsOn: date("ends_on"),
+  enabled: boolean("enabled").notNull().default(true),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const reminderRecipients = pgTable(
+  "reminder_recipients",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    reminderId: uuid("reminder_id")
+      .notNull()
+      .references(() => reminders.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => authUsers.id),
+    enabled: boolean("enabled").notNull().default(true),
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [uniqueIndex("reminder_recipients_reminder_user_idx").on(table.reminderId, table.userId)]
 );

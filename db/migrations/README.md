@@ -12,3 +12,4 @@ Drizzle/Supabase migration files will live here.
   and owner-or-manager update policies.
 - `0005_blood_glucose.sql` creates blood sugar readings with active-member
   read/create and owner-or-manager update policies.
+- `0006_reminders.sql` creates reminders and reminder recipients.
