@@ -13,11 +13,14 @@ final class HealthBootstrapViewModel: ObservableObject {
     @Published var systolic = "120"
     @Published var diastolic = "80"
     @Published var pulse = ""
+    @Published var glucoseValue = "100"
+    @Published var glucoseContext = "fasting"
     @Published private(set) var lastCreatedInviteToken: String?
     @Published private(set) var currentFamilyName: String?
     @Published private(set) var currentFamilyRole: String?
     @Published private(set) var profiles: [HealthProfile] = []
     @Published private(set) var bloodPressureReadings: [BloodPressureReading] = []
+    @Published private(set) var bloodGlucoseReadings: [BloodGlucoseReading] = []
     @Published private(set) var statusMessage = "Online-only Phase 1 bootstrap is ready."
     @Published private(set) var isError = false
 
@@ -128,6 +131,37 @@ final class HealthBootstrapViewModel: ObservableObject {
                 personId: selectedProfileId
             )
             return "Loaded \(bloodPressureReadings.count) BP readings."
+        }
+    }
+
+    func createBloodGlucose() async {
+        await request {
+            guard !selectedProfileId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return "Select or paste a profile ID first."
+            }
+            guard let value = Double(glucoseValue), (20...700).contains(value) else {
+                return "Sugar must be 20-700 mg/dL."
+            }
+            let reading = try await client.createBloodGlucose(
+                baseURL: baseURL,
+                accessToken: accessToken,
+                personId: selectedProfileId,
+                value: value,
+                context: glucoseContext
+            )
+            bloodGlucoseReadings.insert(reading, at: 0)
+            return "Logged sugar \(reading.value) mg/dL."
+        }
+    }
+
+    func loadBloodGlucose() async {
+        await request {
+            bloodGlucoseReadings = try await client.listBloodGlucose(
+                baseURL: baseURL,
+                accessToken: accessToken,
+                personId: selectedProfileId
+            )
+            return "Loaded \(bloodGlucoseReadings.count) sugar readings."
         }
     }
 

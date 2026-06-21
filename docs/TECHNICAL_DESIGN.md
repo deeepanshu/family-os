@@ -306,6 +306,7 @@ unit text not null check unit in ('mg/dL')
 measured_at timestamptz not null
 context text not null check context in ('fasting', 'before_meal', 'after_meal', 'bedtime', 'random')
 notes text
+deleted_at timestamptz
 created_at timestamptz
 updated_at timestamptz
 ```

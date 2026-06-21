@@ -2,12 +2,14 @@ import { createHash } from "node:crypto";
 import type {
   CreateInviteResponse,
   BloodPressureReading,
+  BloodGlucoseReading,
   CurrentFamilyResponse,
   Family,
   FamilyInvite,
   FamilyMembership,
   FamilyRole,
   HealthProfile,
+  GlucoseContext,
   PersonStatus,
   PublicInviteResponse
 } from "@family-os/shared";
@@ -58,6 +60,22 @@ export type UpdateBloodPressureInput = Partial<{
   notes: string;
 }>;
 
+export type CreateBloodGlucoseInput = {
+  actorUserId: string;
+  personId: string;
+  value: number;
+  context: GlucoseContext;
+  measuredAt: string;
+  notes?: string;
+};
+
+export type UpdateBloodGlucoseInput = Partial<{
+  value: number;
+  context: GlucoseContext;
+  measuredAt: string;
+  notes: string;
+}>;
+
 export interface FamilyRepository {
   createFamily(input: CreateFamilyInput): Promise<CurrentFamilyResponse>;
   getCurrentFamily(userId: string): Promise<CurrentFamilyResponse>;
@@ -74,6 +92,11 @@ export interface FamilyRepository {
   getBloodPressure(actorUserId: string, readingId: string): Promise<BloodPressureReading>;
   updateBloodPressure(actorUserId: string, readingId: string, input: UpdateBloodPressureInput): Promise<BloodPressureReading>;
   deleteBloodPressure(actorUserId: string, readingId: string): Promise<void>;
+  createBloodGlucose(input: CreateBloodGlucoseInput): Promise<BloodGlucoseReading>;
+  listBloodGlucose(actorUserId: string, personId?: string, limit?: number): Promise<BloodGlucoseReading[]>;
+  getBloodGlucose(actorUserId: string, readingId: string): Promise<BloodGlucoseReading>;
+  updateBloodGlucose(actorUserId: string, readingId: string, input: UpdateBloodGlucoseInput): Promise<BloodGlucoseReading>;
+  deleteBloodGlucose(actorUserId: string, readingId: string): Promise<void>;
 }
 
 export class InMemoryFamilyRepository implements FamilyRepository {
@@ -82,6 +105,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   private readonly invites = new Map<string, FamilyInvite & { tokenHash: string }>();
   private readonly profiles = new Map<string, HealthProfile>();
   private readonly bloodPressureReadings = new Map<string, BloodPressureReading & { deletedAt?: string }>();
+  private readonly bloodGlucoseReadings = new Map<string, BloodGlucoseReading & { deletedAt?: string }>();
 
   async createFamily(input: CreateFamilyInput): Promise<CurrentFamilyResponse> {
     const existing = await this.getCurrentFamily(input.userId);
@@ -352,6 +376,79 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       throw new HttpError(403, "reading_owner_or_manager_required", "Only the recorder or a manager can delete this reading.");
     }
     this.bloodPressureReadings.set(readingId, { ...reading, deletedAt: new Date().toISOString() });
+  }
+
+  async createBloodGlucose(input: CreateBloodGlucoseInput): Promise<BloodGlucoseReading> {
+    const current = this.requireActiveMember(input.actorUserId);
+    const profile = this.profiles.get(input.personId);
+    if (!profile || profile.familyId !== current.family.id || profile.status !== "active") {
+      throw new HttpError(404, "profile_not_found", "Health profile was not found.");
+    }
+    const now = new Date().toISOString();
+    const reading: BloodGlucoseReading = {
+      id: crypto.randomUUID(),
+      familyId: current.family.id,
+      personId: input.personId,
+      recordedByUserId: input.actorUserId,
+      value: input.value,
+      unit: "mg/dL",
+      context: input.context,
+      measuredAt: input.measuredAt,
+      notes: input.notes,
+      createdAt: now,
+      updatedAt: now
+    };
+    this.bloodGlucoseReadings.set(reading.id, reading);
+    return reading;
+  }
+
+  async listBloodGlucose(actorUserId: string, personId?: string, limit = 50): Promise<BloodGlucoseReading[]> {
+    const current = this.requireActiveMember(actorUserId);
+    return [...this.bloodGlucoseReadings.values()]
+      .filter((reading) => reading.familyId === current.family.id && !reading.deletedAt)
+      .filter((reading) => !personId || reading.personId === personId)
+      .sort((a, b) => Date.parse(b.measuredAt) - Date.parse(a.measuredAt))
+      .slice(0, limit)
+      .map(stripDeleted);
+  }
+
+  async getBloodGlucose(actorUserId: string, readingId: string): Promise<BloodGlucoseReading> {
+    const current = this.requireActiveMember(actorUserId);
+    const reading = this.bloodGlucoseReadings.get(readingId);
+    if (!reading || reading.familyId !== current.family.id || reading.deletedAt) {
+      throw new HttpError(404, "glucose_reading_not_found", "Blood sugar reading was not found.");
+    }
+    return stripDeleted(reading);
+  }
+
+  async updateBloodGlucose(
+    actorUserId: string,
+    readingId: string,
+    input: UpdateBloodGlucoseInput
+  ): Promise<BloodGlucoseReading> {
+    const current = this.requireActiveMember(actorUserId);
+    const reading = this.bloodGlucoseReadings.get(readingId);
+    if (!reading || reading.familyId !== current.family.id || reading.deletedAt) {
+      throw new HttpError(404, "glucose_reading_not_found", "Blood sugar reading was not found.");
+    }
+    if (reading.recordedByUserId !== actorUserId && current.membership.role !== "manager") {
+      throw new HttpError(403, "reading_owner_or_manager_required", "Only the recorder or a manager can change this reading.");
+    }
+    const updated = { ...reading, ...defined(input), updatedAt: new Date().toISOString() };
+    this.bloodGlucoseReadings.set(readingId, updated);
+    return stripDeleted(updated);
+  }
+
+  async deleteBloodGlucose(actorUserId: string, readingId: string): Promise<void> {
+    const current = this.requireActiveMember(actorUserId);
+    const reading = this.bloodGlucoseReadings.get(readingId);
+    if (!reading || reading.familyId !== current.family.id || reading.deletedAt) {
+      throw new HttpError(404, "glucose_reading_not_found", "Blood sugar reading was not found.");
+    }
+    if (reading.recordedByUserId !== actorUserId && current.membership.role !== "manager") {
+      throw new HttpError(403, "reading_owner_or_manager_required", "Only the recorder or a manager can delete this reading.");
+    }
+    this.bloodGlucoseReadings.set(readingId, { ...reading, deletedAt: new Date().toISOString() });
   }
 
   private getCurrentFamilySync(userId: string): CurrentFamilyResponse {

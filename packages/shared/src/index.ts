@@ -98,3 +98,19 @@ export type BloodPressureReading = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type GlucoseContext = "fasting" | "before_meal" | "after_meal" | "bedtime" | "random";
+
+export type BloodGlucoseReading = {
+  id: string;
+  familyId: string;
+  personId: string;
+  recordedByUserId: string;
+  value: number;
+  unit: "mg/dL";
+  context: GlucoseContext;
+  measuredAt: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+};

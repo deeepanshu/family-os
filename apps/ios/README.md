@@ -48,3 +48,5 @@ The current bootstrap screen can call:
 - `POST /health/v1/people`
 - `POST /health/v1/readings/blood-pressure`
 - `GET /health/v1/readings/blood-pressure`
+- `POST /health/v1/readings/blood-glucose`
+- `GET /health/v1/readings/blood-glucose`

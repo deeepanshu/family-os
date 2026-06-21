@@ -10,3 +10,5 @@ Drizzle/Supabase migration files will live here.
   manager write policies.
 - `0004_blood_pressure.sql` creates BP readings with active-member read/create
   and owner-or-manager update policies.
+- `0005_blood_glucose.sql` creates blood sugar readings with active-member
+  read/create and owner-or-manager update policies.

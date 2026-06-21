@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, date, index, integer, pgSchema, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { check, date, index, integer, numeric, pgSchema, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 const authSchema = pgSchema("auth");
 
@@ -118,6 +118,38 @@ export const bloodPressureReadings = pgTable(
     check("bp_diastolic_check", sql`${table.diastolic} between 30 and 180`),
     check("bp_pulse_check", sql`${table.pulse} is null or ${table.pulse} between 30 and 220`),
     index("bp_family_person_measured_idx")
+      .on(table.familyId, table.personId, table.measuredAt)
+      .where(sql`${table.deletedAt} is null`)
+  ]
+);
+
+export const bloodGlucoseReadings = pgTable(
+  "blood_glucose_readings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    familyId: uuid("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    recordedByUserId: uuid("recorded_by_user_id")
+      .notNull()
+      .references(() => authUsers.id),
+    value: numeric("value", { precision: 6, scale: 2 }).notNull(),
+    unit: text("unit", { enum: ["mg/dL"] }).notNull(),
+    context: text("context", { enum: ["fasting", "before_meal", "after_meal", "bedtime", "random"] }).notNull(),
+    measuredAt: timestamp("measured_at", { withTimezone: true }).notNull(),
+    notes: text("notes"),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    check("glucose_value_check", sql`${table.value} between 20 and 700`),
+    check("glucose_unit_check", sql`${table.unit} = 'mg/dL'`),
+    check("glucose_context_check", sql`${table.context} in ('fasting', 'before_meal', 'after_meal', 'bedtime', 'random')`),
+    index("glucose_family_person_measured_idx")
       .on(table.familyId, table.personId, table.measuredAt)
       .where(sql`${table.deletedAt} is null`)
   ]

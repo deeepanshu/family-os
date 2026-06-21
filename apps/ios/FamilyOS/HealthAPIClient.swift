@@ -45,6 +45,12 @@ struct BloodPressureReading: Decodable, Identifiable {
     let pulse: Int?
 }
 
+struct BloodGlucoseReading: Decodable, Identifiable {
+    let id: String
+    let value: Double
+    let context: String
+}
+
 enum HealthAPIError: LocalizedError {
     case invalidURL
     case missingToken
@@ -174,6 +180,28 @@ struct HealthAPIClient {
             body["pulse"] = AnyEncodable(pulse)
         }
         return try await post(path: "readings/blood-pressure", baseURL: baseURL, accessToken: accessToken, body: body)
+    }
+
+    func listBloodGlucose(baseURL: String, accessToken: String, personId: String) async throws -> [BloodGlucoseReading] {
+        let encodedPersonId = personId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? personId
+        return try await get(path: "readings/blood-glucose?personId=\(encodedPersonId)", baseURL: baseURL, accessToken: accessToken)
+    }
+
+    func createBloodGlucose(
+        baseURL: String,
+        accessToken: String,
+        personId: String,
+        value: Double,
+        context: String
+    ) async throws -> BloodGlucoseReading {
+        let body: [String: AnyEncodable] = [
+            "personId": AnyEncodable(personId),
+            "value": AnyEncodable(value),
+            "unit": AnyEncodable("mg/dL"),
+            "context": AnyEncodable(context),
+            "measuredAt": AnyEncodable(ISO8601DateFormatter().string(from: Date()))
+        ]
+        return try await post(path: "readings/blood-glucose", baseURL: baseURL, accessToken: accessToken, body: body)
     }
 
     private func post<T: Decodable, Body: Encodable>(

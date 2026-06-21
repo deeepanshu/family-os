@@ -100,6 +100,27 @@ struct ContentView: View {
                     }
                 }
 
+                Section("Blood Sugar") {
+                    TextField("Glucose mg/dL", text: $viewModel.glucoseValue)
+                        .keyboardType(.decimalPad)
+                    Picker("Context", selection: $viewModel.glucoseContext) {
+                        Text("Fasting").tag("fasting")
+                        Text("Before meal").tag("before_meal")
+                        Text("After meal").tag("after_meal")
+                        Text("Bedtime").tag("bedtime")
+                        Text("Random").tag("random")
+                    }
+                    Button("Log Blood Sugar") {
+                        Task { await viewModel.createBloodGlucose() }
+                    }
+                    Button("Load Sugar History") {
+                        Task { await viewModel.loadBloodGlucose() }
+                    }
+                    ForEach(viewModel.bloodGlucoseReadings) { reading in
+                        Text("\(reading.value, specifier: "%.0f") mg/dL \(reading.context)")
+                    }
+                }
+
                 Section("Status") {
                     Text(viewModel.statusMessage)
                         .foregroundStyle(viewModel.isError ? .red : .primary)
