@@ -30,10 +30,23 @@ struct ContentView: View {
                     if let familyName = viewModel.currentFamilyName {
                         LabeledContent("Current family", value: familyName)
                         LabeledContent("Role", value: viewModel.currentFamilyRole ?? "unknown")
+                        Button("Create Member Invite") {
+                            Task { await viewModel.createInvite() }
+                        }
+                        if let token = viewModel.lastCreatedInviteToken {
+                            Text(token)
+                                .font(.footnote.monospaced())
+                                .textSelection(.enabled)
+                        }
                     } else {
                         TextField("Family name", text: $viewModel.familyName)
                         Button("Create Family") {
                             Task { await viewModel.createFamily() }
+                        }
+                        TextField("Invite token", text: $viewModel.inviteToken)
+                            .textInputAutocapitalization(.never)
+                        Button("Accept Invite") {
+                            Task { await viewModel.acceptInvite() }
                         }
                     }
                     Button("Load Current Family") {

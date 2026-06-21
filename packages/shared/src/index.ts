@@ -46,3 +46,27 @@ export type CurrentFamilyResponse = {
   family: Family;
   membership: FamilyMembership;
 } | null;
+
+export type FamilyInviteStatus = "pending" | "accepted" | "revoked" | "expired";
+
+export type FamilyInvite = {
+  id: string;
+  familyId: string;
+  email?: string;
+  role: FamilyRole;
+  status: FamilyInviteStatus;
+  expiresAt: string;
+  createdAt: string;
+};
+
+export type CreateInviteResponse = {
+  invite: FamilyInvite;
+  token: string;
+};
+
+export type PublicInviteResponse = {
+  familyName: string;
+  role: FamilyRole;
+  status: FamilyInviteStatus;
+  expiresAt: string;
+};

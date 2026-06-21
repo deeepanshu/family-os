@@ -6,6 +6,8 @@ final class HealthBootstrapViewModel: ObservableObject {
     @Published var baseURL = "https://api.deepanshujain.com/health/v1"
     @Published var accessToken = ""
     @Published var familyName = ""
+    @Published var inviteToken = ""
+    @Published private(set) var lastCreatedInviteToken: String?
     @Published private(set) var currentFamilyName: String?
     @Published private(set) var currentFamilyRole: String?
     @Published private(set) var statusMessage = "Online-only Phase 1 bootstrap is ready."
@@ -46,6 +48,27 @@ final class HealthBootstrapViewModel: ObservableObject {
             currentFamilyName = response.family.name
             currentFamilyRole = response.membership.role
             return "Created \(response.family.name); you are \(response.membership.role)."
+        }
+    }
+
+    func createInvite() async {
+        await request {
+            let response = try await client.createInvite(baseURL: baseURL, accessToken: accessToken)
+            lastCreatedInviteToken = response.token
+            return "Created invite token: \(response.token)"
+        }
+    }
+
+    func acceptInvite() async {
+        await request {
+            let response = try await client.acceptInvite(
+                baseURL: baseURL,
+                accessToken: accessToken,
+                token: inviteToken.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            currentFamilyName = response.family.name
+            currentFamilyRole = response.membership.role
+            return "Joined \(response.family.name) as \(response.membership.role)."
         }
     }
 

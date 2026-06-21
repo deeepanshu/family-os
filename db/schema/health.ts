@@ -39,3 +39,30 @@ export const familyMemberships = pgTable(
     check("family_memberships_status_check", sql`${table.status} in ('active', 'invited', 'removed')`)
   ]
 );
+
+export const familyInvites = pgTable(
+  "family_invites",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    familyId: uuid("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    invitedByUserId: uuid("invited_by_user_id")
+      .notNull()
+      .references(() => authUsers.id),
+    email: text("email"),
+    tokenHash: text("token_hash").notNull(),
+    role: text("role", { enum: ["manager", "member"] }).notNull(),
+    status: text("status", { enum: ["pending", "accepted", "revoked", "expired"] }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedByUserId: uuid("accepted_by_user_id").references(() => authUsers.id),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("family_invites_token_hash_idx").on(table.tokenHash),
+    check("family_invites_role_check", sql`${table.role} in ('manager', 'member')`),
+    check("family_invites_status_check", sql`${table.status} in ('pending', 'accepted', 'revoked', 'expired')`)
+  ]
+);
