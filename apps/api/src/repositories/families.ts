@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type {
+  AuditLog,
   CreateInviteResponse,
   BloodPressureReading,
   BloodGlucoseReading,
@@ -107,6 +108,15 @@ export type RegisterDeviceInput = {
   deviceToken: string;
 };
 
+export type AuditInput = {
+  familyId: string;
+  actorUserId?: string;
+  action: string;
+  resourceType: string;
+  resourceId: string;
+  metadata?: Record<string, unknown>;
+};
+
 export interface FamilyRepository {
   createFamily(input: CreateFamilyInput): Promise<CurrentFamilyResponse>;
   getCurrentFamily(userId: string): Promise<CurrentFamilyResponse>;
@@ -139,6 +149,7 @@ export interface FamilyRepository {
   listDueReminderDeliveries(now: Date): Promise<Array<{ reminder: Reminder; recipient: ReminderRecipient; devices: NotificationDevice[]; delivery: NotificationDelivery }>>;
   markDeliverySent(deliveryId: string): Promise<void>;
   markDeliveryFailed(deliveryId: string, error: string): Promise<void>;
+  listAuditLogs(actorUserId: string, limit?: number): Promise<AuditLog[]>;
 }
 
 export class InMemoryFamilyRepository implements FamilyRepository {
@@ -151,6 +162,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   private readonly reminders = new Map<string, Reminder & { deletedAt?: string }>();
   private readonly devices = new Map<string, NotificationDevice>();
   private readonly deliveries = new Map<string, NotificationDelivery>();
+  private readonly auditLogs: AuditLog[] = [];
 
   async createFamily(input: CreateFamilyInput): Promise<CurrentFamilyResponse> {
     const existing = await this.getCurrentFamily(input.userId);
@@ -178,6 +190,13 @@ export class InMemoryFamilyRepository implements FamilyRepository {
 
     this.families.set(family.id, family);
     this.memberships.set(membership.id, membership);
+    this.audit({
+      familyId: family.id,
+      actorUserId: input.userId,
+      action: "family.created",
+      resourceType: "family",
+      resourceId: family.id
+    });
 
     return { family, membership };
   }
@@ -217,6 +236,14 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       tokenHash: hashToken(token)
     };
     this.invites.set(invite.id, invite);
+    this.audit({
+      familyId: current.family.id,
+      actorUserId: input.actorUserId,
+      action: "invite.created",
+      resourceType: "invite",
+      resourceId: invite.id,
+      metadata: { role: input.role }
+    });
 
     return { invite: toPublicInviteRecord(invite), token };
   }
@@ -262,6 +289,14 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       updatedAt: now
     };
     this.memberships.set(membership.id, membership);
+    this.audit({
+      familyId: invite.familyId,
+      actorUserId: userId,
+      action: "invite.accepted",
+      resourceType: "invite",
+      resourceId: invite.id,
+      metadata: { membershipId: membership.id }
+    });
 
     const family = this.families.get(invite.familyId);
     if (!family) {
@@ -310,6 +345,13 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       updatedAt: now
     };
     this.profiles.set(profile.id, profile);
+    this.audit({
+      familyId: current.family.id,
+      actorUserId: input.actorUserId,
+      action: "profile.created",
+      resourceType: "profile",
+      resourceId: profile.id
+    });
     return profile;
   }
 
@@ -326,6 +368,13 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       updatedAt: new Date().toISOString()
     };
     this.profiles.set(profileId, updated);
+    this.audit({
+      familyId: current.family.id,
+      actorUserId,
+      action: input.status === "inactive" ? "profile.deleted" : "profile.updated",
+      resourceType: "profile",
+      resourceId: profileId
+    });
     return updated;
   }
 
@@ -371,6 +420,14 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       updatedAt: now
     };
     this.bloodPressureReadings.set(reading.id, reading);
+    this.audit({
+      familyId: current.family.id,
+      actorUserId: input.actorUserId,
+      action: "blood_pressure.created",
+      resourceType: "blood_pressure_reading",
+      resourceId: reading.id,
+      metadata: { personId: input.personId }
+    });
     return reading;
   }
 
@@ -408,6 +465,13 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     }
     const updated = { ...reading, ...defined(input), updatedAt: new Date().toISOString() };
     this.bloodPressureReadings.set(readingId, updated);
+    this.audit({
+      familyId: current.family.id,
+      actorUserId,
+      action: "blood_pressure.updated",
+      resourceType: "blood_pressure_reading",
+      resourceId: readingId
+    });
     return stripDeleted(updated);
   }
 
@@ -421,6 +485,13 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       throw new HttpError(403, "reading_owner_or_manager_required", "Only the recorder or a manager can delete this reading.");
     }
     this.bloodPressureReadings.set(readingId, { ...reading, deletedAt: new Date().toISOString() });
+    this.audit({
+      familyId: current.family.id,
+      actorUserId,
+      action: "blood_pressure.deleted",
+      resourceType: "blood_pressure_reading",
+      resourceId: readingId
+    });
   }
 
   async createBloodGlucose(input: CreateBloodGlucoseInput): Promise<BloodGlucoseReading> {
@@ -444,6 +515,14 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       updatedAt: now
     };
     this.bloodGlucoseReadings.set(reading.id, reading);
+    this.audit({
+      familyId: current.family.id,
+      actorUserId: input.actorUserId,
+      action: "blood_glucose.created",
+      resourceType: "blood_glucose_reading",
+      resourceId: reading.id,
+      metadata: { personId: input.personId }
+    });
     return reading;
   }
 
@@ -481,6 +560,13 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     }
     const updated = { ...reading, ...defined(input), updatedAt: new Date().toISOString() };
     this.bloodGlucoseReadings.set(readingId, updated);
+    this.audit({
+      familyId: current.family.id,
+      actorUserId,
+      action: "blood_glucose.updated",
+      resourceType: "blood_glucose_reading",
+      resourceId: readingId
+    });
     return stripDeleted(updated);
   }
 
@@ -494,6 +580,13 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       throw new HttpError(403, "reading_owner_or_manager_required", "Only the recorder or a manager can delete this reading.");
     }
     this.bloodGlucoseReadings.set(readingId, { ...reading, deletedAt: new Date().toISOString() });
+    this.audit({
+      familyId: current.family.id,
+      actorUserId,
+      action: "blood_glucose.deleted",
+      resourceType: "blood_glucose_reading",
+      resourceId: readingId
+    });
   }
 
   async createReminder(input: CreateReminderInput): Promise<Reminder> {
@@ -521,6 +614,14 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       updatedAt: now
     };
     this.reminders.set(reminder.id, reminder);
+    this.audit({
+      familyId: current.family.id,
+      actorUserId: input.actorUserId,
+      action: "reminder.created",
+      resourceType: "reminder",
+      resourceId: reminder.id,
+      metadata: { type: input.type }
+    });
     return reminder;
   }
 
@@ -559,6 +660,13 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       updatedAt: new Date().toISOString()
     };
     this.reminders.set(reminderId, updated);
+    this.audit({
+      familyId: current.family.id,
+      actorUserId,
+      action: "reminder.updated",
+      resourceType: "reminder",
+      resourceId: reminderId
+    });
     return stripDeleted(updated);
   }
 
@@ -572,6 +680,13 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       throw new HttpError(403, "reminder_owner_or_manager_required", "Only the creator or a manager can delete this reminder.");
     }
     this.reminders.set(reminderId, { ...reminder, deletedAt: new Date().toISOString() });
+    this.audit({
+      familyId: current.family.id,
+      actorUserId,
+      action: "reminder.deleted",
+      resourceType: "reminder",
+      resourceId: reminderId
+    });
   }
 
   async disableReminderForSelf(actorUserId: string, reminderId: string): Promise<ReminderRecipient> {
@@ -585,10 +700,18 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     if (stored) {
       stored.recipients = stored.recipients.map((candidate) => (candidate.id === updated.id ? updated : candidate));
     }
+    this.audit({
+      familyId: reminder.familyId,
+      actorUserId,
+      action: "reminder_recipient.disabled",
+      resourceType: "reminder",
+      resourceId: reminderId
+    });
     return updated;
   }
 
   async registerDevice(input: RegisterDeviceInput): Promise<NotificationDevice> {
+    const current = this.getCurrentFamilySync(input.userId);
     const now = new Date().toISOString();
     const existing = [...this.devices.values()].find(
       (device) => device.userId === input.userId && device.deviceToken === input.deviceToken
@@ -596,6 +719,15 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     if (existing) {
       const updated = { ...existing, lastSeenAt: now };
       this.devices.set(existing.id, updated);
+      if (current) {
+        this.audit({
+          familyId: current.family.id,
+          actorUserId: input.userId,
+          action: "device.updated",
+          resourceType: "notification_device",
+          resourceId: updated.id
+        });
+      }
       return updated;
     }
     const device: NotificationDevice = {
@@ -607,15 +739,34 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       lastSeenAt: now
     };
     this.devices.set(device.id, device);
+    if (current) {
+      this.audit({
+        familyId: current.family.id,
+        actorUserId: input.userId,
+        action: "device.registered",
+        resourceType: "notification_device",
+        resourceId: device.id
+      });
+    }
     return device;
   }
 
   async deleteDevice(actorUserId: string, deviceId: string): Promise<void> {
+    const current = this.getCurrentFamilySync(actorUserId);
     const device = this.devices.get(deviceId);
     if (!device || device.userId !== actorUserId) {
       throw new HttpError(404, "device_not_found", "Device was not found.");
     }
     this.devices.delete(deviceId);
+    if (current) {
+      this.audit({
+        familyId: current.family.id,
+        actorUserId,
+        action: "device.deleted",
+        resourceType: "notification_device",
+        resourceId: deviceId
+      });
+    }
   }
 
   async listDueReminderDeliveries(now: Date) {
@@ -642,12 +793,26 @@ export class InMemoryFamilyRepository implements FamilyRepository {
 
   async markDeliverySent(deliveryId: string): Promise<void> {
     const delivery = this.deliveries.get(deliveryId);
-    if (delivery) this.deliveries.set(deliveryId, { ...delivery, status: "sent", sentAt: new Date().toISOString() });
+    if (delivery) {
+      this.deliveries.set(deliveryId, { ...delivery, status: "sent", sentAt: new Date().toISOString() });
+      this.auditDelivery(delivery, "notification_delivery.sent");
+    }
   }
 
   async markDeliveryFailed(deliveryId: string, error: string): Promise<void> {
     const delivery = this.deliveries.get(deliveryId);
-    if (delivery) this.deliveries.set(deliveryId, { ...delivery, status: "failed", error });
+    if (delivery) {
+      this.deliveries.set(deliveryId, { ...delivery, status: "failed", error });
+      this.auditDelivery(delivery, "notification_delivery.failed", { error });
+    }
+  }
+
+  async listAuditLogs(actorUserId: string, limit = 100): Promise<AuditLog[]> {
+    const current = this.requireManager(actorUserId);
+    return this.auditLogs
+      .filter((entry) => entry.familyId === current.family.id)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+      .slice(0, limit);
   }
 
   private buildRecipients(userIds: string[], familyId: string, reminderId: string): ReminderRecipient[] {
@@ -695,6 +860,31 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     }
 
     return { family, membership };
+  }
+
+  private audit(input: AuditInput) {
+    this.auditLogs.push({
+      id: crypto.randomUUID(),
+      familyId: input.familyId,
+      actorUserId: input.actorUserId,
+      action: input.action,
+      resourceType: input.resourceType,
+      resourceId: input.resourceId,
+      metadata: input.metadata,
+      createdAt: new Date().toISOString()
+    });
+  }
+
+  private auditDelivery(delivery: NotificationDelivery, action: string, metadata?: Record<string, unknown>) {
+    const reminder = this.reminders.get(delivery.reminderId);
+    if (!reminder) return;
+    this.audit({
+      familyId: reminder.familyId,
+      action,
+      resourceType: "notification_delivery",
+      resourceId: delivery.id,
+      metadata: { recipientUserId: delivery.recipientUserId, ...metadata }
+    });
   }
 }
 

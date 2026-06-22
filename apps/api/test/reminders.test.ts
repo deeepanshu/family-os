@@ -8,6 +8,8 @@ const jwtSecret = "test-supabase-jwt-secret-with-enough-length";
 const supabaseUrl = "https://project.supabase.co";
 const managerId = "00000000-0000-4000-8000-000000000601";
 const memberId = "00000000-0000-4000-8000-000000000602";
+const otherMemberId = "00000000-0000-4000-8000-000000000603";
+const strangerId = "00000000-0000-4000-8000-000000000604";
 
 function app() {
   return createApp({
@@ -54,6 +56,17 @@ async function createReminder(api: ReturnType<typeof app>, token: string, profil
   });
 }
 
+async function addMember(api: ReturnType<typeof app>, managerToken: string, userId: string, email: string) {
+  const token = await jwtFor(userId, email);
+  const invite = await (await api.request(`${HEALTH_API_PREFIX}/invites`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
+    body: JSON.stringify({ email, role: "member" })
+  })).json();
+  await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+  return token;
+}
+
 describe("reminders", () => {
   it("lets active members create and list reminders with selected recipients", async () => {
     const api = app();
@@ -91,5 +104,56 @@ describe("reminders", () => {
     expect(update.status).toBe(200);
     const deleted = await api.request(`${HEALTH_API_PREFIX}/reminders/${reminder.data.id}`, { method: "DELETE", headers: { authorization: `Bearer ${memberToken}` } });
     expect(deleted.status).toBe(204);
+  });
+
+  it("blocks same-family non-creators from updating or deleting reminders", async () => {
+    const api = app();
+    const { managerToken, memberToken, profileId } = await setup(api);
+    const reminder = await (await createReminder(api, memberToken, profileId)).json();
+    const otherToken = await addMember(api, managerToken, otherMemberId, "other-member@example.com");
+
+    const update = await api.request(`${HEALTH_API_PREFIX}/reminders/${reminder.data.id}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${otherToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Nope" })
+    });
+    expect(update.status).toBe(403);
+
+    const deleted = await api.request(`${HEALTH_API_PREFIX}/reminders/${reminder.data.id}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${otherToken}` }
+    });
+    expect(deleted.status).toBe(403);
+  });
+
+  it("blocks cross-family subject profiles and recipients during reminder updates", async () => {
+    const api = app();
+    const { managerToken, memberToken, profileId } = await setup(api);
+    const reminder = await (await createReminder(api, memberToken, profileId)).json();
+    const otherManagerToken = await jwtFor(strangerId);
+    await api.request(`${HEALTH_API_PREFIX}/families`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${otherManagerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Other Family" })
+    });
+    const otherProfile = await (await api.request(`${HEALTH_API_PREFIX}/people`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${otherManagerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "Other" })
+    })).json();
+
+    const subjectUpdate = await api.request(`${HEALTH_API_PREFIX}/reminders/${reminder.data.id}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ subjectPersonId: otherProfile.data.id })
+    });
+    expect(subjectUpdate.status).toBe(404);
+
+    const recipientUpdate = await api.request(`${HEALTH_API_PREFIX}/reminders/${reminder.data.id}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ recipientUserIds: [strangerId] })
+    });
+    expect(recipientUpdate.status).toBe(400);
   });
 });

@@ -8,6 +8,7 @@ import { sendDueReminderPushes, type PushPayload } from "../src/notifications/sc
 const jwtSecret = "test-supabase-jwt-secret-with-enough-length";
 const supabaseUrl = "https://project.supabase.co";
 const userId = "00000000-0000-4000-8000-000000000701";
+const otherUserId = "00000000-0000-4000-8000-000000000702";
 
 function api(repo = new InMemoryFamilyRepository()) {
   return createApp({
@@ -41,6 +42,25 @@ describe("notification devices and scheduler", () => {
     expect(body.data).toMatchObject({ userId, platform: "ios" });
     const deleted = await app.request(`${HEALTH_API_PREFIX}/devices/${body.data.id}`, { method: "DELETE", headers: { authorization: `Bearer ${token}` } });
     expect(deleted.status).toBe(204);
+  });
+
+  it("does not let users delete another user's device", async () => {
+    const app = api();
+    const token = await jwtFor(userId);
+    const otherToken = await jwtFor(otherUserId);
+    const created = await app.request(`${HEALTH_API_PREFIX}/devices`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ platform: "ios", deviceToken: "d".repeat(64) })
+    });
+    const body = await created.json();
+
+    const deleted = await app.request(`${HEALTH_API_PREFIX}/devices/${body.data.id}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${otherToken}` }
+    });
+
+    expect(deleted.status).toBe(404);
   });
 
   it("expands due reminders and sends push intents through the sender interface", async () => {

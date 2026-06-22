@@ -167,3 +167,14 @@ export type NotificationDelivery = {
   error?: string;
   createdAt: string;
 };
+
+export type AuditLog = {
+  id: string;
+  familyId: string;
+  actorUserId?: string;
+  action: string;
+  resourceType: string;
+  resourceId: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+};
