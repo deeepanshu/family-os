@@ -21,6 +21,7 @@ final class HealthBootstrapViewModel: ObservableObject {
     @Published private(set) var profiles: [HealthProfile] = []
     @Published private(set) var bloodPressureReadings: [BloodPressureReading] = []
     @Published private(set) var bloodGlucoseReadings: [BloodGlucoseReading] = []
+    @Published private(set) var notificationRouteMessage: String?
     @Published private(set) var statusMessage = "Online-only Phase 1 bootstrap is ready."
     @Published private(set) var isError = false
 
@@ -162,6 +163,28 @@ final class HealthBootstrapViewModel: ObservableObject {
                 personId: selectedProfileId
             )
             return "Loaded \(bloodGlucoseReadings.count) sugar readings."
+        }
+    }
+
+    func handleNotification(userInfo: [AnyHashable: Any]) {
+        let action = userInfo["action"] as? String
+        if let subjectPersonId = userInfo["subject_person_id"] as? String,
+           !subjectPersonId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            selectedProfileId = subjectPersonId
+        }
+        switch action {
+        case "open_add_blood_glucose":
+            notificationRouteMessage = "Opened sugar logging from reminder."
+            statusMessage = notificationRouteMessage ?? statusMessage
+        case "open_add_blood_pressure":
+            notificationRouteMessage = "Opened BP logging from reminder."
+            statusMessage = notificationRouteMessage ?? statusMessage
+        case "open_reminder":
+            notificationRouteMessage = "Opened reminder details."
+            statusMessage = notificationRouteMessage ?? statusMessage
+        default:
+            notificationRouteMessage = "Opened Family OS notification."
+            statusMessage = notificationRouteMessage ?? statusMessage
         }
     }
 

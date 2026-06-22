@@ -122,6 +122,10 @@ struct ContentView: View {
                 }
 
                 Section("Status") {
+                    if let route = viewModel.notificationRouteMessage {
+                        Text(route)
+                            .foregroundStyle(.blue)
+                    }
                     Text(viewModel.statusMessage)
                         .foregroundStyle(viewModel.isError ? .red : .primary)
                 }

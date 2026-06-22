@@ -52,3 +52,12 @@ The current bootstrap screen can call:
 - `GET /health/v1/readings/blood-glucose`
 - `POST /health/v1/reminders`
 - `GET /health/v1/reminders`
+
+Remote notification payloads use these keys:
+
+- `action` - routing action. Supported values:
+  - `open_add_blood_glucose`
+  - `open_add_blood_pressure`
+  - `open_reminder`
+- `subject_person_id` - optional health profile ID preselected when the notification is opened.
+- `reminder_id` - optional identifier of the reminder that triggered the push.
