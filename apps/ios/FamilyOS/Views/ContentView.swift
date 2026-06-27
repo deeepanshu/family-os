@@ -83,12 +83,12 @@ private struct DeveloperSettingsView: View {
         NavigationStack {
             Form {
                 Section("Connection") {
-                    TextField("Supabase URL", text: $viewModel.supabaseURL)
+                    TextField("Supabase URL", text: $viewModel.connection.supabaseURL)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
-                    SecureField("Supabase anon key", text: $viewModel.supabaseAnonKey)
+                    SecureField("Supabase anon key", text: $viewModel.connection.supabaseAnonKey)
                         .textInputAutocapitalization(.never)
-                    TextField("API base URL", text: $viewModel.baseURL)
+                    TextField("API base URL", text: $viewModel.connection.baseURL)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
                     Button("Save Connection") {
@@ -97,7 +97,7 @@ private struct DeveloperSettingsView: View {
                 }
 
                 Section("Manual Token") {
-                    SecureField("Supabase access token", text: $viewModel.accessToken)
+                    SecureField("Supabase access token", text: $viewModel.auth.accessToken)
                         .textInputAutocapitalization(.never)
                     Button("Use Manual Token") {
                         viewModel.useManualAccessToken()
@@ -195,7 +195,7 @@ private struct HomeView: View {
         if let profile = viewModel.selectedProfile {
             return "Logging for \(profile.displayName)"
         }
-        if viewModel.profiles.isEmpty {
+        if viewModel.profiles.profiles.isEmpty {
             return "Create a profile before recording readings."
         }
         return "Choose a profile before recording readings."
@@ -222,8 +222,8 @@ private struct ProfileView: View {
                 }
 
                 Section("Create Profile") {
-                    TextField("Name", text: $viewModel.profileName)
-                    TextField("Relationship", text: $viewModel.profileRelationship)
+                    TextField("Name", text: $viewModel.profiles.profileName)
+                    TextField("Relationship", text: $viewModel.profiles.profileRelationship)
                     Button("Save Profile") {
                         Task { await viewModel.createProfile() }
                     }
@@ -262,10 +262,10 @@ private struct HistoryView: View {
                 }
 
                 Section("Blood Pressure") {
-                    if viewModel.bloodPressureReadings.isEmpty {
+                    if viewModel.readings.bloodPressureReadings.isEmpty {
                         EmptyRow("No blood pressure readings yet.")
                     } else {
-                        ForEach(viewModel.bloodPressureReadings) { reading in
+                        ForEach(viewModel.readings.bloodPressureReadings) { reading in
                             ReadingRow(
                                 title: "\(reading.systolic)/\(reading.diastolic) mmHg",
                                 detail: reading.pulse.map { "Pulse \($0)" } ?? "Pulse not recorded"
@@ -275,10 +275,10 @@ private struct HistoryView: View {
                 }
 
                 Section("Diabetes") {
-                    if viewModel.bloodGlucoseReadings.isEmpty {
+                    if viewModel.readings.bloodGlucoseReadings.isEmpty {
                         EmptyRow("No blood sugar readings yet.")
                     } else {
-                        ForEach(viewModel.bloodGlucoseReadings) { reading in
+                        ForEach(viewModel.readings.bloodGlucoseReadings) { reading in
                             ReadingRow(
                                 title: "\(String(format: "%.0f", reading.value)) mg/dL",
                                 detail: reading.context.replacingOccurrences(of: "_", with: " ").capitalized
@@ -309,11 +309,11 @@ private struct FamilyView: View {
         NavigationStack {
             List {
                 Section("Family") {
-                    if let familyName = viewModel.currentFamilyName {
+                    if let familyName = viewModel.family.currentFamilyName {
                         LabeledContent("Name", value: familyName)
-                        LabeledContent("Your role", value: viewModel.currentFamilyRole ?? "Member")
+                        LabeledContent("Your role", value: viewModel.family.currentFamilyRole ?? "Member")
                     } else {
-                        TextField("Family name", text: $viewModel.familyName)
+                        TextField("Family name", text: $viewModel.family.familyName)
                         Button("Create Family") {
                             Task { await viewModel.createFamily() }
                         }
@@ -324,13 +324,13 @@ private struct FamilyView: View {
                     Button("Create Invite") {
                         Task { await viewModel.createInvite() }
                     }
-                    if let token = viewModel.lastCreatedInviteToken {
+                    if let token = viewModel.family.lastCreatedInviteToken {
                         Text(token)
                             .font(.footnote.monospaced())
                             .textSelection(.enabled)
                     }
 
-                    TextField("Invite token", text: $viewModel.inviteToken)
+                    TextField("Invite token", text: $viewModel.family.inviteToken)
                         .textInputAutocapitalization(.never)
                     Button("Join Family") {
                         Task { await viewModel.acceptInvite() }
@@ -338,17 +338,17 @@ private struct FamilyView: View {
                 }
 
                 Section("Family Profiles") {
-                    if viewModel.profiles.isEmpty {
+                    if viewModel.profiles.profiles.isEmpty {
                         EmptyRow("No profiles yet.")
                     } else {
-                        ForEach(viewModel.profiles) { profile in
+                        ForEach(viewModel.profiles.profiles) { profile in
                             Button {
-                                viewModel.selectedProfileId = profile.id
+                                viewModel.profiles.selectedProfileId = profile.id
                             } label: {
                                 HStack {
                                     ProfileRow(profile: profile)
                                     Spacer()
-                                    if viewModel.selectedProfileId == profile.id {
+                                    if viewModel.profiles.selectedProfileId == profile.id {
                                         Image(systemName: "checkmark.circle.fill")
                                             .foregroundStyle(.blue)
                                     }
@@ -393,18 +393,18 @@ private struct LogReadingSheet: View {
                 switch kind {
                 case .bloodPressure:
                     Section("Blood Pressure") {
-                        TextField("Systolic", text: $viewModel.systolic)
+                        TextField("Systolic", text: $viewModel.readings.systolic)
                             .keyboardType(.numberPad)
-                        TextField("Diastolic", text: $viewModel.diastolic)
+                        TextField("Diastolic", text: $viewModel.readings.diastolic)
                             .keyboardType(.numberPad)
-                        TextField("Pulse (optional)", text: $viewModel.pulse)
+                        TextField("Pulse (optional)", text: $viewModel.readings.pulse)
                             .keyboardType(.numberPad)
                     }
                 case .bloodSugar:
                     Section("Diabetes") {
-                        TextField("Blood sugar mg/dL", text: $viewModel.glucoseValue)
+                        TextField("Blood sugar mg/dL", text: $viewModel.readings.glucoseValue)
                             .keyboardType(.decimalPad)
-                        Picker("Context", selection: $viewModel.glucoseContext) {
+                        Picker("Context", selection: $viewModel.readings.glucoseContext) {
                             Text("Fasting").tag("fasting")
                             Text("Before meal").tag("before_meal")
                             Text("After meal").tag("after_meal")
@@ -477,12 +477,12 @@ private struct LatestReadingsSummary: View {
             HStack(spacing: 12) {
                 MetricTile(
                     title: "BP",
-                    value: viewModel.bloodPressureReadings.first.map { "\($0.systolic)/\($0.diastolic)" } ?? "--",
+                    value: viewModel.readings.bloodPressureReadings.first.map { "\($0.systolic)/\($0.diastolic)" } ?? "--",
                     detail: "mmHg"
                 )
                 MetricTile(
                     title: "Diabetes",
-                    value: viewModel.bloodGlucoseReadings.first.map { String(format: "%.0f", $0.value) } ?? "--",
+                    value: viewModel.readings.bloodGlucoseReadings.first.map { String(format: "%.0f", $0.value) } ?? "--",
                     detail: "mg/dL"
                 )
             }
@@ -533,13 +533,13 @@ private struct ProfilePicker: View {
     @ObservedObject var viewModel: HealthBootstrapViewModel
 
     var body: some View {
-        if viewModel.profiles.isEmpty {
+        if viewModel.profiles.profiles.isEmpty {
             Text("Create a profile first.")
                 .foregroundStyle(.secondary)
         } else {
-            Picker("Profile", selection: $viewModel.selectedProfileId) {
+            Picker("Profile", selection: $viewModel.profiles.selectedProfileId) {
                 Text("Choose profile").tag("")
-                ForEach(viewModel.profiles) { profile in
+                ForEach(viewModel.profiles.profiles) { profile in
                     Text(profile.displayName).tag(profile.id)
                 }
             }

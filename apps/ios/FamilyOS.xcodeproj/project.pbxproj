@@ -14,6 +14,18 @@
 		DE1000000000000000000005 /* SupabaseAuthClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1000000000000000000015 /* SupabaseAuthClient.swift */; };
 		DE1000000000000000000006 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1000000000000000000017 /* KeychainStore.swift */; };
 		DE1000000000000000000007 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1000000000000000000018 /* AppEnvironment.swift */; };
+		DE1000000000000000000008 /* HealthBootstrapAuthViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1000000000000000000021 /* HealthBootstrapAuthViewModel.swift */; };
+		DE1000000000000000000009 /* HealthBootstrapFamilyViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1000000000000000000022 /* HealthBootstrapFamilyViewModel.swift */; };
+		DE100000000000000000000A /* HealthBootstrapProfilesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1000000000000000000023 /* HealthBootstrapProfilesViewModel.swift */; };
+		DE100000000000000000000B /* HealthBootstrapReadingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1000000000000000000024 /* HealthBootstrapReadingsViewModel.swift */; };
+		DE100000000000000000000C /* HealthModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1000000000000000000025 /* HealthModels.swift */; };
+		DE100000000000000000000D /* SupabaseModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1000000000000000000026 /* SupabaseModels.swift */; };
+		DE100000000000000000000E /* AnyEncodable.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1000000000000000000027 /* AnyEncodable.swift */; };
+		DE100000000000000000000F /* HealthConnectionViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1000000000000000000028 /* HealthConnectionViewModel.swift */; };
+		DE100000000000000000001A /* HealthAuthStateViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1000000000000000000029 /* HealthAuthStateViewModel.swift */; };
+		DE100000000000000000001B /* HealthFamilyStateViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE100000000000000000002A /* HealthFamilyStateViewModel.swift */; };
+		DE100000000000000000001C /* HealthProfilesStateViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE100000000000000000002B /* HealthProfilesStateViewModel.swift */; };
+		DE100000000000000000001D /* HealthReadingsStateViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE100000000000000000002C /* HealthReadingsStateViewModel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,6 +39,18 @@
 		DE1000000000000000000017 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		DE1000000000000000000018 /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
 		DE1000000000000000000019 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		DE1000000000000000000021 /* HealthBootstrapAuthViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthBootstrapAuthViewModel.swift; sourceTree = "<group>"; };
+		DE1000000000000000000022 /* HealthBootstrapFamilyViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthBootstrapFamilyViewModel.swift; sourceTree = "<group>"; };
+		DE1000000000000000000023 /* HealthBootstrapProfilesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthBootstrapProfilesViewModel.swift; sourceTree = "<group>"; };
+		DE1000000000000000000024 /* HealthBootstrapReadingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthBootstrapReadingsViewModel.swift; sourceTree = "<group>"; };
+		DE1000000000000000000025 /* HealthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthModels.swift; sourceTree = "<group>"; };
+		DE1000000000000000000026 /* SupabaseModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseModels.swift; sourceTree = "<group>"; };
+		DE1000000000000000000027 /* AnyEncodable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnyEncodable.swift; sourceTree = "<group>"; };
+		DE1000000000000000000028 /* HealthConnectionViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthConnectionViewModel.swift; sourceTree = "<group>"; };
+		DE1000000000000000000029 /* HealthAuthStateViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthAuthStateViewModel.swift; sourceTree = "<group>"; };
+		DE100000000000000000002A /* HealthFamilyStateViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthFamilyStateViewModel.swift; sourceTree = "<group>"; };
+		DE100000000000000000002B /* HealthProfilesStateViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthProfilesStateViewModel.swift; sourceTree = "<group>"; };
+		DE100000000000000000002C /* HealthReadingsStateViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthReadingsStateViewModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -57,6 +81,7 @@
 				DE1000000000000000000036 /* Configuration */,
 				DE1000000000000000000037 /* Resources */,
 				DE1000000000000000000038 /* ViewModels */,
+				DE1000000000000000000039 /* Models */,
 				DE1000000000000000000011 /* FamilyOSApp.swift */,
 			);
 			path = FamilyOS;
@@ -108,8 +133,27 @@
 			isa = PBXGroup;
 			children = (
 				DE1000000000000000000013 /* HealthBootstrapViewModel.swift */,
+				DE1000000000000000000021 /* HealthBootstrapAuthViewModel.swift */,
+				DE1000000000000000000022 /* HealthBootstrapFamilyViewModel.swift */,
+				DE1000000000000000000023 /* HealthBootstrapProfilesViewModel.swift */,
+				DE1000000000000000000024 /* HealthBootstrapReadingsViewModel.swift */,
+				DE1000000000000000000029 /* HealthAuthStateViewModel.swift */,
+				DE1000000000000000000028 /* HealthConnectionViewModel.swift */,
+				DE100000000000000000002A /* HealthFamilyStateViewModel.swift */,
+				DE100000000000000000002B /* HealthProfilesStateViewModel.swift */,
+				DE100000000000000000002C /* HealthReadingsStateViewModel.swift */,
 			);
 			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		DE1000000000000000000039 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				DE1000000000000000000027 /* AnyEncodable.swift */,
+				DE1000000000000000000025 /* HealthModels.swift */,
+				DE1000000000000000000026 /* SupabaseModels.swift */,
+			);
+			path = Models;
 			sourceTree = "<group>";
 		};
 		DE1000000000000000000032 /* Products */ = {
@@ -195,6 +239,18 @@
 				DE1000000000000000000005 /* SupabaseAuthClient.swift in Sources */,
 				DE1000000000000000000006 /* KeychainStore.swift in Sources */,
 				DE1000000000000000000007 /* AppEnvironment.swift in Sources */,
+				DE1000000000000000000008 /* HealthBootstrapAuthViewModel.swift in Sources */,
+				DE1000000000000000000009 /* HealthBootstrapFamilyViewModel.swift in Sources */,
+				DE100000000000000000000A /* HealthBootstrapProfilesViewModel.swift in Sources */,
+				DE100000000000000000000B /* HealthBootstrapReadingsViewModel.swift in Sources */,
+				DE100000000000000000000C /* HealthModels.swift in Sources */,
+				DE100000000000000000000D /* SupabaseModels.swift in Sources */,
+				DE100000000000000000000E /* AnyEncodable.swift in Sources */,
+				DE100000000000000000000F /* HealthConnectionViewModel.swift in Sources */,
+				DE100000000000000000001A /* HealthAuthStateViewModel.swift in Sources */,
+				DE100000000000000000001B /* HealthFamilyStateViewModel.swift in Sources */,
+				DE100000000000000000001C /* HealthProfilesStateViewModel.swift in Sources */,
+				DE100000000000000000001D /* HealthReadingsStateViewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
