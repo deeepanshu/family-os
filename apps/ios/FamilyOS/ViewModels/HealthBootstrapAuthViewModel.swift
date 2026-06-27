@@ -24,44 +24,23 @@ extension HealthBootstrapViewModel {
         }
     }
 
-    func refreshSupabaseSession() async {
-        await request {
-            guard let refreshToken = auth.refreshToken else {
-                return "No refresh token is available. Sign in again."
-            }
-            let session = try await authClient.refreshSession(
-                supabaseURL: connection.supabaseURL,
-                anonKey: connection.supabaseAnonKey,
-                refreshToken: refreshToken
-            )
-            try storeSession(session)
-            return "Refreshed Supabase session for \(signedInSummary)."
-        }
-    }
-
-    func useManualAccessToken() {
-        let trimmed = auth.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        auth.accessToken = trimmed
+    func useLocalDevToken() async {
+        auth.accessToken = "dev-token"
         do {
-            try keychain.set(trimmed, for: DefaultsKey.accessToken)
+            try keychain.set(auth.accessToken, for: DefaultsKey.accessToken)
+            keychain.remove(DefaultsKey.refreshToken)
+            defaults.removeObject(forKey: DefaultsKey.userId)
+            defaults.removeObject(forKey: DefaultsKey.userEmail)
+            auth.refreshToken = nil
+            auth.signedInUserId = nil
+            auth.signedInUserEmail = nil
+            isError = false
+            statusMessage = "Using local development sign in."
         } catch {
             isError = true
             statusMessage = error.localizedDescription
             return
         }
-        keychain.remove(DefaultsKey.refreshToken)
-        defaults.removeObject(forKey: DefaultsKey.userId)
-        defaults.removeObject(forKey: DefaultsKey.userEmail)
-        auth.refreshToken = nil
-        auth.signedInUserId = nil
-        auth.signedInUserEmail = nil
-        isError = trimmed.isEmpty
-        statusMessage = trimmed.isEmpty ? "Paste a Supabase access token first." : "Using manual access token."
-    }
-
-    func useLocalDevToken() async {
-        auth.accessToken = "dev-token"
-        useManualAccessToken()
         if hasAccessToken {
             await loadCurrentFamily()
             await loadProfiles()

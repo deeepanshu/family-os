@@ -1,20 +1,6 @@
 import Foundation
 
 extension HealthBootstrapViewModel {
-    func checkHealth() async {
-        await request {
-            let response = try await client.healthcheck(baseURL: connection.baseURL)
-            return "\(response.service) is \(response.status)."
-        }
-    }
-
-    func checkSession() async {
-        await request {
-            let response = try await client.session(baseURL: connection.baseURL, accessToken: auth.accessToken)
-            return "Authenticated as \(response.userId)."
-        }
-    }
-
     func loadCurrentFamily() async {
         await request {
             let response = try await client.currentFamily(baseURL: connection.baseURL, accessToken: auth.accessToken)
