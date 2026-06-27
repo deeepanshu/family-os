@@ -117,6 +117,14 @@
 			path = FamilyOS;
 			sourceTree = "<group>";
 		};
+		DE1000000000000000000032 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				DE1000000000000000000010 /* FamilyOS.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
 		DE1000000000000000000033 /* Views */ = {
 			isa = PBXGroup;
 			children = (
@@ -131,29 +139,6 @@
 				DE3000000000000000000008 /* LogReadingSheet.swift */,
 			);
 			path = Views;
-			sourceTree = "<group>";
-		};
-		DE3000000000000000000031 /* Auth */ = {
-			isa = PBXGroup;
-			children = (
-				DE3000000000000000000001 /* SignInView.swift */,
-			);
-			path = Auth;
-			sourceTree = "<group>";
-		};
-		DE3000000000000000000032 /* Components */ = {
-			isa = PBXGroup;
-			children = (
-				DE3000000000000000000009 /* LatestReadingsSummary.swift */,
-				DE300000000000000000000A /* PrimaryActionButton.swift */,
-				DE300000000000000000000B /* ProfilePicker.swift */,
-				DE300000000000000000000C /* ProfileRow.swift */,
-				DE300000000000000000000D /* ReadingRow.swift */,
-				DE300000000000000000000E /* EmptyRow.swift */,
-				DE300000000000000000000F /* MetricTile.swift */,
-				DE3000000000000000000010 /* StatusText.swift */,
-			);
-			path = Components;
 			sourceTree = "<group>";
 		};
 		DE1000000000000000000034 /* Clients */ = {
@@ -217,12 +202,27 @@
 			path = Models;
 			sourceTree = "<group>";
 		};
-		DE1000000000000000000032 /* Products */ = {
+		DE3000000000000000000031 /* Auth */ = {
 			isa = PBXGroup;
 			children = (
-				DE1000000000000000000010 /* FamilyOS.app */,
+				DE3000000000000000000001 /* SignInView.swift */,
 			);
-			name = Products;
+			path = Auth;
+			sourceTree = "<group>";
+		};
+		DE3000000000000000000032 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				DE3000000000000000000009 /* LatestReadingsSummary.swift */,
+				DE300000000000000000000A /* PrimaryActionButton.swift */,
+				DE300000000000000000000B /* ProfilePicker.swift */,
+				DE300000000000000000000C /* ProfileRow.swift */,
+				DE300000000000000000000D /* ReadingRow.swift */,
+				DE300000000000000000000E /* EmptyRow.swift */,
+				DE300000000000000000000F /* MetricTile.swift */,
+				DE3000000000000000000010 /* StatusText.swift */,
+			);
+			path = Components;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -456,9 +456,10 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				FAMILY_OS_ENV = local;
-				HEALTH_API_BASE_URL = "http://localhost:3001/health/v1";
 				GENERATE_INFOPLIST_FILE = NO;
+				HEALTH_API_BASE_URL = "http://localhost:3001/health/v1";
 				INFOPLIST_FILE = FamilyOS/Resources/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -467,9 +468,9 @@
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.deepanshujain.familyos;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPABASE_ANON_KEY = "";
 				SUPABASE_URL = "";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -490,6 +491,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				HEALTH_API_BASE_URL = "https://api.deepanshujain.com/health/v1";
 				INFOPLIST_FILE = FamilyOS/Resources/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -498,9 +500,9 @@
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.deepanshujain.familyos;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPABASE_ANON_KEY = "";
 				SUPABASE_URL = "";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
