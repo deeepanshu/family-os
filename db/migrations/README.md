@@ -1,6 +1,13 @@
 # Database Migrations
 
-Drizzle/Supabase migration files will live here.
+Drizzle/Supabase migration files live here.
+
+For plain local Postgres, run `npm run db:migrate:local`. That applies
+`db/local/0000_auth_stub.sql` first so Supabase-specific references to
+`auth.users`, `auth.uid()`, and `gen_random_uuid()` exist outside Supabase.
+Do not use the local auth stub as a replacement for Supabase Auth in
+production. Local runs are tracked in a `local_schema_migrations` table so the
+helper can be run more than once.
 
 - `0001_family_setup.sql` creates families, memberships, and baseline RLS
   select policies for active members.

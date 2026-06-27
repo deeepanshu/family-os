@@ -9,7 +9,11 @@
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "api:dev": "npm run dev -w @family-os/health-api",
-    "api:test": "npm run test -w @family-os/health-api"
+    "api:test": "npm run test -w @family-os/health-api",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:logs": "docker compose logs -f postgres",
+    "db:migrate:local": "scripts/migrate-local-postgres.sh"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

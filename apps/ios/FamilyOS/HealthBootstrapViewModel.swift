@@ -27,6 +27,10 @@ final class HealthBootstrapViewModel: ObservableObject {
 
     private let client = HealthAPIClient()
 
+    var hasAccessToken: Bool {
+        !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     func checkHealth() async {
         await request {
             let response = try await client.healthcheck(baseURL: baseURL)

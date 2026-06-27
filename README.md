@@ -50,6 +50,19 @@ Install dependencies:
 npm install
 ```
 
+Start lightweight local Docker with Colima:
+
+```sh
+colima start --cpu 2 --memory 4 --disk 20 --runtime docker
+```
+
+Start local Postgres and apply migrations:
+
+```sh
+npm run db:up
+npm run db:migrate:local
+```
+
 Run backend checks:
 
 ```sh
@@ -64,8 +77,9 @@ npm run api:dev
 ```
 
 Backend environment placeholders are documented in `.env.example`. Empty
-placeholders are treated as unset. `NODE_ENV` defaults to `development` and
-`PORT` defaults to `3001`.
+placeholders are treated as unset. `NODE_ENV` defaults to `development`,
+`PORT` defaults to `3001`, and local Docker Postgres uses
+`postgres://family_os:family_os@localhost:5432/family_os`.
 
 For local smoke tests only, set both `HEALTH_API_ENABLE_DEV_AUTH=true` and
 `HEALTH_API_DEV_AUTH_USER_ID=<uuid>`, then call protected endpoints with
