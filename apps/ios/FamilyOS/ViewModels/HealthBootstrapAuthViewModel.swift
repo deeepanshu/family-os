@@ -59,6 +59,15 @@ extension HealthBootstrapViewModel {
         statusMessage = trimmed.isEmpty ? "Paste a Supabase access token first." : "Using manual access token."
     }
 
+    func useLocalDevToken() async {
+        auth.accessToken = "dev-token"
+        useManualAccessToken()
+        if hasAccessToken {
+            await loadCurrentFamily()
+            await loadProfiles()
+        }
+    }
+
     private func signInWithApple(_ authorization: ASAuthorization) async {
         await request {
             guard let currentAppleNonce = auth.currentAppleNonce else {

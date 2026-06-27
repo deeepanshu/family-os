@@ -3,7 +3,6 @@ import SwiftUI
 
 struct SignInView: View {
     @ObservedObject var viewModel: HealthBootstrapViewModel
-    @State private var showDeveloperSettings = false
 
     var body: some View {
         NavigationStack {
@@ -19,15 +18,30 @@ struct SignInView: View {
                     .padding(.top, 40)
 
                     VStack(spacing: 14) {
-                        SignInWithAppleButton(.continue) { request in
-                            viewModel.prepareAppleSignInRequest(request)
-                        } onCompletion: { result in
-                            Task { await viewModel.handleAppleSignInCompletion(result) }
+                        if viewModel.usesLocalDevSignIn {
+                            Button {
+                                Task { await viewModel.useLocalDevToken() }
+                            } label: {
+                                Text("Continue")
+                                    .font(.headline)
+                                    .foregroundStyle(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 52)
+                                    .background(Color.black)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            SignInWithAppleButton(.continue) { request in
+                                viewModel.prepareAppleSignInRequest(request)
+                            } onCompletion: { result in
+                                Task { await viewModel.handleAppleSignInCompletion(result) }
+                            }
+                            .signInWithAppleButtonStyle(.black)
+                            .frame(height: 52)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .disabled(!viewModel.hasSupabaseConfiguration)
                         }
-                        .signInWithAppleButtonStyle(.black)
-                        .frame(height: 52)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .disabled(!viewModel.hasSupabaseConfiguration)
                     }
 
                     Spacer(minLength: 20)
@@ -35,21 +49,6 @@ struct SignInView: View {
                 .padding(24)
             }
             .background(Color(.systemGroupedBackground))
-            #if DEBUG
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showDeveloperSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .accessibilityLabel("Developer Settings")
-                }
-            }
-            .sheet(isPresented: $showDeveloperSettings) {
-                DeveloperSettingsView(viewModel: viewModel)
-            }
-            #endif
         }
     }
 }

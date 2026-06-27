@@ -47,6 +47,14 @@ final class HealthBootstrapViewModel: ObservableObject {
         !connection.supabaseAnonKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    var usesLocalDevSignIn: Bool {
+        #if DEBUG
+        connection.environmentName == .local && !hasSupabaseConfiguration
+        #else
+        false
+        #endif
+    }
+
     var signedInSummary: String {
         if let email = auth.signedInUserEmail, !email.isEmpty {
             return email
