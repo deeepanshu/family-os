@@ -28,10 +28,8 @@ struct SignInView: View {
                         .frame(height: 52)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .disabled(!viewModel.hasSupabaseConfiguration)
-
                     }
 
-                    StatusText(viewModel: viewModel)
                     Spacer(minLength: 20)
                 }
                 .padding(24)
