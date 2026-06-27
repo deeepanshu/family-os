@@ -459,7 +459,6 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				HEALTH_API_BASE_URL = "http://localhost:3001/health/v1";
 				INFOPLIST_FILE = FamilyOS/Resources/Info.plist;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -491,7 +490,6 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				HEALTH_API_BASE_URL = "https://api.deepanshujain.com/health/v1";
 				INFOPLIST_FILE = FamilyOS/Resources/Info.plist;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
