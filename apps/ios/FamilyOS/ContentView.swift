@@ -1,24 +1,86 @@
+import AuthenticationServices
 import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var viewModel: HealthBootstrapViewModel
 
     var body: some View {
-        TabView {
-            DashboardView(viewModel: viewModel)
-                .tabItem { Label("Home", systemImage: "heart.text.square") }
+        if viewModel.hasAccessToken {
+            TabView {
+                DashboardView(viewModel: viewModel)
+                    .tabItem { Label("Home", systemImage: "heart.text.square") }
 
-            LogHealthView(viewModel: viewModel)
-                .tabItem { Label("Log", systemImage: "plus.circle") }
+                LogHealthView(viewModel: viewModel)
+                    .tabItem { Label("Log", systemImage: "plus.circle") }
 
-            HistoryView(viewModel: viewModel)
-                .tabItem { Label("History", systemImage: "clock") }
+                HistoryView(viewModel: viewModel)
+                    .tabItem { Label("History", systemImage: "clock") }
 
-            FamilyView(viewModel: viewModel)
-                .tabItem { Label("Family", systemImage: "person.3") }
+                FamilyView(viewModel: viewModel)
+                    .tabItem { Label("Family", systemImage: "person.3") }
 
-            SettingsView(viewModel: viewModel)
-                .tabItem { Label("Settings", systemImage: "gearshape") }
+                SettingsView(viewModel: viewModel)
+                    .tabItem { Label("Settings", systemImage: "gearshape") }
+            }
+        } else {
+            SignInView(viewModel: viewModel)
+        }
+    }
+}
+
+private struct SignInView: View {
+    @ObservedObject var viewModel: HealthBootstrapViewModel
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Family OS") {
+                    Text("Sign in or sign up with Apple to manage family health.")
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Supabase") {
+                    TextField("Supabase URL", text: $viewModel.supabaseURL)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                    SecureField("Supabase anon key", text: $viewModel.supabaseAnonKey)
+                        .textInputAutocapitalization(.never)
+                    Button("Save Connection") {
+                        viewModel.saveConnectionSettings()
+                    }
+                }
+
+                Section("Apple") {
+                    SignInWithAppleButton(.continue) { request in
+                        viewModel.prepareAppleSignInRequest(request)
+                    } onCompletion: { result in
+                        Task { await viewModel.handleAppleSignInCompletion(result) }
+                    }
+                    .signInWithAppleButtonStyle(.black)
+                    .frame(height: 48)
+                    .disabled(!viewModel.hasSupabaseConfiguration)
+
+                    if !viewModel.hasSupabaseConfiguration {
+                        Text("Enter the Supabase URL and anon key before signing in.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Local Development") {
+                    SecureField("Supabase access token", text: $viewModel.accessToken)
+                        .textInputAutocapitalization(.never)
+                    Button("Use Manual Token") {
+                        viewModel.useManualAccessToken()
+                    }
+                }
+
+                Section("Status") {
+                    Text(viewModel.statusMessage)
+                        .foregroundStyle(viewModel.isError ? .red : .secondary)
+                }
+            }
+            .navigationTitle("Sign In")
         }
     }
 }
@@ -99,6 +161,8 @@ private struct DashboardView: View {
                     Text(route)
                         .foregroundStyle(.blue)
                 }
+                Text("Signed in: \(viewModel.signedInSummary)")
+                    .foregroundStyle(.secondary)
                 Text(viewModel.statusMessage)
                     .foregroundStyle(viewModel.isError ? .red : .secondary)
             }
@@ -296,16 +360,37 @@ private struct SettingsView: View {
                     TextField("API base URL", text: $viewModel.baseURL)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
+                    TextField("Supabase URL", text: $viewModel.supabaseURL)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                    SecureField("Supabase anon key", text: $viewModel.supabaseAnonKey)
+                        .textInputAutocapitalization(.never)
+                    Button("Save Connection") {
+                        viewModel.saveConnectionSettings()
+                    }
                     Button("Check API") {
                         Task { await viewModel.checkHealth() }
+                    }
+                }
+
+                Section("Session") {
+                    LabeledContent("Signed in", value: viewModel.signedInSummary)
+                    Button("Refresh Supabase Session") {
+                        Task { await viewModel.refreshSupabaseSession() }
+                    }
+                    Button("Check Backend Session") {
+                        Task { await viewModel.checkSession() }
+                    }
+                    Button("Sign Out", role: .destructive) {
+                        viewModel.signOut()
                     }
                 }
 
                 Section("Local Development Auth") {
                     SecureField("Supabase access token", text: $viewModel.accessToken)
                         .textInputAutocapitalization(.never)
-                    Button("Check Session") {
-                        Task { await viewModel.checkSession() }
+                    Button("Use Manual Token") {
+                        viewModel.useManualAccessToken()
                     }
                 }
 

@@ -53,6 +53,26 @@ The current bootstrap screen can call:
 - `POST /health/v1/reminders`
 - `GET /health/v1/reminders`
 
+## Sign In With Apple
+
+The app uses Apple's native `AuthenticationServices` flow and exchanges the
+Apple identity token with Supabase Auth. In the app, enter:
+
+- Supabase URL, for example `https://<project-ref>.supabase.co`
+- Supabase anon key
+- Health API base URL
+
+The anon key is expected in the client. Do not put the Supabase service role key
+in the iOS app.
+
+Supabase must have the Apple provider enabled, and the Apple developer account
+must enable Sign in with Apple for `com.deepanshujain.familyos`. The Xcode target
+includes `FamilyOS.entitlements` with the Sign in with Apple capability.
+
+For local backend smoke testing without Apple/Supabase, paste a temporary
+Supabase access token or the development `dev-token` when the backend is running
+with `HEALTH_API_ENABLE_DEV_AUTH=true`.
+
 Remote notification payloads use these keys:
 
 - `action` - routing action. Supported values:

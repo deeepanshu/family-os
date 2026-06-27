@@ -1,10 +1,15 @@
-import Foundation
+import AuthenticationServices
 import Combine
+import Foundation
 
 @MainActor
 final class HealthBootstrapViewModel: ObservableObject {
     @Published var baseURL = "https://api.deepanshujain.com/health/v1"
+    @Published var supabaseURL = ""
+    @Published var supabaseAnonKey = ""
     @Published var accessToken = ""
+    @Published private(set) var signedInUserEmail: String?
+    @Published private(set) var signedInUserId: String?
     @Published var familyName = ""
     @Published var inviteToken = ""
     @Published var profileName = ""
@@ -26,9 +31,126 @@ final class HealthBootstrapViewModel: ObservableObject {
     @Published private(set) var isError = false
 
     private let client = HealthAPIClient()
+    private let authClient = SupabaseAuthClient()
+    private let keychain = KeychainStore()
+    private var currentAppleNonce: AppleSignInNonce?
+    private var refreshToken: String?
+    private let defaults = UserDefaults.standard
+
+    init() {
+        baseURL = defaults.string(forKey: DefaultsKey.baseURL) ?? baseURL
+        supabaseURL = defaults.string(forKey: DefaultsKey.supabaseURL) ?? ""
+        supabaseAnonKey = defaults.string(forKey: DefaultsKey.supabaseAnonKey) ?? ""
+        accessToken = (try? keychain.string(for: DefaultsKey.accessToken)) ?? ""
+        refreshToken = try? keychain.string(for: DefaultsKey.refreshToken)
+        signedInUserId = defaults.string(forKey: DefaultsKey.userId)
+        signedInUserEmail = defaults.string(forKey: DefaultsKey.userEmail)
+        if hasAccessToken {
+            statusMessage = signedInUserEmail.map { "Signed in as \($0)." } ?? "Signed in."
+        }
+    }
 
     var hasAccessToken: Bool {
         !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var hasSupabaseConfiguration: Bool {
+        !supabaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !supabaseAnonKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var signedInSummary: String {
+        if let signedInUserEmail, !signedInUserEmail.isEmpty {
+            return signedInUserEmail
+        }
+        if let signedInUserId, !signedInUserId.isEmpty {
+            return signedInUserId
+        }
+        return hasAccessToken ? "Authenticated" : "Not signed in"
+    }
+
+    func saveConnectionSettings() {
+        defaults.set(baseURL.trimmingCharacters(in: .whitespacesAndNewlines), forKey: DefaultsKey.baseURL)
+        defaults.set(supabaseURL.trimmingCharacters(in: .whitespacesAndNewlines), forKey: DefaultsKey.supabaseURL)
+        defaults.set(supabaseAnonKey.trimmingCharacters(in: .whitespacesAndNewlines), forKey: DefaultsKey.supabaseAnonKey)
+        statusMessage = "Saved connection settings."
+        isError = false
+    }
+
+    func prepareAppleSignInRequest(_ request: ASAuthorizationAppleIDRequest) {
+        do {
+            let nonce = try authClient.makeAppleNonce()
+            currentAppleNonce = nonce
+            request.requestedScopes = [.fullName, .email]
+            request.nonce = nonce.sha256
+        } catch {
+            isError = true
+            statusMessage = error.localizedDescription
+        }
+    }
+
+    func handleAppleSignInCompletion(_ result: Result<ASAuthorization, Error>) async {
+        switch result {
+        case .success(let authorization):
+            await signInWithApple(authorization)
+        case .failure(let error):
+            isError = true
+            statusMessage = error.localizedDescription
+        }
+    }
+
+    func refreshSupabaseSession() async {
+        await request {
+            guard let refreshToken else {
+                return "No refresh token is available. Sign in again."
+            }
+            let session = try await authClient.refreshSession(
+                supabaseURL: supabaseURL,
+                anonKey: supabaseAnonKey,
+                refreshToken: refreshToken
+            )
+            try storeSession(session)
+            return "Refreshed Supabase session for \(signedInSummary)."
+        }
+    }
+
+    func useManualAccessToken() {
+        let trimmed = accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        accessToken = trimmed
+        do {
+            try keychain.set(trimmed, for: DefaultsKey.accessToken)
+        } catch {
+            isError = true
+            statusMessage = error.localizedDescription
+            return
+        }
+        keychain.remove(DefaultsKey.refreshToken)
+        defaults.removeObject(forKey: DefaultsKey.userId)
+        defaults.removeObject(forKey: DefaultsKey.userEmail)
+        refreshToken = nil
+        signedInUserId = nil
+        signedInUserEmail = nil
+        isError = trimmed.isEmpty
+        statusMessage = trimmed.isEmpty ? "Paste a Supabase access token first." : "Using manual access token."
+    }
+
+    func signOut() {
+        accessToken = ""
+        refreshToken = nil
+        signedInUserId = nil
+        signedInUserEmail = nil
+        currentFamilyName = nil
+        currentFamilyRole = nil
+        profiles = []
+        bloodPressureReadings = []
+        bloodGlucoseReadings = []
+        lastCreatedInviteToken = nil
+        keychain.remove(DefaultsKey.accessToken)
+        keychain.remove(DefaultsKey.refreshToken)
+        defaults.removeObject(forKey: DefaultsKey.userId)
+        defaults.removeObject(forKey: DefaultsKey.userEmail)
+        statusMessage = "Signed out."
+        isError = false
     }
 
     func checkHealth() async {
@@ -217,4 +339,59 @@ final class HealthBootstrapViewModel: ObservableObject {
             statusMessage = error.localizedDescription
         }
     }
+
+    private func signInWithApple(_ authorization: ASAuthorization) async {
+        await request {
+            guard let currentAppleNonce else {
+                return "Apple sign-in nonce was missing. Try again."
+            }
+            let session = try await authClient.exchangeAppleCredential(
+                supabaseURL: supabaseURL,
+                anonKey: supabaseAnonKey,
+                authorization: authorization,
+                rawNonce: currentAppleNonce.raw
+            )
+            try storeSession(session)
+            self.currentAppleNonce = nil
+            return "Signed in with Apple as \(signedInSummary)."
+        }
+        if hasAccessToken {
+            await loadCurrentFamily()
+            await loadProfiles()
+        }
+    }
+
+    private func storeSession(_ session: SupabaseSession) throws {
+        accessToken = session.accessToken
+        refreshToken = session.refreshToken
+        signedInUserId = session.user?.id
+        signedInUserEmail = session.user?.email
+        try keychain.set(accessToken, for: DefaultsKey.accessToken)
+        if let refreshToken {
+            try keychain.set(refreshToken, for: DefaultsKey.refreshToken)
+        } else {
+            keychain.remove(DefaultsKey.refreshToken)
+        }
+        if let signedInUserId {
+            defaults.set(signedInUserId, forKey: DefaultsKey.userId)
+        } else {
+            defaults.removeObject(forKey: DefaultsKey.userId)
+        }
+        if let signedInUserEmail {
+            defaults.set(signedInUserEmail, forKey: DefaultsKey.userEmail)
+        } else {
+            defaults.removeObject(forKey: DefaultsKey.userEmail)
+        }
+        saveConnectionSettings()
+    }
+}
+
+private enum DefaultsKey {
+    static let baseURL = "familyOS.baseURL"
+    static let supabaseURL = "familyOS.supabaseURL"
+    static let supabaseAnonKey = "familyOS.supabaseAnonKey"
+    static let accessToken = "familyOS.accessToken"
+    static let refreshToken = "familyOS.refreshToken"
+    static let userId = "familyOS.userId"
+    static let userEmail = "familyOS.userEmail"
 }
