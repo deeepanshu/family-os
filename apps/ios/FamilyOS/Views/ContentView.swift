@@ -127,14 +127,14 @@ private struct AppTabsView: View {
             HomeView(viewModel: viewModel)
                 .tabItem { Label("Home", systemImage: "house") }
 
-            ProfileView(viewModel: viewModel)
-                .tabItem { Label("Profile", systemImage: "person.crop.circle") }
-
             HistoryView(viewModel: viewModel)
                 .tabItem { Label("History", systemImage: "clock") }
 
             FamilyView(viewModel: viewModel)
                 .tabItem { Label("Family", systemImage: "person.3") }
+
+            ProfileView(viewModel: viewModel)
+                .tabItem { Label("Profile", systemImage: "person.crop.circle") }
         }
     }
 }
