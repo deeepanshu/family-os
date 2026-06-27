@@ -180,7 +180,7 @@ private struct HomeView: View {
                 .padding()
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("Home")
+            .navigationTitle("Health")
             .task {
                 await viewModel.loadCurrentFamily()
                 await viewModel.loadProfiles()
