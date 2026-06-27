@@ -36,11 +36,12 @@ final class HealthBootstrapViewModel: ObservableObject {
     private var currentAppleNonce: AppleSignInNonce?
     private var refreshToken: String?
     private let defaults = UserDefaults.standard
+    private let appEnvironment = AppEnvironment.current
 
     init() {
-        baseURL = defaults.string(forKey: DefaultsKey.baseURL) ?? baseURL
-        supabaseURL = defaults.string(forKey: DefaultsKey.supabaseURL) ?? ""
-        supabaseAnonKey = defaults.string(forKey: DefaultsKey.supabaseAnonKey) ?? ""
+        baseURL = defaults.string(forKey: DefaultsKey.baseURL) ?? appEnvironment.apiBaseURL
+        supabaseURL = defaults.string(forKey: DefaultsKey.supabaseURL) ?? appEnvironment.supabaseURL
+        supabaseAnonKey = defaults.string(forKey: DefaultsKey.supabaseAnonKey) ?? appEnvironment.supabaseAnonKey
         accessToken = (try? keychain.string(for: DefaultsKey.accessToken)) ?? ""
         refreshToken = try? keychain.string(for: DefaultsKey.refreshToken)
         signedInUserId = defaults.string(forKey: DefaultsKey.userId)
@@ -67,6 +68,14 @@ final class HealthBootstrapViewModel: ObservableObject {
             return signedInUserId
         }
         return hasAccessToken ? "Authenticated" : "Not signed in"
+    }
+
+    var selectedProfile: HealthProfile? {
+        profiles.first { $0.id == selectedProfileId }
+    }
+
+    var hasSelectedProfile: Bool {
+        !selectedProfileId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     func saveConnectionSettings() {
@@ -220,7 +229,7 @@ final class HealthBootstrapViewModel: ObservableObject {
     func createBloodPressure() async {
         await request {
             guard !selectedProfileId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return "Select or paste a profile ID first."
+                return "Choose a profile first."
             }
             guard let systolicValue = Int(systolic), let diastolicValue = Int(diastolic) else {
                 return "Enter numeric systolic and diastolic values."
@@ -264,7 +273,7 @@ final class HealthBootstrapViewModel: ObservableObject {
     func createBloodGlucose() async {
         await request {
             guard !selectedProfileId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return "Select or paste a profile ID first."
+                return "Choose a profile first."
             }
             guard let value = Double(glucoseValue), (20...700).contains(value) else {
                 return "Sugar must be 20-700 mg/dL."
@@ -323,6 +332,7 @@ final class HealthBootstrapViewModel: ObservableObject {
                 relationshipLabel: profileRelationship.trimmingCharacters(in: .whitespacesAndNewlines)
             )
             profiles.append(profile)
+            selectedProfileId = profile.id
             profileName = ""
             profileRelationship = ""
             return "Created profile for \(profile.displayName)."

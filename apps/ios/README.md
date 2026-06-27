@@ -35,6 +35,32 @@ xcodebuild \
   build
 ```
 
+## Environments
+
+Debug builds use the `local` environment:
+
+- Health API: `http://localhost:3001/health/v1`
+- Backend database: local Docker Postgres
+- Auth: Supabase Auth for real Apple sign-in, or `dev-token` for local smoke
+  tests when the backend enables dev auth
+
+Release builds use the `release` environment:
+
+- Health API: `https://api.deepanshujain.com/health/v1`
+- Backend database: Supabase Postgres behind the Raspberry Pi API
+- Auth: Supabase Auth with Sign in with Apple
+
+The app reads these generated Info.plist keys:
+
+- `FAMILY_OS_ENV`
+- `HEALTH_API_BASE_URL`
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+
+`SUPABASE_URL` and `SUPABASE_ANON_KEY` are blank placeholders in source control.
+Set them through Xcode build settings or a local untracked configuration before
+using real Apple login.
+
 The current bootstrap screen can call:
 
 - `GET /health/v1/healthcheck`

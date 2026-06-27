@@ -27,6 +27,22 @@ Local API URL:
 http://localhost:3001/health/v1
 ```
 
+## Environments
+
+The iOS app has two build-time environments:
+
+- `local` - Debug builds. Uses `http://localhost:3001/health/v1`, which points
+  at the local Bun API from the iOS simulator. The local API uses Docker
+  Postgres through `DATABASE_URL`.
+- `release` - Release builds. Uses
+  `https://api.deepanshujain.com/health/v1`, which points at the Raspberry
+  Pi-hosted API. Release database storage is Supabase Postgres.
+
+Both environments use Supabase Auth for real Sign in with Apple. The local
+backend can bypass Supabase only for smoke tests when
+`HEALTH_API_ENABLE_DEV_AUTH=true` and the app uses `dev-token` from the debug
+developer sheet.
+
 ## Phase 1
 
 - Family setup.
