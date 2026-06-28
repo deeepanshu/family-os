@@ -1,36 +1,36 @@
 # Database Migrations
 
-Drizzle/Supabase migration files live here.
+Drizzle Kit migration files live here.
 
 ## Source of Truth
 
-For Phase 1, the SQL files in this directory are the migration source of truth.
-`db/schema/health.ts` is the TypeScript/Drizzle mirror used by backend code and
-schema review, but it is not the migration generator yet. Any schema change must
-update both the SQL migration and the Drizzle mirror in the same commit.
+`db/schema/health.ts` is the source of truth for app-owned tables, columns,
+indexes, foreign keys, and check constraints. Use Drizzle Kit to generate schema
+migrations:
 
-This keeps local Docker Postgres and Supabase release Postgres on the exact same
-DDL path while avoiding a partial Drizzle Kit migration workflow. Revisit this
-decision only when the team is ready to make Drizzle Kit the single migration
-generator and remove hand-maintained duplicate DDL.
+```sh
+npm run db:generate
+```
+
+Supabase-specific database behavior that Drizzle cannot model cleanly, including
+RLS policies, `auth.uid()` policies, `auth.users` foreign keys, and trigger
+functions, is kept as Drizzle custom migration SQL in this same directory. It is
+not a second migration system; it is applied by the Drizzle migration journal in
+order with generated migrations.
+
+Apply migrations with:
+
+```sh
+npm run db:migrate
+```
 
 For plain local Postgres, run `npm run db:migrate:local`. That applies
 `db/local/0000_auth_stub.sql` first so Supabase-specific references to
 `auth.users`, `auth.uid()`, and `gen_random_uuid()` exist outside Supabase.
 Do not use the local auth stub as a replacement for Supabase Auth in
-production. Local runs are tracked in a `local_schema_migrations` table so the
-helper can be run more than once.
+production. Local runs are tracked by Drizzle in the `drizzle.__drizzle_migrations`
+table so the helper can be run more than once.
 
-- `0001_family_setup.sql` creates families, memberships, and baseline RLS
-  select policies for active members.
-- `0002_family_invites.sql` creates invite storage with hashed tokens and
-  manager-only insert policy.
-- `0003_people.sql` creates family health profiles with active-member read and
-  manager write policies.
-- `0004_blood_pressure.sql` creates BP readings with active-member read/create
-  and owner-or-manager update policies.
-- `0005_blood_glucose.sql` creates blood sugar readings with active-member
-  read/create and owner-or-manager update policies.
-- `0006_reminders.sql` creates reminders and reminder recipients.
-- `0007_notifications.sql` creates APNs devices and delivery records.
-- `0008_audit_logs.sql` creates family-scoped audit logs with RLS policies.
+If you already applied the old hand-written SQL migrations to a local Docker
+volume, reset that local volume before running the Drizzle baseline. Do not do
+that against production data.

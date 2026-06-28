@@ -18,7 +18,7 @@ Fixed after this review:
 - iOS `HealthAPIClient` now parses server error bodies.
 - Public backend route injection now uses smaller domain interfaces instead of one all-purpose repository dependency.
 - iOS bootstrap now has a dependency container, typed health enums, and typed request bodies; `AnyEncodable` was removed.
-- Migration ownership is documented: SQL migrations are the Phase 1 source of truth and the Drizzle schema is the required mirror.
+- Migration ownership now uses Drizzle Kit: `db/schema/health.ts` generates app schema migrations, and Supabase RLS/auth/trigger SQL is kept as Drizzle custom migrations.
 
 Still remaining:
 
@@ -28,6 +28,9 @@ Still remaining:
 - Further split the in-memory repository implementation itself if it becomes a frequent edit point.
 
 ---
+
+The detailed review below is preserved as the original 2026-06-27 review. Use
+the follow-up status above for the current state of fixed and remaining items.
 
 ## Executive Summary
 

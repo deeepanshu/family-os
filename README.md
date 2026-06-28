@@ -79,6 +79,19 @@ npm run db:up
 npm run db:migrate:local
 ```
 
+Generate and apply database migrations through Drizzle Kit:
+
+```sh
+npm run db:generate
+npm run db:migrate
+```
+
+`db/schema/health.ts` owns app table structure. Supabase RLS policies,
+`auth.users` foreign keys, and triggers live as custom SQL inside the same
+Drizzle migration folder and are applied by Drizzle's migration journal. The
+local migration helper only adds a local Supabase Auth shim before invoking
+Drizzle.
+
 Run backend checks:
 
 ```sh

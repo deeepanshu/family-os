@@ -37,6 +37,11 @@ npm run db:up
 npm run db:migrate:local
 ```
 
+Drizzle Kit owns migrations. Change app-owned database structure in
+`db/schema/health.ts`, then run `npm run db:generate`. Supabase-specific RLS,
+`auth.users` foreign keys, and triggers live as Drizzle custom SQL migrations in
+`db/migrations`.
+
 Use `DATABASE_URL=postgres://family_os:family_os@localhost:5432/family_os` for
 local Docker Postgres. Release should point `DATABASE_URL` at Supabase Postgres
 and set `HEALTH_API_SYNC_LOCAL_AUTH_USERS=false`; local can keep it `true`

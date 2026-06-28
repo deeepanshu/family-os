@@ -1,6 +1,6 @@
 # Database Schema
 
-Supabase Postgres schema and Drizzle schema definitions will live here.
+Supabase Postgres schema and Drizzle schema definitions live here.
 
 Core Phase 1 tables:
 
@@ -16,6 +16,10 @@ Core Phase 1 tables:
 - `notification_deliveries`
 - `audit_logs`
 
-Current Drizzle schema starts in `health.ts` with `families`,
-`family_memberships`, `family_invites`, and `people`. Later Phase 1 issues
-extend the same file.
+`health.ts` is the source of truth for app-owned database structure. Generate
+migrations from it with `npm run db:generate`.
+
+Supabase-owned auth storage is intentionally not modeled as a Drizzle-generated
+table. The migration layer adds foreign keys to `auth.users` as custom Drizzle
+SQL so Supabase release Postgres owns Auth and local Postgres can use
+`db/local/0000_auth_stub.sql`.

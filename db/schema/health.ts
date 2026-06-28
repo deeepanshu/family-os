@@ -1,18 +1,10 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, date, index, integer, jsonb, numeric, pgSchema, pgTable, text, time, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
-
-const authSchema = pgSchema("auth");
-
-export const authUsers = authSchema.table("users", {
-  id: uuid("id").primaryKey()
-});
+import { boolean, check, date, index, integer, jsonb, numeric, pgTable, text, time, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 export const families = pgTable("families", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
-  createdByUserId: uuid("created_by_user_id")
-    .notNull()
-    .references(() => authUsers.id),
+  createdByUserId: uuid("created_by_user_id").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
@@ -24,7 +16,7 @@ export const familyMemberships = pgTable(
     familyId: uuid("family_id")
       .notNull()
       .references(() => families.id, { onDelete: "cascade" }),
-    userId: uuid("user_id").notNull().references(() => authUsers.id),
+    userId: uuid("user_id").notNull(),
     role: text("role", { enum: ["manager", "member"] }).notNull(),
     status: text("status", { enum: ["active", "invited", "removed"] }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -47,15 +39,13 @@ export const familyInvites = pgTable(
     familyId: uuid("family_id")
       .notNull()
       .references(() => families.id, { onDelete: "cascade" }),
-    invitedByUserId: uuid("invited_by_user_id")
-      .notNull()
-      .references(() => authUsers.id),
+    invitedByUserId: uuid("invited_by_user_id").notNull(),
     email: text("email"),
     tokenHash: text("token_hash").notNull(),
     role: text("role", { enum: ["manager", "member"] }).notNull(),
     status: text("status", { enum: ["pending", "accepted", "revoked", "expired"] }).notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    acceptedByUserId: uuid("accepted_by_user_id").references(() => authUsers.id),
+    acceptedByUserId: uuid("accepted_by_user_id"),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
@@ -74,10 +64,8 @@ export const people = pgTable(
     familyId: uuid("family_id")
       .notNull()
       .references(() => families.id, { onDelete: "cascade" }),
-    linkedUserId: uuid("linked_user_id").references(() => authUsers.id),
-    createdByUserId: uuid("created_by_user_id")
-      .notNull()
-      .references(() => authUsers.id),
+    linkedUserId: uuid("linked_user_id"),
+    createdByUserId: uuid("created_by_user_id").notNull(),
     displayName: text("display_name").notNull(),
     relationshipLabel: text("relationship_label"),
     dateOfBirth: date("date_of_birth"),
@@ -100,9 +88,7 @@ export const bloodPressureReadings = pgTable(
     personId: uuid("person_id")
       .notNull()
       .references(() => people.id, { onDelete: "cascade" }),
-    recordedByUserId: uuid("recorded_by_user_id")
-      .notNull()
-      .references(() => authUsers.id),
+    recordedByUserId: uuid("recorded_by_user_id").notNull(),
     systolic: integer("systolic").notNull(),
     diastolic: integer("diastolic").notNull(),
     pulse: integer("pulse"),
@@ -133,9 +119,7 @@ export const bloodGlucoseReadings = pgTable(
     personId: uuid("person_id")
       .notNull()
       .references(() => people.id, { onDelete: "cascade" }),
-    recordedByUserId: uuid("recorded_by_user_id")
-      .notNull()
-      .references(() => authUsers.id),
+    recordedByUserId: uuid("recorded_by_user_id").notNull(),
     value: numeric("value", { precision: 6, scale: 2 }).notNull(),
     unit: text("unit", { enum: ["mg/dL"] }).notNull(),
     context: text("context", { enum: ["fasting", "before_meal", "after_meal", "bedtime", "random"] }).notNull(),
@@ -155,29 +139,34 @@ export const bloodGlucoseReadings = pgTable(
   ]
 );
 
-export const reminders = pgTable("reminders", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  familyId: uuid("family_id")
-    .notNull()
-    .references(() => families.id, { onDelete: "cascade" }),
-  subjectPersonId: uuid("subject_person_id").references(() => people.id),
-  createdByUserId: uuid("created_by_user_id")
-    .notNull()
-    .references(() => authUsers.id),
-  type: text("type", { enum: ["generic", "blood_glucose", "blood_pressure"] }).notNull(),
-  title: text("title").notNull(),
-  message: text("message").notNull(),
-  scheduleKind: text("schedule_kind", { enum: ["once", "daily", "weekly", "custom_days"] }).notNull(),
-  timeOfDay: time("time_of_day"),
-  timezone: text("timezone").notNull(),
-  daysOfWeek: integer("days_of_week").array(),
-  startsOn: date("starts_on"),
-  endsOn: date("ends_on"),
-  enabled: boolean("enabled").notNull().default(true),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
-});
+export const reminders = pgTable(
+  "reminders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    familyId: uuid("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    subjectPersonId: uuid("subject_person_id").references(() => people.id),
+    createdByUserId: uuid("created_by_user_id").notNull(),
+    type: text("type", { enum: ["generic", "blood_glucose", "blood_pressure"] }).notNull(),
+    title: text("title").notNull(),
+    message: text("message").notNull(),
+    scheduleKind: text("schedule_kind", { enum: ["once", "daily", "weekly", "custom_days"] }).notNull(),
+    timeOfDay: time("time_of_day"),
+    timezone: text("timezone").notNull(),
+    daysOfWeek: integer("days_of_week").array(),
+    startsOn: date("starts_on"),
+    endsOn: date("ends_on"),
+    enabled: boolean("enabled").notNull().default(true),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    check("reminders_type_check", sql`${table.type} in ('generic', 'blood_glucose', 'blood_pressure')`),
+    check("reminders_schedule_kind_check", sql`${table.scheduleKind} in ('once', 'daily', 'weekly', 'custom_days')`)
+  ]
+);
 
 export const reminderRecipients = pgTable(
   "reminder_recipients",
@@ -186,9 +175,7 @@ export const reminderRecipients = pgTable(
     reminderId: uuid("reminder_id")
       .notNull()
       .references(() => reminders.id, { onDelete: "cascade" }),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => authUsers.id),
+    userId: uuid("user_id").notNull(),
     enabled: boolean("enabled").notNull().default(true),
     disabledAt: timestamp("disabled_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
@@ -200,32 +187,37 @@ export const notificationDevices = pgTable(
   "notification_devices",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => authUsers.id),
+    userId: uuid("user_id").notNull(),
     deviceToken: text("device_token").notNull(),
     platform: text("platform", { enum: ["ios"] }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow()
   },
-  (table) => [uniqueIndex("notification_devices_user_token_idx").on(table.userId, table.deviceToken)]
+  (table) => [
+    uniqueIndex("notification_devices_user_token_idx").on(table.userId, table.deviceToken),
+    check("notification_devices_platform_check", sql`${table.platform} = 'ios'`)
+  ]
 );
 
-export const notificationDeliveries = pgTable("notification_deliveries", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  reminderId: uuid("reminder_id")
-    .notNull()
-    .references(() => reminders.id, { onDelete: "cascade" }),
-  recipientUserId: uuid("recipient_user_id")
-    .notNull()
-    .references(() => authUsers.id),
-  status: text("status", { enum: ["pending", "sent", "failed", "opened"] }).notNull(),
-  scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
-  sentAt: timestamp("sent_at", { withTimezone: true }),
-  openedAt: timestamp("opened_at", { withTimezone: true }),
-  error: text("error"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
-});
+export const notificationDeliveries = pgTable(
+  "notification_deliveries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    reminderId: uuid("reminder_id")
+      .notNull()
+      .references(() => reminders.id, { onDelete: "cascade" }),
+    recipientUserId: uuid("recipient_user_id").notNull(),
+    status: text("status", { enum: ["pending", "sent", "failed", "opened"] }).notNull(),
+    scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    openedAt: timestamp("opened_at", { withTimezone: true }),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    check("notification_deliveries_status_check", sql`${table.status} in ('pending', 'sent', 'failed', 'opened')`)
+  ]
+);
 
 export const auditLogs = pgTable(
   "audit_logs",
@@ -234,7 +226,7 @@ export const auditLogs = pgTable(
     familyId: uuid("family_id")
       .notNull()
       .references(() => families.id, { onDelete: "cascade" }),
-    actorUserId: uuid("actor_user_id").references(() => authUsers.id),
+    actorUserId: uuid("actor_user_id"),
     action: text("action").notNull(),
     resourceType: text("resource_type").notNull(),
     resourceId: uuid("resource_id").notNull(),
