@@ -9,7 +9,7 @@ struct FamilyView: View {
                 Section("Family") {
                     if let familyName = viewModel.family.currentFamilyName {
                         LabeledContent("Name", value: familyName)
-                        LabeledContent("Your role", value: viewModel.family.currentFamilyRole ?? "Member")
+                        LabeledContent("Your role", value: viewModel.family.currentFamilyRole?.displayName ?? "Member")
                     } else {
                         TextField("Family name", text: $viewModel.family.familyName)
                         Button("Create Family") {

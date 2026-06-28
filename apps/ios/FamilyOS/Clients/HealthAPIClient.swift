@@ -18,6 +18,12 @@ enum HealthAPIError: LocalizedError {
 }
 
 struct HealthAPIClient {
+    let session: URLSession
+
+    init(session: URLSession = .shared) {
+        self.session = session
+    }
+
     func healthcheck(baseURL: String) async throws -> HealthcheckResponse {
         try await get(path: "healthcheck", baseURL: baseURL, accessToken: nil)
     }
@@ -49,7 +55,7 @@ struct HealthAPIClient {
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.setValue("application/json", forHTTPHeaderField: "accept")
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "authorization")
-        request.httpBody = try JSONEncoder().encode(["name": name])
+        request.httpBody = try JSONEncoder().encode(CreateFamilyRequest(name: name))
 
         return try await decodeEnvelope(FamilyResponse.self, from: request)
     }
@@ -59,7 +65,7 @@ struct HealthAPIClient {
             path: "invites",
             baseURL: baseURL,
             accessToken: accessToken,
-            body: ["role": "member"]
+            body: CreateInviteRequest(role: .member)
         )
     }
 
@@ -72,7 +78,7 @@ struct HealthAPIClient {
             path: "invites/\(encodedToken)/accept",
             baseURL: baseURL,
             accessToken: accessToken,
-            body: [String: String]()
+            body: EmptyRequest()
         )
     }
 
@@ -86,15 +92,14 @@ struct HealthAPIClient {
         displayName: String,
         relationshipLabel: String
     ) async throws -> HealthProfile {
-        var body = ["displayName": displayName]
-        if !relationshipLabel.isEmpty {
-            body["relationshipLabel"] = relationshipLabel
-        }
         return try await post(
             path: "people",
             baseURL: baseURL,
             accessToken: accessToken,
-            body: body
+            body: CreateProfileRequest(
+                displayName: displayName,
+                relationshipLabel: relationshipLabel.isEmpty ? nil : relationshipLabel
+            )
         )
     }
 
@@ -111,15 +116,13 @@ struct HealthAPIClient {
         diastolic: Int,
         pulse: Int?
     ) async throws -> BloodPressureReading {
-        var body: [String: AnyEncodable] = [
-            "personId": AnyEncodable(personId),
-            "systolic": AnyEncodable(systolic),
-            "diastolic": AnyEncodable(diastolic),
-            "measuredAt": AnyEncodable(ISO8601DateFormatter().string(from: Date()))
-        ]
-        if let pulse {
-            body["pulse"] = AnyEncodable(pulse)
-        }
+        let body = CreateBloodPressureRequest(
+            personId: personId,
+            systolic: systolic,
+            diastolic: diastolic,
+            pulse: pulse,
+            measuredAt: ISO8601DateFormatter().string(from: Date())
+        )
         return try await post(path: "readings/blood-pressure", baseURL: baseURL, accessToken: accessToken, body: body)
     }
 
@@ -133,15 +136,14 @@ struct HealthAPIClient {
         accessToken: String,
         personId: String,
         value: Double,
-        context: String
+        context: GlucoseContext
     ) async throws -> BloodGlucoseReading {
-        let body: [String: AnyEncodable] = [
-            "personId": AnyEncodable(personId),
-            "value": AnyEncodable(value),
-            "unit": AnyEncodable("mg/dL"),
-            "context": AnyEncodable(context),
-            "measuredAt": AnyEncodable(ISO8601DateFormatter().string(from: Date()))
-        ]
+        let body = CreateBloodGlucoseRequest(
+            personId: personId,
+            value: value,
+            context: context,
+            measuredAt: ISO8601DateFormatter().string(from: Date())
+        )
         return try await post(path: "readings/blood-glucose", baseURL: baseURL, accessToken: accessToken, body: body)
     }
 
@@ -184,7 +186,7 @@ struct HealthAPIClient {
     }
 
     private func decodeEnvelope<T: Decodable>(_ type: T.Type, from request: URLRequest) async throws -> T {
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw HealthAPIError.badStatus(-1, nil)
         }
@@ -209,4 +211,35 @@ private struct APIErrorEnvelope: Decodable {
 
 private struct APIErrorBody: Decodable {
     let message: String
+}
+
+private struct EmptyRequest: Encodable {}
+
+private struct CreateFamilyRequest: Encodable {
+    let name: String
+}
+
+private struct CreateInviteRequest: Encodable {
+    let role: FamilyRole
+}
+
+private struct CreateProfileRequest: Encodable {
+    let displayName: String
+    let relationshipLabel: String?
+}
+
+private struct CreateBloodPressureRequest: Encodable {
+    let personId: String
+    let systolic: Int
+    let diastolic: Int
+    let pulse: Int?
+    let measuredAt: String
+}
+
+private struct CreateBloodGlucoseRequest: Encodable {
+    let personId: String
+    let value: Double
+    let unit = "mg/dL"
+    let context: GlucoseContext
+    let measuredAt: String
 }

@@ -6,7 +6,7 @@ final class HealthFamilyViewModel: ObservableObject {
     @Published var inviteToken = ""
     @Published var lastCreatedInviteToken: String?
     @Published var currentFamilyName: String?
-    @Published var currentFamilyRole: String?
+    @Published var currentFamilyRole: FamilyRole?
 
     func clear() {
         familyName = ""

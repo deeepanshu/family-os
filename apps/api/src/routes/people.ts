@@ -2,7 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
 import { requireAuth, type AppVariables } from "../auth";
-import type { FamilyRepository } from "../repositories/families";
+import type { ProfileStore } from "../repositories/contracts";
 
 const profileBody = z.object({
   displayName: z.string().trim().min(1).max(120),
@@ -25,7 +25,7 @@ const idParam = z.object({
   id: z.string().uuid()
 });
 
-export function createPeopleRoutes(repository: FamilyRepository) {
+export function createPeopleRoutes(repository: ProfileStore) {
   const people = new Hono<{ Variables: AppVariables }>();
 
   people.use("*", requireAuth());

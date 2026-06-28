@@ -2,7 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
 import { requireAuth, type AppVariables } from "../auth";
-import type { FamilyRepository } from "../repositories/families";
+import type { ReadingStore } from "../repositories/contracts";
 
 const timestamp = z.string().datetime({ offset: true });
 
@@ -23,7 +23,7 @@ const query = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50)
 });
 
-export function createBloodPressureRoutes(repository: FamilyRepository) {
+export function createBloodPressureRoutes(repository: ReadingStore) {
   const readings = new Hono<{ Variables: AppVariables }>();
   readings.use("*", requireAuth());
 

@@ -14,16 +14,23 @@ import { createReminderRoutes } from "./routes/reminders";
 import { createDeviceRoutes } from "./routes/devices";
 import { createAuditLogRoutes } from "./routes/auditLogs";
 import { corsMiddleware, requestLoggingMiddleware, writeRateLimitMiddleware } from "./middleware/hardening";
-import { createDependencies } from "./dependencies";
+import { createDependencies, repositoriesFromFamilyRepository } from "./dependencies";
+import type { AppRepositories } from "./repositories/contracts";
 
 export type AppOptions = {
   config?: Partial<AppConfig>;
   familyRepository?: FamilyRepository;
+  repositories?: AppRepositories;
 };
 
 export function createApp(options: AppOptions = {}) {
   const config = options.config ? loadConfig(options.config) : loadConfig();
-  const familyRepository = options.familyRepository ?? createDependencies(config).familyRepository;
+  const dependencies = options.repositories
+    ? { repositories: options.repositories }
+    : options.familyRepository
+      ? { repositories: repositoriesFromFamilyRepository(options.familyRepository) }
+      : createDependencies(config);
+  const repositories = dependencies.repositories;
   const app = new Hono<{ Variables: AppVariables }>();
   const health = new Hono<{ Variables: AppVariables }>();
 
@@ -49,14 +56,14 @@ export function createApp(options: AppOptions = {}) {
     return c.json({ data: body });
   });
 
-  health.route("/families", createFamilyRoutes(familyRepository));
-  health.route("/invites", createInviteRoutes(familyRepository));
-  health.route("/people", createPeopleRoutes(familyRepository));
-  health.route("/readings/blood-pressure", createBloodPressureRoutes(familyRepository));
-  health.route("/readings/blood-glucose", createBloodGlucoseRoutes(familyRepository));
-  health.route("/reminders", createReminderRoutes(familyRepository));
-  health.route("/devices", createDeviceRoutes(familyRepository));
-  health.route("/audit-logs", createAuditLogRoutes(familyRepository));
+  health.route("/families", createFamilyRoutes(repositories.families));
+  health.route("/invites", createInviteRoutes(repositories.invites));
+  health.route("/people", createPeopleRoutes(repositories.profiles));
+  health.route("/readings/blood-pressure", createBloodPressureRoutes(repositories.readings));
+  health.route("/readings/blood-glucose", createBloodGlucoseRoutes(repositories.readings));
+  health.route("/reminders", createReminderRoutes(repositories.reminders));
+  health.route("/devices", createDeviceRoutes(repositories.devices));
+  health.route("/audit-logs", createAuditLogRoutes(repositories.auditLogs));
 
   app.route(HEALTH_API_PREFIX, health);
 

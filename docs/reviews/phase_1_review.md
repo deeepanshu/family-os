@@ -16,15 +16,16 @@ Fixed after this review:
 - Added `updated_at` triggers.
 - Added request IDs, structured request logging, CORS, and write rate limiting.
 - iOS `HealthAPIClient` now parses server error bodies.
+- Public backend route injection now uses smaller domain interfaces instead of one all-purpose repository dependency.
+- iOS bootstrap now has a dependency container, typed health enums, and typed request bodies; `AnyEncodable` was removed.
+- Migration ownership is documented: SQL migrations are the Phase 1 source of truth and the Drizzle schema is the required mirror.
 
 Still remaining:
 
 - Add production infra files: Dockerfile/systemd service, Cloudflare tunnel config, reverse proxy routing, and backup script.
-- Split the public backend repository interface itself into smaller domain interfaces. The implementation is split, but route injection still uses one `FamilyRepository` facade.
-- Improve iOS architecture with dependency injection, typed Swift enums, and typed request bodies instead of `AnyEncodable`.
 - Add CI for API typecheck/tests and iOS build.
 - Document production deployment and restore runbook.
-- Decide whether to move from hand-written SQL plus Drizzle schema mirror to a single migration source of truth.
+- Further split the in-memory repository implementation itself if it becomes a frequent edit point.
 
 ---
 

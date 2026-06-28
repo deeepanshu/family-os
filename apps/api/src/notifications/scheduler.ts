@@ -1,4 +1,4 @@
-import type { FamilyRepository } from "../repositories/families";
+import type { NotificationDeliveryStore } from "../repositories/contracts";
 
 export type PushPayload = {
   token: string;
@@ -11,7 +11,7 @@ export interface PushSender {
   send(payload: PushPayload): Promise<void>;
 }
 
-export async function sendDueReminderPushes(repository: FamilyRepository, sender: PushSender, now = new Date()) {
+export async function sendDueReminderPushes(repository: NotificationDeliveryStore, sender: PushSender, now = new Date()) {
   const due = await repository.listDueReminderDeliveries(now);
   for (const item of due) {
     try {

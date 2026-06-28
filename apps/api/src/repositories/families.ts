@@ -21,6 +21,16 @@ import type {
   PublicInviteResponse
 } from "@family-os/shared";
 import { HttpError } from "../errors";
+import type {
+  AuditLogStore,
+  DeviceStore,
+  FamilyStore,
+  InviteStore,
+  NotificationDeliveryStore,
+  ProfileStore,
+  ReadingStore,
+  ReminderStore
+} from "./contracts";
 
 export type CreateFamilyInput = {
   name: string;
@@ -117,40 +127,15 @@ export type AuditInput = {
   metadata?: Record<string, unknown>;
 };
 
-export interface FamilyRepository {
-  createFamily(input: CreateFamilyInput): Promise<CurrentFamilyResponse>;
-  getCurrentFamily(userId: string): Promise<CurrentFamilyResponse>;
-  createInvite(input: CreateInviteInput): Promise<CreateInviteResponse>;
-  getInviteByToken(token: string): Promise<PublicInviteResponse>;
-  acceptInvite(token: string, userId: string, userEmail?: string): Promise<CurrentFamilyResponse>;
-  listProfiles(actorUserId: string): Promise<HealthProfile[]>;
-  getProfile(actorUserId: string, profileId: string): Promise<HealthProfile>;
-  createProfile(input: CreateProfileInput): Promise<HealthProfile>;
-  updateProfile(actorUserId: string, profileId: string, input: UpdateProfileInput): Promise<HealthProfile>;
-  deleteProfile(actorUserId: string, profileId: string): Promise<void>;
-  createBloodPressure(input: CreateBloodPressureInput): Promise<BloodPressureReading>;
-  listBloodPressure(actorUserId: string, personId?: string, limit?: number): Promise<BloodPressureReading[]>;
-  getBloodPressure(actorUserId: string, readingId: string): Promise<BloodPressureReading>;
-  updateBloodPressure(actorUserId: string, readingId: string, input: UpdateBloodPressureInput): Promise<BloodPressureReading>;
-  deleteBloodPressure(actorUserId: string, readingId: string): Promise<void>;
-  createBloodGlucose(input: CreateBloodGlucoseInput): Promise<BloodGlucoseReading>;
-  listBloodGlucose(actorUserId: string, personId?: string, limit?: number): Promise<BloodGlucoseReading[]>;
-  getBloodGlucose(actorUserId: string, readingId: string): Promise<BloodGlucoseReading>;
-  updateBloodGlucose(actorUserId: string, readingId: string, input: UpdateBloodGlucoseInput): Promise<BloodGlucoseReading>;
-  deleteBloodGlucose(actorUserId: string, readingId: string): Promise<void>;
-  createReminder(input: CreateReminderInput): Promise<Reminder>;
-  listReminders(actorUserId: string): Promise<Reminder[]>;
-  getReminder(actorUserId: string, reminderId: string): Promise<Reminder>;
-  updateReminder(actorUserId: string, reminderId: string, input: UpdateReminderInput): Promise<Reminder>;
-  deleteReminder(actorUserId: string, reminderId: string): Promise<void>;
-  disableReminderForSelf(actorUserId: string, reminderId: string): Promise<ReminderRecipient>;
-  registerDevice(input: RegisterDeviceInput): Promise<NotificationDevice>;
-  deleteDevice(actorUserId: string, deviceId: string): Promise<void>;
-  listDueReminderDeliveries(now: Date): Promise<Array<{ reminder: Reminder; recipient: ReminderRecipient; devices: NotificationDevice[]; delivery: NotificationDelivery }>>;
-  markDeliverySent(deliveryId: string): Promise<void>;
-  markDeliveryFailed(deliveryId: string, error: string): Promise<void>;
-  listAuditLogs(actorUserId: string, limit?: number): Promise<AuditLog[]>;
-}
+export interface FamilyRepository
+  extends FamilyStore,
+    InviteStore,
+    ProfileStore,
+    ReadingStore,
+    ReminderStore,
+    DeviceStore,
+    NotificationDeliveryStore,
+    AuditLogStore {}
 
 export class InMemoryFamilyRepository implements FamilyRepository {
   private readonly families = new Map<string, Family>();

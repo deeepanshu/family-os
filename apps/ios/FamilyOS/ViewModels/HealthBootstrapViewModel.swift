@@ -12,16 +12,20 @@ final class HealthBootstrapViewModel: ObservableObject {
     @Published var statusMessage = "Online-only Phase 1 bootstrap is ready."
     @Published var isError = false
 
-    let client = HealthAPIClient()
-    let authClient = SupabaseAuthClient()
-    let keychain = KeychainStore()
-    let defaults = UserDefaults.standard
+    let client: HealthAPIClient
+    let authClient: SupabaseAuthClient
+    let keychain: KeychainStore
+    let defaults: UserDefaults
 
     private var cancellables: Set<AnyCancellable> = []
 
-    init() {
-        let environment = AppEnvironment.current
-        connection = HealthConnectionViewModel(defaults: defaults, environment: environment)
+    init(dependencies: HealthBootstrapDependencies = .live) {
+        client = dependencies.healthClient
+        authClient = dependencies.authClient
+        keychain = dependencies.keychain
+        defaults = dependencies.defaults
+
+        connection = HealthConnectionViewModel(defaults: defaults, environment: dependencies.environment)
         auth = HealthAuthViewModel(defaults: defaults, keychain: keychain)
         family = HealthFamilyViewModel()
         profiles = HealthProfilesViewModel()

@@ -2,7 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
 import { requireAuth, type AppVariables } from "../auth";
-import type { FamilyRepository } from "../repositories/families";
+import type { ReminderStore } from "../repositories/contracts";
 
 const body = z.object({
   subjectPersonId: z.string().uuid().optional(),
@@ -21,7 +21,7 @@ const body = z.object({
 const updateBody = body.partial().extend({ enabled: z.boolean().optional() });
 const idParam = z.object({ id: z.string().uuid() });
 
-export function createReminderRoutes(repository: FamilyRepository) {
+export function createReminderRoutes(repository: ReminderStore) {
   const reminders = new Hono<{ Variables: AppVariables }>();
   reminders.use("*", requireAuth());
 

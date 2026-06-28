@@ -2,13 +2,13 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
 import { requireAuth, type AppVariables } from "../auth";
-import type { FamilyRepository } from "../repositories/families";
+import type { FamilyStore } from "../repositories/contracts";
 
 const createFamilySchema = z.object({
   name: z.string().trim().min(1).max(120)
 });
 
-export function createFamilyRoutes(repository: FamilyRepository) {
+export function createFamilyRoutes(repository: FamilyStore) {
   const families = new Hono<{ Variables: AppVariables }>();
 
   families.use("*", requireAuth());

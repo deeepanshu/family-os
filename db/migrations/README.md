@@ -2,6 +2,18 @@
 
 Drizzle/Supabase migration files live here.
 
+## Source of Truth
+
+For Phase 1, the SQL files in this directory are the migration source of truth.
+`db/schema/health.ts` is the TypeScript/Drizzle mirror used by backend code and
+schema review, but it is not the migration generator yet. Any schema change must
+update both the SQL migration and the Drizzle mirror in the same commit.
+
+This keeps local Docker Postgres and Supabase release Postgres on the exact same
+DDL path while avoiding a partial Drizzle Kit migration workflow. Revisit this
+decision only when the team is ready to make Drizzle Kit the single migration
+generator and remove hand-maintained duplicate DDL.
+
 For plain local Postgres, run `npm run db:migrate:local`. That applies
 `db/local/0000_auth_stub.sql` first so Supabase-specific references to
 `auth.users`, `auth.uid()`, and `gen_random_uuid()` exist outside Supabase.

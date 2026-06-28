@@ -19,7 +19,7 @@ extension HealthBootstrapViewModel {
             let response = try await client.createFamily(baseURL: connection.baseURL, accessToken: auth.accessToken, name: trimmedName)
             family.currentFamilyName = response.family.name
             family.currentFamilyRole = response.membership.role
-            return "Created \(response.family.name); you are \(response.membership.role)."
+            return "Created \(response.family.name); you are \(response.membership.role.displayName)."
         }
     }
 
@@ -40,7 +40,7 @@ extension HealthBootstrapViewModel {
             )
             family.currentFamilyName = response.family.name
             family.currentFamilyRole = response.membership.role
-            return "Joined \(response.family.name) as \(response.membership.role)."
+            return "Joined \(response.family.name) as \(response.membership.role.displayName)."
         }
     }
 }

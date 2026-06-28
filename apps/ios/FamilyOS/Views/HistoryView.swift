@@ -33,7 +33,7 @@ struct HistoryView: View {
                         ForEach(viewModel.readings.bloodGlucoseReadings) { reading in
                             ReadingRow(
                                 title: "\(String(format: "%.0f", reading.value)) mg/dL",
-                                detail: reading.context.replacingOccurrences(of: "_", with: " ").capitalized
+                                detail: reading.context.displayName
                             )
                         }
                     }

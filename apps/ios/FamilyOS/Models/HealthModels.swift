@@ -24,8 +24,28 @@ struct Family: Decodable {
 }
 
 struct FamilyMembership: Decodable {
-    let role: String
-    let status: String
+    let role: FamilyRole
+    let status: MembershipStatus
+}
+
+enum FamilyRole: String, Codable {
+    case manager
+    case member
+
+    var displayName: String {
+        switch self {
+        case .manager:
+            return "Manager"
+        case .member:
+            return "Member"
+        }
+    }
+}
+
+enum MembershipStatus: String, Codable {
+    case active
+    case invited
+    case removed
 }
 
 struct CreateInviteResponse: Decodable {
@@ -48,5 +68,30 @@ struct BloodPressureReading: Decodable, Identifiable {
 struct BloodGlucoseReading: Decodable, Identifiable {
     let id: String
     let value: Double
-    let context: String
+    let context: GlucoseContext
+}
+
+enum GlucoseContext: String, Codable, CaseIterable, Identifiable {
+    case fasting
+    case beforeMeal = "before_meal"
+    case afterMeal = "after_meal"
+    case bedtime
+    case random
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .fasting:
+            return "Fasting"
+        case .beforeMeal:
+            return "Before meal"
+        case .afterMeal:
+            return "After meal"
+        case .bedtime:
+            return "Bedtime"
+        case .random:
+            return "Random"
+        }
+    }
 }

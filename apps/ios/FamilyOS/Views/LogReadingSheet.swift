@@ -27,11 +27,9 @@ struct LogReadingSheet: View {
                         TextField("Blood sugar mg/dL", text: $viewModel.readings.glucoseValue)
                             .keyboardType(.decimalPad)
                         Picker("Context", selection: $viewModel.readings.glucoseContext) {
-                            Text("Fasting").tag("fasting")
-                            Text("Before meal").tag("before_meal")
-                            Text("After meal").tag("after_meal")
-                            Text("Bedtime").tag("bedtime")
-                            Text("Random").tag("random")
+                            ForEach(GlucoseContext.allCases) { context in
+                                Text(context.displayName).tag(context)
+                            }
                         }
                     }
                 }

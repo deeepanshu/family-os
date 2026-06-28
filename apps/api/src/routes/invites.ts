@@ -2,7 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
 import { requireAuth, type AppVariables } from "../auth";
-import type { FamilyRepository } from "../repositories/families";
+import type { InviteStore } from "../repositories/contracts";
 
 const createInviteSchema = z.object({
   email: z.string().email().optional(),
@@ -13,7 +13,7 @@ const tokenSchema = z.object({
   token: z.string().min(16).max(256)
 });
 
-export function createInviteRoutes(repository: FamilyRepository) {
+export function createInviteRoutes(repository: InviteStore) {
   const invites = new Hono<{ Variables: AppVariables }>();
 
   invites.post("/", requireAuth(), zValidator("json", createInviteSchema), async (c) => {
