@@ -81,6 +81,7 @@ describe("health API bootstrap", () => {
       config: {
         NODE_ENV: "development",
         PORT: 3001,
+        HEALTH_API_REPOSITORY: "memory",
         HEALTH_API_ENABLE_DEV_AUTH: true,
         HEALTH_API_DEV_AUTH_USER_ID: testUserId,
         HEALTH_API_RATE_LIMIT_MAX_WRITES: 1
@@ -98,6 +99,7 @@ describe("health API bootstrap", () => {
       config: {
         NODE_ENV: "development",
         PORT: 3001,
+        HEALTH_API_REPOSITORY: "memory",
         HEALTH_API_ENABLE_DEV_AUTH: true,
         HEALTH_API_DEV_AUTH_USER_ID: testUserId,
         HEALTH_API_RATE_LIMIT_MAX_WRITES: 1
@@ -135,6 +137,7 @@ describe("health API bootstrap", () => {
       config: {
         NODE_ENV: "development",
         PORT: 3001,
+        HEALTH_API_REPOSITORY: "memory",
         HEALTH_API_ENABLE_DEV_AUTH: true,
         HEALTH_API_DEV_AUTH_USER_ID: testUserId,
         HEALTH_API_RATE_LIMIT_MAX_WRITES: 1
@@ -261,6 +264,7 @@ describe("health API bootstrap", () => {
       config: {
         NODE_ENV: "development",
         PORT: 3001,
+        HEALTH_API_REPOSITORY: "memory",
         HEALTH_API_ENABLE_DEV_AUTH: true,
         HEALTH_API_DEV_AUTH_USER_ID: testUserId
       }
@@ -283,6 +287,7 @@ describe("health API bootstrap", () => {
       config: {
         NODE_ENV: "development",
         PORT: 3001,
+        HEALTH_API_REPOSITORY: "memory",
         HEALTH_API_ENABLE_DEV_AUTH: false,
         HEALTH_API_DEV_AUTH_USER_ID: testUserId,
         SUPABASE_JWT_SECRET: jwtSecret
@@ -301,6 +306,7 @@ describe("health API bootstrap", () => {
       config: {
         NODE_ENV: "production",
         PORT: 3001,
+        DATABASE_URL: "postgres://example",
         HEALTH_API_ENABLE_DEV_AUTH: true,
         HEALTH_API_DEV_AUTH_USER_ID: testUserId,
         SUPABASE_JWT_SECRET: jwtSecret,

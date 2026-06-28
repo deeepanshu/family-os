@@ -4,7 +4,7 @@ import type { AppConfig } from "./config";
 import { loadConfig } from "./config";
 import { HttpError, jsonError } from "./errors";
 import { requireAuth, type AppVariables } from "./auth";
-import { InMemoryFamilyRepository, type FamilyRepository } from "./repositories/families";
+import type { FamilyRepository } from "./repositories/families";
 import { createFamilyRoutes } from "./routes/families";
 import { createInviteRoutes } from "./routes/invites";
 import { createPeopleRoutes } from "./routes/people";
@@ -14,6 +14,7 @@ import { createReminderRoutes } from "./routes/reminders";
 import { createDeviceRoutes } from "./routes/devices";
 import { createAuditLogRoutes } from "./routes/auditLogs";
 import { corsMiddleware, requestLoggingMiddleware, writeRateLimitMiddleware } from "./middleware/hardening";
+import { createDependencies } from "./dependencies";
 
 export type AppOptions = {
   config?: Partial<AppConfig>;
@@ -22,10 +23,7 @@ export type AppOptions = {
 
 export function createApp(options: AppOptions = {}) {
   const config = options.config ? loadConfig(options.config) : loadConfig();
-  if (config.NODE_ENV === "production" && !options.familyRepository) {
-    throw new Error("FamilyRepository must be configured in production.");
-  }
-  const familyRepository = options.familyRepository ?? new InMemoryFamilyRepository();
+  const familyRepository = options.familyRepository ?? createDependencies(config).familyRepository;
   const app = new Hono<{ Variables: AppVariables }>();
   const health = new Hono<{ Variables: AppVariables }>();
 

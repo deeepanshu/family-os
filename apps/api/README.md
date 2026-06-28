@@ -29,6 +29,19 @@ Run the API with Bun:
 npm run api:dev
 ```
 
+Local API runtime uses Postgres by default. Start the local database and apply
+migrations before running the API:
+
+```sh
+npm run db:up
+npm run db:migrate:local
+```
+
+Use `DATABASE_URL=postgres://family_os:family_os@localhost:5432/family_os` for
+local Docker Postgres. Release should point `DATABASE_URL` at Supabase Postgres
+and set `HEALTH_API_SYNC_LOCAL_AUTH_USERS=false`; local can keep it `true`
+because the migration helper installs a lightweight `auth.users` stub.
+
 The Health facet is mounted at:
 
 ```text
@@ -154,6 +167,8 @@ For local smoke tests only, set both `HEALTH_API_ENABLE_DEV_AUTH=true` and
 
 Runtime hardening knobs:
 
+- `HEALTH_API_REPOSITORY` defaults to `memory` for tests and `postgres` otherwise. Production rejects `memory`.
+- `HEALTH_API_SYNC_LOCAL_AUTH_USERS` defaults to `true` for non-production Postgres runs and `false` in production.
 - `HEALTH_API_CORS_ORIGIN` defaults to `*` outside production for local app/API smoke tests. Production must set an explicit origin.
 - `HEALTH_API_RATE_LIMIT_WINDOW_MS` defaults to `60000`.
 - `HEALTH_API_RATE_LIMIT_MAX_WRITES` defaults to `120` writes per window per bearer token, falling back to IP when no bearer token is present.
