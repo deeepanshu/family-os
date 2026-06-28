@@ -17,7 +17,17 @@ describe("configuration", () => {
     ).toMatchObject({
       NODE_ENV: "development",
       PORT: 3001,
-      HEALTH_API_ENABLE_DEV_AUTH: false
+      HEALTH_API_ENABLE_DEV_AUTH: false,
+      HEALTH_API_CORS_ORIGIN: "*",
+      HEALTH_API_RATE_LIMIT_WINDOW_MS: 60_000,
+      HEALTH_API_RATE_LIMIT_MAX_WRITES: 120,
+      HEALTH_API_RATE_LIMIT_MAX_BUCKETS: 10_000
     });
+  });
+
+  it("requires an explicit CORS origin in production", () => {
+    expect(() => loadConfig({ NODE_ENV: "production" })).toThrow(
+      "HEALTH_API_CORS_ORIGIN must be configured in production."
+    );
   });
 });

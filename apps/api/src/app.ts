@@ -13,14 +13,15 @@ import { createBloodGlucoseRoutes } from "./routes/bloodGlucose";
 import { createReminderRoutes } from "./routes/reminders";
 import { createDeviceRoutes } from "./routes/devices";
 import { createAuditLogRoutes } from "./routes/auditLogs";
+import { corsMiddleware, requestLoggingMiddleware, writeRateLimitMiddleware } from "./middleware/hardening";
 
 export type AppOptions = {
-  config?: AppConfig;
+  config?: Partial<AppConfig>;
   familyRepository?: FamilyRepository;
 };
 
 export function createApp(options: AppOptions = {}) {
-  const config = options.config ?? loadConfig();
+  const config = options.config ? loadConfig(options.config) : loadConfig();
   if (config.NODE_ENV === "production" && !options.familyRepository) {
     throw new Error("FamilyRepository must be configured in production.");
   }
@@ -32,6 +33,9 @@ export function createApp(options: AppOptions = {}) {
     c.set("config", config);
     await next();
   });
+  app.use("*", requestLoggingMiddleware());
+  app.use(`${HEALTH_API_PREFIX}/*`, corsMiddleware(config));
+  app.use(`${HEALTH_API_PREFIX}/*`, writeRateLimitMiddleware(config));
 
   health.get("/healthcheck", (c) => {
     const body: HealthcheckResponse = {

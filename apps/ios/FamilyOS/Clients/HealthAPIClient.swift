@@ -3,7 +3,7 @@ import Foundation
 enum HealthAPIError: LocalizedError {
     case invalidURL
     case missingToken
-    case badStatus(Int)
+    case badStatus(Int, String?)
 
     var errorDescription: String? {
         switch self {
@@ -11,8 +11,8 @@ enum HealthAPIError: LocalizedError {
             return "The Health API base URL is invalid."
         case .missingToken:
             return "Paste a Supabase access token first."
-        case .badStatus(let status):
-            return "Health API returned HTTP \(status)."
+        case .badStatus(let status, let message):
+            return message.map { "Health API returned HTTP \(status): \($0)" } ?? "Health API returned HTTP \(status)."
         }
     }
 }
@@ -51,15 +51,7 @@ struct HealthAPIClient {
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "authorization")
         request.httpBody = try JSONEncoder().encode(["name": name])
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw HealthAPIError.badStatus(-1)
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            throw HealthAPIError.badStatus(http.statusCode)
-        }
-
-        return try JSONDecoder().decode(APIEnvelope<FamilyResponse>.self, from: data).data
+        return try await decodeEnvelope(FamilyResponse.self, from: request)
     }
 
     func createInvite(baseURL: String, accessToken: String) async throws -> CreateInviteResponse {
@@ -173,15 +165,7 @@ struct HealthAPIClient {
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "authorization")
         request.httpBody = try JSONEncoder().encode(body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw HealthAPIError.badStatus(-1)
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            throw HealthAPIError.badStatus(http.statusCode)
-        }
-
-        return try JSONDecoder().decode(APIEnvelope<T>.self, from: data).data
+        return try await decodeEnvelope(T.self, from: request)
     }
 
     private func get<T: Decodable>(path: String, baseURL: String, accessToken: String?) async throws -> T {
@@ -196,12 +180,17 @@ struct HealthAPIClient {
             request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "authorization")
         }
 
+        return try await decodeEnvelope(T.self, from: request)
+    }
+
+    private func decodeEnvelope<T: Decodable>(_ type: T.Type, from request: URLRequest) async throws -> T {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
-            throw HealthAPIError.badStatus(-1)
+            throw HealthAPIError.badStatus(-1, nil)
         }
         guard (200..<300).contains(http.statusCode) else {
-            throw HealthAPIError.badStatus(http.statusCode)
+            let error = try? JSONDecoder().decode(APIErrorEnvelope.self, from: data)
+            throw HealthAPIError.badStatus(http.statusCode, error?.error.message)
         }
 
         return try JSONDecoder().decode(APIEnvelope<T>.self, from: data).data
@@ -212,4 +201,12 @@ struct HealthAPIClient {
         let trimmedPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         return URL(string: "\(trimmedBase)/\(trimmedPath)")
     }
+}
+
+private struct APIErrorEnvelope: Decodable {
+    let error: APIErrorBody
+}
+
+private struct APIErrorBody: Decodable {
+    let message: String
 }

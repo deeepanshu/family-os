@@ -151,3 +151,10 @@ curl -X POST \
 For local smoke tests only, set both `HEALTH_API_ENABLE_DEV_AUTH=true` and
 `HEALTH_API_DEV_AUTH_USER_ID=<uuid>`, then call `/me` with
 `Authorization: Bearer dev-token`. This bypass is rejected in production.
+
+Runtime hardening knobs:
+
+- `HEALTH_API_CORS_ORIGIN` defaults to `*` outside production for local app/API smoke tests. Production must set an explicit origin.
+- `HEALTH_API_RATE_LIMIT_WINDOW_MS` defaults to `60000`.
+- `HEALTH_API_RATE_LIMIT_MAX_WRITES` defaults to `120` writes per window per bearer token, falling back to IP when no bearer token is present.
+- `HEALTH_API_RATE_LIMIT_MAX_BUCKETS` defaults to `10000` in-memory buckets per API process. The Phase 1 limiter is process-local; multi-process deployments need a shared limiter.
