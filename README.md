@@ -52,6 +52,7 @@ developer sheet.
 - Blood sugar readings.
 - Custom reminders.
 - Push notifications.
+- HealthKit-only import for Apple Health readings.
 
 See:
 

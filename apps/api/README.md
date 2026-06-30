@@ -148,6 +148,21 @@ curl -H "Authorization: Bearer <supabase_access_token>" \
   "http://localhost:3001/health/v1/readings/blood-glucose?personId=<profile_id>"
 ```
 
+Link the signed-in user's own profile for HealthKit import:
+
+```sh
+curl -X POST \
+  -H "Authorization: Bearer <supabase_access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"personId":"<own_profile_id>"}' \
+  http://localhost:3001/health/v1/healthkit/link-profile
+```
+
+Enable HealthKit categories and import samples through
+`/health/v1/healthkit/sync/settings` and
+`/health/v1/healthkit/samples/batch`. Family OS imports only from Apple Health;
+third-party device apps should sync into HealthKit first.
+
 Create a reminder:
 
 ```sh

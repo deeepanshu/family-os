@@ -7,6 +7,7 @@ import type {
   FamilyInvite,
   FamilyMembership,
   HealthProfile,
+  HealthMetricDailySummary,
   NotificationDelivery,
   NotificationDevice,
   Reminder,
@@ -74,6 +75,7 @@ export function mapProfile(row: Row): HealthProfile {
   return {
     id: row.id,
     familyId: row.family_id,
+    linkedUserId: row.linked_user_id ?? undefined,
     displayName: row.display_name,
     relationshipLabel: row.relationship_label ?? undefined,
     dateOfBirth: toDateString(row.date_of_birth),
@@ -95,6 +97,7 @@ export function mapBloodPressure(row: Row): BloodPressureReading {
     measuredAt: toIso(row.measured_at),
     context: row.context ?? undefined,
     notes: row.notes ?? undefined,
+    source: row.source ?? "manual",
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at)
   };
@@ -111,7 +114,23 @@ export function mapBloodGlucose(row: Row): BloodGlucoseReading {
     context: row.context,
     measuredAt: toIso(row.measured_at),
     notes: row.notes ?? undefined,
+    source: row.source ?? "manual",
     createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at)
+  };
+}
+
+export function mapHealthMetricDailySummary(row: Row): HealthMetricDailySummary {
+  return {
+    id: row.id,
+    familyId: row.family_id,
+    personId: row.person_id,
+    metricType: row.metric_type,
+    date: toDateString(row.date)!,
+    value: Number(row.value),
+    unit: row.unit,
+    source: "healthkit",
+    sampleCount: row.sample_count,
     updatedAt: toIso(row.updated_at)
   };
 }

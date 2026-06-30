@@ -311,6 +311,44 @@ created_at timestamptz
 updated_at timestamptz
 ```
 
+### HealthKit import
+
+Family OS imports external health data only through Apple HealthKit. Third-party
+apps are expected to write to HealthKit first; Family OS does not integrate with
+vendor APIs directly.
+
+HealthKit import is read-only in the iOS app. Imported samples attach only to
+the signed-in user's linked health profile. Imported BP and blood glucose appear
+in the same reading histories as manual entries with `source = healthkit`.
+
+Tables:
+
+```text
+healthkit_sync_settings
+healthkit_sync_runs
+healthkit_samples
+health_metric_daily_summaries
+```
+
+Initial HealthKit metrics:
+
+```text
+steps
+walking_distance
+sleep
+weight
+blood_pressure
+blood_glucose
+```
+
+Sync behavior:
+
+- First sync backfills 90 days.
+- Sync runs manually and on app foreground.
+- Raw samples are deduped by HealthKit sample key.
+- Daily summaries are rebuilt from raw samples for dashboard/history queries.
+- No HealthKit values are written to application logs.
+
 Suggested validation:
 
 ```text

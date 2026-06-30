@@ -8,11 +8,13 @@ final class HealthBootstrapViewModel: ObservableObject {
     var family: HealthFamilyViewModel
     var profiles: HealthProfilesViewModel
     var readings: HealthReadingsViewModel
+    var healthKit: HealthKitSyncStateViewModel
 
     @Published var statusMessage = "Online-only Phase 1 bootstrap is ready."
     @Published var isError = false
 
     let client: HealthAPIClient
+    let healthKitClient: HealthKitClient
     let authClient: SupabaseAuthClient
     let keychain: KeychainStore
     let defaults: UserDefaults
@@ -21,6 +23,7 @@ final class HealthBootstrapViewModel: ObservableObject {
 
     init(dependencies: HealthBootstrapDependencies = .live) {
         client = dependencies.healthClient
+        healthKitClient = dependencies.healthKitClient
         authClient = dependencies.authClient
         keychain = dependencies.keychain
         defaults = dependencies.defaults
@@ -30,12 +33,14 @@ final class HealthBootstrapViewModel: ObservableObject {
         family = HealthFamilyViewModel()
         profiles = HealthProfilesViewModel()
         readings = HealthReadingsViewModel()
+        healthKit = HealthKitSyncStateViewModel()
 
         republishChanges(from: connection)
         republishChanges(from: auth)
         republishChanges(from: family)
         republishChanges(from: profiles)
         republishChanges(from: readings)
+        republishChanges(from: healthKit)
 
         if hasAccessToken {
             statusMessage = auth.signedInUserEmail.map { "Signed in as \($0)." } ?? "Signed in."
@@ -88,6 +93,7 @@ final class HealthBootstrapViewModel: ObservableObject {
         family.clear()
         profiles.clear()
         readings.clear()
+        healthKit.clear()
         statusMessage = "Signed out."
         isError = false
     }

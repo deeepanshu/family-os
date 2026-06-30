@@ -32,6 +32,7 @@ export function repositoriesFromFamilyRepository(familyRepository: FamilyReposit
     invites: familyRepository,
     profiles: familyRepository,
     readings: familyRepository,
+    healthKit: familyRepository,
     reminders: familyRepository,
     devices: familyRepository,
     notificationDeliveries: familyRepository,

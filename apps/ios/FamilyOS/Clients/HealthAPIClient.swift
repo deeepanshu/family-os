@@ -147,6 +147,35 @@ struct HealthAPIClient {
         return try await post(path: "readings/blood-glucose", baseURL: baseURL, accessToken: accessToken, body: body)
     }
 
+    func healthKitSyncStatus(baseURL: String, accessToken: String) async throws -> HealthKitSyncStatus {
+        try await get(path: "healthkit/sync/status", baseURL: baseURL, accessToken: accessToken)
+    }
+
+    func linkHealthKitProfile(baseURL: String, accessToken: String, personId: String) async throws -> HealthKitSyncStatus {
+        try await post(path: "healthkit/link-profile", baseURL: baseURL, accessToken: accessToken, body: LinkHealthKitProfileRequest(personId: personId))
+    }
+
+    func updateHealthKitSettings(
+        baseURL: String,
+        accessToken: String,
+        enabledMetrics: [HealthKitMetricType]
+    ) async throws -> HealthKitSyncStatus {
+        try await patch(path: "healthkit/sync/settings", baseURL: baseURL, accessToken: accessToken, body: HealthKitSettingsRequest(enabledMetrics: enabledMetrics))
+    }
+
+    func importHealthKitSamples(
+        baseURL: String,
+        accessToken: String,
+        samples: [HealthKitSampleInput]
+    ) async throws -> HealthKitImportResult {
+        try await post(path: "healthkit/samples/batch", baseURL: baseURL, accessToken: accessToken, body: HealthKitSamplesBatchRequest(samples: samples))
+    }
+
+    func listHealthKitDailySummaries(baseURL: String, accessToken: String, personId: String) async throws -> [HealthMetricDailySummary] {
+        let encodedPersonId = personId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? personId
+        return try await get(path: "healthkit/metrics/daily?personId=\(encodedPersonId)", baseURL: baseURL, accessToken: accessToken)
+    }
+
     private func post<T: Decodable, Body: Encodable>(
         path: String,
         baseURL: String,
@@ -162,6 +191,29 @@ struct HealthAPIClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.setValue("application/json", forHTTPHeaderField: "accept")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "authorization")
+        request.httpBody = try JSONEncoder().encode(body)
+
+        return try await decodeEnvelope(T.self, from: request)
+    }
+
+    private func patch<T: Decodable, Body: Encodable>(
+        path: String,
+        baseURL: String,
+        accessToken: String,
+        body: Body
+    ) async throws -> T {
+        guard !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw HealthAPIError.missingToken
+        }
+        guard let url = endpointURL(baseURL: baseURL, path: path) else {
+            throw HealthAPIError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.setValue("application/json", forHTTPHeaderField: "accept")
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "authorization")
@@ -242,4 +294,16 @@ private struct CreateBloodGlucoseRequest: Encodable {
     let unit = "mg/dL"
     let context: GlucoseContext
     let measuredAt: String
+}
+
+private struct LinkHealthKitProfileRequest: Encodable {
+    let personId: String
+}
+
+private struct HealthKitSettingsRequest: Encodable {
+    let enabledMetrics: [HealthKitMetricType]
+}
+
+private struct HealthKitSamplesBatchRequest: Encodable {
+    let samples: [HealthKitSampleInput]
 }

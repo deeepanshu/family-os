@@ -76,6 +76,7 @@ export type PersonStatus = "active" | "inactive";
 export type HealthProfile = {
   id: string;
   familyId: string;
+  linkedUserId?: string;
   displayName: string;
   relationshipLabel?: string;
   dateOfBirth?: string;
@@ -95,6 +96,7 @@ export type BloodPressureReading = {
   measuredAt: string;
   context?: string;
   notes?: string;
+  source: "manual" | "healthkit";
   createdAt: string;
   updatedAt: string;
 };
@@ -111,7 +113,57 @@ export type BloodGlucoseReading = {
   context: GlucoseContext;
   measuredAt: string;
   notes?: string;
+  source: "manual" | "healthkit";
   createdAt: string;
+  updatedAt: string;
+};
+
+export type HealthKitMetricType = "steps" | "walking_distance" | "sleep" | "weight" | "blood_pressure" | "blood_glucose";
+
+export type HealthKitSyncStatus = {
+  linkedProfileId?: string;
+  enabledMetrics: HealthKitMetricType[];
+  lastSync?: {
+    id: string;
+    status: "completed" | "failed";
+    startedAt: string;
+    finishedAt: string;
+    importedCount: number;
+    skippedCount: number;
+    failedCount: number;
+  };
+};
+
+export type HealthKitSampleInput = {
+  metricType: HealthKitMetricType;
+  sourceSampleKey: string;
+  startDate: string;
+  endDate?: string;
+  value?: number;
+  unit?: string;
+  systolic?: number;
+  diastolic?: number;
+  pulse?: number;
+  glucoseContext?: GlucoseContext;
+};
+
+export type HealthKitImportResult = {
+  syncRunId: string;
+  importedCount: number;
+  skippedCount: number;
+  failedCount: number;
+};
+
+export type HealthMetricDailySummary = {
+  id: string;
+  familyId: string;
+  personId: string;
+  metricType: HealthKitMetricType;
+  date: string;
+  value: number;
+  unit: string;
+  source: "healthkit";
+  sampleCount: number;
   updatedAt: string;
 };
 

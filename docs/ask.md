@@ -20,7 +20,6 @@ The app is intended for private family use first, distributed through TestFlight
 
 ## Non-Goals For Phase 1
 
-- HealthKit sync.
 - Medical record uploads.
 - ECG/lab/prescription document storage.
 - OCR or AI summaries.
@@ -28,6 +27,8 @@ The app is intended for private family use first, distributed through TestFlight
 - Android support.
 - Web dashboard.
 - Clinical decision support or medical diagnosis.
+- Direct third-party health app integrations. Third-party apps should sync into
+  Apple Health first; Family OS imports from HealthKit only.
 
 ## Target Users
 
@@ -200,14 +201,15 @@ An active family member cannot:
 - Deleted readings and reminders disappear from normal app views.
 - Phase 1 is online-only.
 - The backend is reachable at `https://api.deepanshujain.com/health/v1`.
+- A user can import HealthKit readings for their own linked profile.
 
 ## Future Phases
 
-- HealthKit integration for steps, sleep, heart rate, and other metrics.
+- HealthKit integration for heart rate and additional metrics beyond steps,
+  walking distance, sleep, BP, blood sugar, and weight.
 - Medical document uploads for ECGs, labs, prescriptions, and reports.
 - Supabase Storage-backed file vault.
 - Lab result structured entry and charting.
-- HealthKit import normalization.
 - OCR and AI summaries.
 - Missed-reading escalation.
 - Offline entry and sync.

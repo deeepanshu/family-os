@@ -5,6 +5,11 @@ import type {
   CreateInviteResponse,
   CurrentFamilyResponse,
   HealthProfile,
+  HealthKitImportResult,
+  HealthKitMetricType,
+  HealthKitSampleInput,
+  HealthKitSyncStatus,
+  HealthMetricDailySummary,
   NotificationDelivery,
   NotificationDevice,
   PublicInviteResponse,
@@ -57,6 +62,14 @@ export interface ReadingStore {
   deleteBloodGlucose(actorUserId: string, readingId: string): Promise<void>;
 }
 
+export interface HealthKitStore {
+  getHealthKitSyncStatus(actorUserId: string): Promise<HealthKitSyncStatus>;
+  linkHealthKitProfile(actorUserId: string, personId: string): Promise<HealthKitSyncStatus>;
+  updateHealthKitSyncSettings(actorUserId: string, enabledMetrics: HealthKitMetricType[]): Promise<HealthKitSyncStatus>;
+  importHealthKitSamples(actorUserId: string, samples: HealthKitSampleInput[]): Promise<HealthKitImportResult>;
+  listHealthMetricDailySummaries(actorUserId: string, personId?: string, metricType?: HealthKitMetricType, limit?: number): Promise<HealthMetricDailySummary[]>;
+}
+
 export interface ReminderStore {
   createReminder(input: CreateReminderInput): Promise<Reminder>;
   listReminders(actorUserId: string): Promise<Reminder[]>;
@@ -86,9 +99,9 @@ export type AppRepositories = {
   invites: InviteStore;
   profiles: ProfileStore;
   readings: ReadingStore;
+  healthKit: HealthKitStore;
   reminders: ReminderStore;
   devices: DeviceStore;
   notificationDeliveries: NotificationDeliveryStore;
   auditLogs: AuditLogStore;
 };
-

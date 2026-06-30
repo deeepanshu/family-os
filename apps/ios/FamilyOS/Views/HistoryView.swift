@@ -20,7 +20,8 @@ struct HistoryView: View {
                         ForEach(viewModel.readings.bloodPressureReadings) { reading in
                             ReadingRow(
                                 title: "\(reading.systolic)/\(reading.diastolic) mmHg",
-                                detail: reading.pulse.map { "Pulse \($0)" } ?? "Pulse not recorded"
+                                detail: reading.pulse.map { "Pulse \($0)" } ?? "Pulse not recorded",
+                                source: reading.source.displayName
                             )
                         }
                     }
@@ -33,7 +34,8 @@ struct HistoryView: View {
                         ForEach(viewModel.readings.bloodGlucoseReadings) { reading in
                             ReadingRow(
                                 title: "\(String(format: "%.0f", reading.value)) mg/dL",
-                                detail: reading.context.displayName
+                                detail: reading.context.displayName,
+                                source: reading.source.displayName
                             )
                         }
                     }

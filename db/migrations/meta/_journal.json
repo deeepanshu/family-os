@@ -22,6 +22,13 @@
       "when": 1782632670956,
       "tag": "0002_supabase_rls_and_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1782820930723,
+      "tag": "0003_healthkit_sync",
+      "breakpoints": true
     }
   ]
 }

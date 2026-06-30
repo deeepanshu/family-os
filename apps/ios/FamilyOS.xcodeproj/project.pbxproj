@@ -41,6 +41,10 @@
 		DE300000000000000000002E /* EmptyRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE300000000000000000000E /* EmptyRow.swift */; };
 		DE300000000000000000002F /* MetricTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE300000000000000000000F /* MetricTile.swift */; };
 		DE3000000000000000000030 /* StatusText.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE3000000000000000000010 /* StatusText.swift */; };
+		DE4000000000000000000001 /* HealthKitClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE4000000000000000000011 /* HealthKitClient.swift */; };
+		DE4000000000000000000002 /* HealthKitSyncStateViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE4000000000000000000012 /* HealthKitSyncStateViewModel.swift */; };
+		DE4000000000000000000003 /* HealthBootstrapHealthKitViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE4000000000000000000013 /* HealthBootstrapHealthKitViewModel.swift */; };
+		DE4000000000000000000004 /* HealthKitSyncView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE4000000000000000000014 /* HealthKitSyncView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -81,6 +85,10 @@
 		DE300000000000000000000E /* EmptyRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyRow.swift; sourceTree = "<group>"; };
 		DE300000000000000000000F /* MetricTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricTile.swift; sourceTree = "<group>"; };
 		DE3000000000000000000010 /* StatusText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusText.swift; sourceTree = "<group>"; };
+		DE4000000000000000000011 /* HealthKitClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitClient.swift; sourceTree = "<group>"; };
+		DE4000000000000000000012 /* HealthKitSyncStateViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitSyncStateViewModel.swift; sourceTree = "<group>"; };
+		DE4000000000000000000013 /* HealthBootstrapHealthKitViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthBootstrapHealthKitViewModel.swift; sourceTree = "<group>"; };
+		DE4000000000000000000014 /* HealthKitSyncView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitSyncView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -136,6 +144,7 @@
 				DE3000000000000000000006 /* HistoryView.swift */,
 				DE3000000000000000000007 /* FamilyView.swift */,
 				DE3000000000000000000005 /* ProfileView.swift */,
+				DE4000000000000000000014 /* HealthKitSyncView.swift */,
 				DE3000000000000000000008 /* LogReadingSheet.swift */,
 			);
 			path = Views;
@@ -145,6 +154,7 @@
 			isa = PBXGroup;
 			children = (
 				DE1000000000000000000014 /* HealthAPIClient.swift */,
+				DE4000000000000000000011 /* HealthKitClient.swift */,
 				DE1000000000000000000015 /* SupabaseAuthClient.swift */,
 			);
 			path = Clients;
@@ -184,11 +194,13 @@
 				DE1000000000000000000022 /* HealthBootstrapFamilyViewModel.swift */,
 				DE1000000000000000000023 /* HealthBootstrapProfilesViewModel.swift */,
 				DE1000000000000000000024 /* HealthBootstrapReadingsViewModel.swift */,
+				DE4000000000000000000013 /* HealthBootstrapHealthKitViewModel.swift */,
 				DE1000000000000000000029 /* HealthAuthStateViewModel.swift */,
 				DE1000000000000000000028 /* HealthConnectionViewModel.swift */,
 				DE100000000000000000002A /* HealthFamilyStateViewModel.swift */,
 				DE100000000000000000002B /* HealthProfilesStateViewModel.swift */,
 				DE100000000000000000002C /* HealthReadingsStateViewModel.swift */,
+				DE4000000000000000000012 /* HealthKitSyncStateViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -327,6 +339,10 @@
 				DE300000000000000000002E /* EmptyRow.swift in Sources */,
 				DE300000000000000000002F /* MetricTile.swift in Sources */,
 				DE3000000000000000000030 /* StatusText.swift in Sources */,
+				DE4000000000000000000001 /* HealthKitClient.swift in Sources */,
+				DE4000000000000000000002 /* HealthKitSyncStateViewModel.swift in Sources */,
+				DE4000000000000000000003 /* HealthBootstrapHealthKitViewModel.swift in Sources */,
+				DE4000000000000000000004 /* HealthKitSyncView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

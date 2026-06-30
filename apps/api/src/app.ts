@@ -10,6 +10,7 @@ import { createInviteRoutes } from "./routes/invites";
 import { createPeopleRoutes } from "./routes/people";
 import { createBloodPressureRoutes } from "./routes/bloodPressure";
 import { createBloodGlucoseRoutes } from "./routes/bloodGlucose";
+import { createHealthKitRoutes } from "./routes/healthKit";
 import { createReminderRoutes } from "./routes/reminders";
 import { createDeviceRoutes } from "./routes/devices";
 import { createAuditLogRoutes } from "./routes/auditLogs";
@@ -61,6 +62,7 @@ export function createApp(options: AppOptions = {}) {
   health.route("/people", createPeopleRoutes(repositories.profiles));
   health.route("/readings/blood-pressure", createBloodPressureRoutes(repositories.readings));
   health.route("/readings/blood-glucose", createBloodGlucoseRoutes(repositories.readings));
+  health.route("/healthkit", createHealthKitRoutes(repositories.healthKit));
   health.route("/reminders", createReminderRoutes(repositories.reminders));
   health.route("/devices", createDeviceRoutes(repositories.devices));
   health.route("/audit-logs", createAuditLogRoutes(repositories.auditLogs));

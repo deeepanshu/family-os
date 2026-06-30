@@ -34,6 +34,8 @@ struct ProfileView: View {
                     }
                 }
 
+                HealthKitSyncView(viewModel: viewModel)
+
                 Section("Status") {
                     StatusText(viewModel: viewModel)
                 }
@@ -41,6 +43,7 @@ struct ProfileView: View {
             .navigationTitle("Profile")
             .task {
                 await viewModel.loadProfiles()
+                await viewModel.loadHealthKitStatus()
             }
         }
     }

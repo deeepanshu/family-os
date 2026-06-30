@@ -4,6 +4,11 @@ import type {
   CreateInviteResponse,
   BloodPressureReading,
   BloodGlucoseReading,
+  HealthKitImportResult,
+  HealthKitMetricType,
+  HealthKitSampleInput,
+  HealthKitSyncStatus,
+  HealthMetricDailySummary,
   Reminder,
   NotificationDelivery,
   NotificationDevice,
@@ -25,6 +30,7 @@ import type {
   AuditLogStore,
   DeviceStore,
   FamilyStore,
+  HealthKitStore,
   InviteStore,
   NotificationDeliveryStore,
   ProfileStore,
@@ -132,6 +138,7 @@ export interface FamilyRepository
     InviteStore,
     ProfileStore,
     ReadingStore,
+    HealthKitStore,
     ReminderStore,
     DeviceStore,
     NotificationDeliveryStore,
@@ -144,6 +151,10 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   private readonly profiles = new Map<string, HealthProfile>();
   private readonly bloodPressureReadings = new Map<string, BloodPressureReading & { deletedAt?: string }>();
   private readonly bloodGlucoseReadings = new Map<string, BloodGlucoseReading & { deletedAt?: string }>();
+  private readonly healthKitSettings = new Map<string, { userId: string; personId: string; enabledMetrics: HealthKitMetricType[] }>();
+  private readonly healthKitSyncRuns = new Map<string, HealthKitSyncStatus["lastSync"] & { userId: string; personId: string }>();
+  private readonly healthKitSamples = new Map<string, HealthKitSampleInput & { id: string; familyId: string; personId: string; userId: string; syncRunId: string }>();
+  private readonly healthMetricDailySummaries = new Map<string, HealthMetricDailySummary>();
   private readonly reminders = new Map<string, Reminder & { deletedAt?: string }>();
   private readonly devices = new Map<string, NotificationDevice>();
   private readonly deliveries = new Map<string, NotificationDelivery>();
@@ -401,6 +412,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       measuredAt: input.measuredAt,
       context: input.context,
       notes: input.notes,
+      source: "manual",
       createdAt: now,
       updatedAt: now
     };
@@ -496,6 +508,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       context: input.context,
       measuredAt: input.measuredAt,
       notes: input.notes,
+      source: "manual",
       createdAt: now,
       updatedAt: now
     };
@@ -572,6 +585,184 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       resourceType: "blood_glucose_reading",
       resourceId: readingId
     });
+  }
+
+  async getHealthKitSyncStatus(actorUserId: string): Promise<HealthKitSyncStatus> {
+    this.requireActiveMember(actorUserId);
+    const setting = this.healthKitSettings.get(actorUserId);
+    const lastSync = [...this.healthKitSyncRuns.values()]
+      .filter((run) => run.userId === actorUserId)
+      .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0];
+    return {
+      linkedProfileId: setting?.personId,
+      enabledMetrics: setting?.enabledMetrics ?? [],
+      lastSync: lastSync
+        ? {
+            id: lastSync.id,
+            status: lastSync.status,
+            startedAt: lastSync.startedAt,
+            finishedAt: lastSync.finishedAt,
+            importedCount: lastSync.importedCount,
+            skippedCount: lastSync.skippedCount,
+            failedCount: lastSync.failedCount
+          }
+        : undefined
+    };
+  }
+
+  async linkHealthKitProfile(actorUserId: string, personId: string): Promise<HealthKitSyncStatus> {
+    const current = this.requireActiveMember(actorUserId);
+    const profile = this.profiles.get(personId);
+    if (!profile || profile.familyId !== current.family.id || profile.status !== "active") {
+      throw new HttpError(404, "profile_not_found", "Health profile was not found.");
+    }
+    if (profile.linkedUserId && profile.linkedUserId !== actorUserId) {
+      throw new HttpError(409, "profile_already_linked", "This health profile is already linked to another user.");
+    }
+    this.profiles.set(personId, { ...profile, linkedUserId: actorUserId, updatedAt: new Date().toISOString() });
+    this.healthKitSettings.set(actorUserId, {
+      userId: actorUserId,
+      personId,
+      enabledMetrics: this.healthKitSettings.get(actorUserId)?.enabledMetrics ?? []
+    });
+    this.audit({
+      familyId: current.family.id,
+      actorUserId,
+      action: "healthkit.profile_linked",
+      resourceType: "health_profile",
+      resourceId: personId
+    });
+    return this.getHealthKitSyncStatus(actorUserId);
+  }
+
+  async updateHealthKitSyncSettings(actorUserId: string, enabledMetrics: HealthKitMetricType[]): Promise<HealthKitSyncStatus> {
+    const current = this.requireActiveMember(actorUserId);
+    const setting = this.healthKitSettings.get(actorUserId);
+    if (!setting) {
+      throw new HttpError(409, "healthkit_profile_required", "Link your profile before enabling HealthKit sync.");
+    }
+    const uniqueMetrics = [...new Set(enabledMetrics)].filter(isHealthKitMetricType);
+    this.healthKitSettings.set(actorUserId, {
+      ...setting,
+      enabledMetrics: uniqueMetrics
+    });
+    this.audit({
+      familyId: current.family.id,
+      actorUserId,
+      action: "healthkit.settings_updated",
+      resourceType: "health_profile",
+      resourceId: setting.personId,
+      metadata: { enabledMetrics: uniqueMetrics }
+    });
+    return this.getHealthKitSyncStatus(actorUserId);
+  }
+
+  async importHealthKitSamples(actorUserId: string, samples: HealthKitSampleInput[]): Promise<HealthKitImportResult> {
+    const current = this.requireActiveMember(actorUserId);
+    const setting = this.healthKitSettings.get(actorUserId);
+    if (!setting) {
+      throw new HttpError(409, "healthkit_profile_required", "Link your profile before importing HealthKit data.");
+    }
+    const enabled = new Set(setting.enabledMetrics);
+    const syncRunId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    let importedCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
+
+    for (const sample of samples) {
+      if (!enabled.has(sample.metricType)) {
+        skippedCount += 1;
+        continue;
+      }
+      const sampleKey = `${setting.personId}:${sample.sourceSampleKey}`;
+      if (this.healthKitSamples.has(sampleKey)) {
+        skippedCount += 1;
+        continue;
+      }
+      if (!isValidHealthKitSample(sample)) {
+        failedCount += 1;
+        continue;
+      }
+      this.healthKitSamples.set(sampleKey, {
+        ...sample,
+        id: crypto.randomUUID(),
+        familyId: current.family.id,
+        personId: setting.personId,
+        userId: actorUserId,
+        syncRunId
+      });
+      if (sample.metricType === "blood_pressure") {
+        const reading: BloodPressureReading = {
+          id: crypto.randomUUID(),
+          familyId: current.family.id,
+          personId: setting.personId,
+          recordedByUserId: actorUserId,
+          systolic: sample.systolic!,
+          diastolic: sample.diastolic!,
+          pulse: sample.pulse,
+          measuredAt: sample.startDate,
+          source: "healthkit",
+          createdAt: now,
+          updatedAt: now
+        };
+        this.bloodPressureReadings.set(reading.id, reading);
+      } else if (sample.metricType === "blood_glucose") {
+        const reading: BloodGlucoseReading = {
+          id: crypto.randomUUID(),
+          familyId: current.family.id,
+          personId: setting.personId,
+          recordedByUserId: actorUserId,
+          value: sample.value!,
+          unit: "mg/dL",
+          context: sample.glucoseContext ?? "random",
+          measuredAt: sample.startDate,
+          source: "healthkit",
+          createdAt: now,
+          updatedAt: now
+        };
+        this.bloodGlucoseReadings.set(reading.id, reading);
+      }
+      importedCount += 1;
+    }
+
+    this.rebuildHealthMetricSummaries(current.family.id, setting.personId);
+    const run = {
+      id: syncRunId,
+      userId: actorUserId,
+      personId: setting.personId,
+      status: failedCount > 0 ? "failed" as const : "completed" as const,
+      startedAt: now,
+      finishedAt: new Date().toISOString(),
+      importedCount,
+      skippedCount,
+      failedCount
+    };
+    this.healthKitSyncRuns.set(syncRunId, run);
+    this.audit({
+      familyId: current.family.id,
+      actorUserId,
+      action: "healthkit.samples_imported",
+      resourceType: "healthkit_sync_run",
+      resourceId: syncRunId,
+      metadata: { importedCount, skippedCount, failedCount }
+    });
+    return { syncRunId, importedCount, skippedCount, failedCount };
+  }
+
+  async listHealthMetricDailySummaries(
+    actorUserId: string,
+    personId?: string,
+    metricType?: HealthKitMetricType,
+    limit = 90
+  ): Promise<HealthMetricDailySummary[]> {
+    const current = this.requireActiveMember(actorUserId);
+    return [...this.healthMetricDailySummaries.values()]
+      .filter((summary) => summary.familyId === current.family.id)
+      .filter((summary) => !personId || summary.personId === personId)
+      .filter((summary) => !metricType || summary.metricType === metricType)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, limit);
   }
 
   async createReminder(input: CreateReminderInput): Promise<Reminder> {
@@ -871,6 +1062,44 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       metadata: { recipientUserId: delivery.recipientUserId, ...metadata }
     });
   }
+
+  private rebuildHealthMetricSummaries(familyId: string, personId: string) {
+    for (const key of [...this.healthMetricDailySummaries.keys()]) {
+      const summary = this.healthMetricDailySummaries.get(key);
+      if (summary?.familyId === familyId && summary.personId === personId) {
+        this.healthMetricDailySummaries.delete(key);
+      }
+    }
+    const samples = [...this.healthKitSamples.values()].filter(
+      (sample) => sample.familyId === familyId && sample.personId === personId && !["blood_pressure", "blood_glucose"].includes(sample.metricType)
+    );
+    const groups = new Map<string, typeof samples>();
+    for (const sample of samples) {
+      const key = `${sample.metricType}:${sample.startDate.slice(0, 10)}`;
+      groups.set(key, [...(groups.get(key) ?? []), sample]);
+    }
+    for (const [key, grouped] of groups) {
+      const [metricType, date] = key.split(":") as [HealthKitMetricType, string];
+      const latest = grouped.sort((a, b) => Date.parse(b.startDate) - Date.parse(a.startDate))[0];
+      if (!latest) continue;
+      const aggregateValue = metricType === "weight"
+        ? latest.value ?? 0
+        : grouped.reduce((sum, sample) => sum + (sample.value ?? 0), 0);
+      const summary: HealthMetricDailySummary = {
+        id: crypto.randomUUID(),
+        familyId,
+        personId,
+        metricType,
+        date,
+        value: aggregateValue,
+        unit: latest.unit ?? defaultUnit(metricType),
+        source: "healthkit",
+        sampleCount: grouped.length,
+        updatedAt: new Date().toISOString()
+      };
+      this.healthMetricDailySummaries.set(`${personId}:${metricType}:${date}`, summary);
+    }
+  }
 }
 
 function defined<T extends object>(input: T): Partial<T> {
@@ -906,6 +1135,37 @@ function currentInviteStatus(invite: FamilyInvite): FamilyInvite["status"] {
     return "expired";
   }
   return invite.status;
+}
+
+function isValidHealthKitSample(sample: HealthKitSampleInput) {
+  if (sample.metricType === "blood_pressure") {
+    return sample.systolic !== undefined && sample.diastolic !== undefined;
+  }
+  if (sample.metricType === "blood_glucose") {
+    return sample.value !== undefined && (sample.unit === undefined || sample.unit === "mg/dL");
+  }
+  return sample.value !== undefined;
+}
+
+function defaultUnit(metricType: HealthKitMetricType) {
+  switch (metricType) {
+    case "steps":
+      return "count";
+    case "walking_distance":
+      return "m";
+    case "sleep":
+      return "min";
+    case "weight":
+      return "kg";
+    case "blood_pressure":
+      return "mmHg";
+    case "blood_glucose":
+      return "mg/dL";
+  }
+}
+
+function isHealthKitMetricType(metricType: string): metricType is HealthKitMetricType {
+  return ["steps", "walking_distance", "sleep", "weight", "blood_pressure", "blood_glucose"].includes(metricType);
 }
 
 function toPublicInviteRecord(invite: FamilyInvite): FamilyInvite {

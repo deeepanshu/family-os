@@ -5,6 +5,11 @@ import type {
   BloodPressureReading,
   CreateInviteResponse,
   CurrentFamilyResponse,
+  HealthKitImportResult,
+  HealthKitMetricType,
+  HealthKitSampleInput,
+  HealthKitSyncStatus,
+  HealthMetricDailySummary,
   HealthProfile,
   NotificationDelivery,
   NotificationDevice,
@@ -28,17 +33,20 @@ import type {
 } from "../families";
 import { PostgresRepositoryContext } from "./context";
 import { PostgresFamilyStore } from "./familyStore";
+import { PostgresHealthKitStore } from "./healthKitStore";
 import { PostgresReadingStore } from "./readingStore";
 import { PostgresReminderStore } from "./reminderStore";
 import type { PostgresRepositoryOptions } from "./types";
 
 export class PostgresFamilyRepository implements FamilyRepository {
   private readonly familyStore: PostgresFamilyStore;
+  private readonly healthKitStore: PostgresHealthKitStore;
   private readonly readingStore: PostgresReadingStore;
   private readonly reminderStore: PostgresReminderStore;
 
   constructor(context: PostgresRepositoryContext) {
     this.familyStore = new PostgresFamilyStore(context);
+    this.healthKitStore = new PostgresHealthKitStore(context);
     this.readingStore = new PostgresReadingStore(context);
     this.reminderStore = new PostgresReminderStore(context);
   }
@@ -133,6 +141,26 @@ export class PostgresFamilyRepository implements FamilyRepository {
     return this.readingStore.deleteBloodGlucose(actorUserId, readingId);
   }
 
+  getHealthKitSyncStatus(actorUserId: string): Promise<HealthKitSyncStatus> {
+    return this.healthKitStore.getHealthKitSyncStatus(actorUserId);
+  }
+
+  linkHealthKitProfile(actorUserId: string, personId: string): Promise<HealthKitSyncStatus> {
+    return this.healthKitStore.linkHealthKitProfile(actorUserId, personId);
+  }
+
+  updateHealthKitSyncSettings(actorUserId: string, enabledMetrics: HealthKitMetricType[]): Promise<HealthKitSyncStatus> {
+    return this.healthKitStore.updateHealthKitSyncSettings(actorUserId, enabledMetrics);
+  }
+
+  importHealthKitSamples(actorUserId: string, samples: HealthKitSampleInput[]): Promise<HealthKitImportResult> {
+    return this.healthKitStore.importHealthKitSamples(actorUserId, samples);
+  }
+
+  listHealthMetricDailySummaries(actorUserId: string, personId?: string, metricType?: HealthKitMetricType, limit?: number): Promise<HealthMetricDailySummary[]> {
+    return this.healthKitStore.listHealthMetricDailySummaries(actorUserId, personId, metricType, limit);
+  }
+
   createReminder(input: CreateReminderInput): Promise<Reminder> {
     return this.reminderStore.createReminder(input);
   }
@@ -181,4 +209,3 @@ export class PostgresFamilyRepository implements FamilyRepository {
     return this.reminderStore.listAuditLogs(actorUserId, limit);
   }
 }
-
