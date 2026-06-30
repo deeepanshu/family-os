@@ -29,8 +29,10 @@ const sampleBody = z.object({
   glucoseContext: glucoseContext.optional()
 });
 
+const MAX_SAMPLES_PER_BATCH = 5000;
+
 const importBody = z.object({
-  samples: z.array(sampleBody).max(500)
+  samples: z.array(sampleBody).max(MAX_SAMPLES_PER_BATCH)
 });
 
 const summaryQuery = z.object({

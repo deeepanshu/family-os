@@ -23,7 +23,13 @@ struct HealthKitSyncView: View {
                 }
                 .disabled(viewModel.healthKit.linkedProfileId == nil)
             } else {
-                LabeledContent("Enabled", value: "\(viewModel.healthKit.enabledMetrics.count) categories")
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Enabled categories")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text(viewModel.healthKit.enabledMetrics.map(\.displayName).joined(separator: ", "))
+                        .font(.body)
+                }
             }
 
             Button(viewModel.healthKit.isSyncing ? "Syncing..." : "Sync HealthKit Now") {

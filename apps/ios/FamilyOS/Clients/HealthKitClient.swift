@@ -17,6 +17,7 @@ enum HealthKitClientError: LocalizedError {
 
 struct HealthKitClient {
     private let store = HKHealthStore()
+    private let sampleLimit = HKObjectQueryNoLimit
 
     var isAvailable: Bool {
         HKHealthStore.isHealthDataAvailable()
@@ -29,13 +30,26 @@ struct HealthKitClient {
 
     func readSamples(since startDate: Date, until endDate: Date = Date()) async throws -> [HealthKitSampleInput] {
         guard isAvailable else { throw HealthKitClientError.unavailable }
-        async let steps = readQuantitySamples(metricType: .steps, identifier: .stepCount, unit: .count(), since: startDate, until: endDate)
-        async let distance = readQuantitySamples(metricType: .walkingDistance, identifier: .distanceWalkingRunning, unit: .meter(), since: startDate, until: endDate)
-        async let weight = readQuantitySamples(metricType: .weight, identifier: .bodyMass, unit: .gramUnit(with: .kilo), since: startDate, until: endDate)
-        async let glucose = readGlucoseSamples(since: startDate, until: endDate)
-        async let sleep = readSleepSamples(since: startDate, until: endDate)
-        async let bloodPressure = readBloodPressureSamples(since: startDate, until: endDate)
-        return try await steps + distance + weight + glucose + sleep + bloodPressure
+        var samples: [HealthKitSampleInput] = []
+        if let steps = try? await readDailyQuantitySummaries(metricType: .steps, identifier: .stepCount, unit: .count(), since: startDate, until: endDate) {
+            samples += steps
+        }
+        if let distance = try? await readDailyQuantitySummaries(metricType: .walkingDistance, identifier: .distanceWalkingRunning, unit: .meter(), since: startDate, until: endDate) {
+            samples += distance
+        }
+        if let weight = try? await readQuantitySamples(metricType: .weight, identifier: .bodyMass, unit: .gramUnit(with: .kilo), since: startDate, until: endDate) {
+            samples += weight
+        }
+        if let glucose = try? await readGlucoseSamples(since: startDate, until: endDate) {
+            samples += glucose
+        }
+        if let sleep = try? await readSleepSamples(since: startDate, until: endDate) {
+            samples += sleep
+        }
+        if let bloodPressure = try? await readBloodPressureSamples(since: startDate, until: endDate) {
+            samples += bloodPressure
+        }
+        return samples
     }
 
     private func readTypes() -> [HKObjectType] {
@@ -46,8 +60,7 @@ struct HealthKitClient {
             HKQuantityType.quantityType(forIdentifier: .bloodGlucose),
             HKQuantityType.quantityType(forIdentifier: .bloodPressureSystolic),
             HKQuantityType.quantityType(forIdentifier: .bloodPressureDiastolic),
-            HKCategoryType.categoryType(forIdentifier: .sleepAnalysis),
-            HKCorrelationType.correlationType(forIdentifier: .bloodPressure)
+            HKCategoryType.categoryType(forIdentifier: .sleepAnalysis)
         ].compactMap { $0 }
     }
 
@@ -70,6 +83,42 @@ struct HealthKitClient {
                 startDate: isoString(quantity.startDate),
                 endDate: isoString(quantity.endDate),
                 value: quantity.quantity.doubleValue(for: unit),
+                unit: unitName(for: metricType),
+                systolic: nil,
+                diastolic: nil,
+                pulse: nil,
+                glucoseContext: nil
+            )
+        }
+    }
+
+    private func readDailyQuantitySummaries(
+        metricType: HealthKitMetricType,
+        identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        since startDate: Date,
+        until endDate: Date
+    ) async throws -> [HealthKitSampleInput] {
+        guard let type = HKQuantityType.quantityType(forIdentifier: identifier) else {
+            throw HealthKitClientError.sampleTypeUnavailable
+        }
+        let calendar = Calendar(identifier: .gregorian)
+        let startOfDay = calendar.startOfDay(for: startDate)
+        let summaries = try await statisticsCollection(
+            type: type,
+            unit: unit,
+            since: startOfDay,
+            until: endDate
+        )
+        return summaries.compactMap { summary in
+            guard summary.value > 0 else { return nil }
+            let day = dayString(summary.startDate)
+            return HealthKitSampleInput(
+                metricType: metricType,
+                sourceSampleKey: "\(metricType.rawValue):\(day)",
+                startDate: isoString(summary.startDate),
+                endDate: isoString(summary.endDate),
+                value: summary.value,
                 unit: unitName(for: metricType),
                 systolic: nil,
                 diastolic: nil,
@@ -160,7 +209,7 @@ struct HealthKitClient {
         try await withCheckedThrowingContinuation { continuation in
             let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: [.strictStartDate])
             let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
-            let query = HKSampleQuery(sampleType: type, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: [sort]) { _, samples, error in
+            let query = HKSampleQuery(sampleType: type, predicate: predicate, limit: sampleLimit, sortDescriptors: [sort]) { _, samples, error in
                 if let error {
                     continuation.resume(throwing: error)
                 } else {
@@ -175,12 +224,57 @@ struct HealthKitClient {
         try await withCheckedThrowingContinuation { continuation in
             let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: [.strictStartDate])
             let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
-            let query = HKSampleQuery(sampleType: type, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: [sort]) { _, samples, error in
+            let query = HKSampleQuery(sampleType: type, predicate: predicate, limit: sampleLimit, sortDescriptors: [sort]) { _, samples, error in
                 if let error {
                     continuation.resume(throwing: error)
                 } else {
                     continuation.resume(returning: (samples ?? []).compactMap { $0 as? HKCorrelation })
                 }
+            }
+            store.execute(query)
+        }
+    }
+
+    private struct QuantitySummary {
+        let startDate: Date
+        let endDate: Date
+        let value: Double
+    }
+
+    private func statisticsCollection(
+        type: HKQuantityType,
+        unit: HKUnit,
+        since startDate: Date,
+        until endDate: Date
+    ) async throws -> [QuantitySummary] {
+        try await withCheckedThrowingContinuation { continuation in
+            let interval = DateComponents(day: 1)
+            let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: [.strictStartDate])
+            let query = HKStatisticsCollectionQuery(
+                quantityType: type,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum,
+                anchorDate: startDate,
+                intervalComponents: interval
+            )
+            query.initialResultsHandler = { _, collection, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                var output: [QuantitySummary] = []
+                collection?.enumerateStatistics(from: startDate, to: endDate) { statistics, _ in
+                    if let quantity = statistics.sumQuantity() {
+                        output.append(
+                            QuantitySummary(
+                                startDate: statistics.startDate,
+                                endDate: statistics.endDate,
+                                value: quantity.doubleValue(for: unit)
+                            )
+                        )
+                    }
+                }
+                continuation.resume(returning: output)
             }
             store.execute(query)
         }
@@ -214,5 +308,13 @@ struct HealthKitClient {
 
     private func isoString(_ date: Date) -> String {
         ISO8601DateFormatter().string(from: date)
+    }
+
+    private func dayString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
     }
 }
