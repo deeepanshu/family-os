@@ -62,11 +62,7 @@ extension HealthBootstrapViewModel {
             let enabled = Set(healthKit.enabledMetrics)
             let samples = try await healthKitClient.readSamples(since: startDate)
                 .filter { enabled.contains($0.metricType) }
-            let result = try await client.importHealthKitSamples(
-                baseURL: connection.baseURL,
-                accessToken: auth.accessToken,
-                samples: samples
-            )
+            let result = try await importHealthKitSamplesInBatches(samples)
             healthKit.status = try await client.healthKitSyncStatus(baseURL: connection.baseURL, accessToken: auth.accessToken)
             healthKit.dailySummaries = try await client.listHealthKitDailySummaries(
                 baseURL: connection.baseURL,
@@ -85,5 +81,36 @@ extension HealthBootstrapViewModel {
             )
             return "HealthKit sync imported \(result.importedCount), skipped \(result.skippedCount), failed \(result.failedCount)."
         }
+    }
+
+    private func importHealthKitSamplesInBatches(_ samples: [HealthKitSampleInput]) async throws -> HealthKitImportResult {
+        let batchSize = 500
+        var syncRunId = ""
+        var importedCount = 0
+        var skippedCount = 0
+        var failedCount = 0
+
+        for startIndex in stride(from: 0, to: samples.count, by: batchSize) {
+            let endIndex = min(startIndex + batchSize, samples.count)
+            let batch = Array(samples[startIndex..<endIndex])
+            let result = try await client.importHealthKitSamples(
+                baseURL: connection.baseURL,
+                accessToken: auth.accessToken,
+                samples: batch
+            )
+            if syncRunId.isEmpty {
+                syncRunId = result.syncRunId
+            }
+            importedCount += result.importedCount
+            skippedCount += result.skippedCount
+            failedCount += result.failedCount
+        }
+
+        return HealthKitImportResult(
+            syncRunId: syncRunId,
+            importedCount: importedCount,
+            skippedCount: skippedCount,
+            failedCount: failedCount
+        )
     }
 }
