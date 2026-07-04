@@ -22,6 +22,7 @@ export class PostgresHealthKitStore {
       from people
       where family_id = ${current.family.id}
         and linked_user_id = ${actorUserId}
+        and relationship_label = 'Self'
         and status = 'active'
       limit 1
     `;
@@ -88,7 +89,7 @@ export class PostgresHealthKitStore {
 
   async updateHealthKitSyncSettings(actorUserId: string, enabledMetrics: HealthKitMetricType[]): Promise<HealthKitSyncStatus> {
     const current = await this.context.requireActiveMember(actorUserId);
-    const linkedProfileId = await this.requireLinkedProfileId(actorUserId, current.family.id);
+    const linkedProfileId = await this.requireLinkedSelfProfileId(actorUserId, current.family.id);
     const uniqueMetrics = [...new Set(enabledMetrics)].filter((metric) => allMetricTypes.includes(metric));
     await this.context.sql.begin(async (tx: any) => {
       await tx`delete from healthkit_sync_settings where user_id = ${actorUserId}`;
@@ -124,7 +125,7 @@ export class PostgresHealthKitStore {
 
   async importHealthKitSamples(actorUserId: string, samples: HealthKitSampleInput[]): Promise<HealthKitImportResult> {
     const current = await this.context.requireActiveMember(actorUserId);
-    const personId = await this.requireLinkedProfileId(actorUserId, current.family.id);
+    const personId = await this.requireLinkedSelfProfileId(actorUserId, current.family.id);
     const settings = await this.context.sql`
       select metric_type
       from healthkit_sync_settings
@@ -261,17 +262,18 @@ export class PostgresHealthKitStore {
     return rows.map(mapHealthMetricDailySummary);
   }
 
-  private async requireLinkedProfileId(actorUserId: string, familyId: string): Promise<string> {
+  private async requireLinkedSelfProfileId(actorUserId: string, familyId: string): Promise<string> {
     const [profile] = await this.context.sql`
       select id
       from people
       where family_id = ${familyId}
         and linked_user_id = ${actorUserId}
+        and relationship_label = 'Self'
         and status = 'active'
       limit 1
     `;
     if (!profile) {
-      throw new HttpError(409, "healthkit_profile_required", "Link your profile before using HealthKit sync.");
+      throw new HttpError(409, "healthkit_profile_required", "Create your self profile before using HealthKit sync.");
     }
     return profile.id;
   }

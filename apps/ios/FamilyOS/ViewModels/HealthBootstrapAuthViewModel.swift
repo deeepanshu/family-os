@@ -42,8 +42,7 @@ extension HealthBootstrapViewModel {
             return
         }
         if hasAccessToken {
-            await loadCurrentFamily()
-            await loadProfiles()
+            await startup()
         }
     }
 
@@ -63,8 +62,7 @@ extension HealthBootstrapViewModel {
             return "Signed in with Apple as \(signedInSummary)."
         }
         if hasAccessToken {
-            await loadCurrentFamily()
-            await loadProfiles()
+            await startup()
         }
     }
 }

@@ -16,6 +16,7 @@ export class PostgresRepositoryContext {
       select
         f.id as family_id,
         f.name as family_name,
+        f.kind as family_kind,
         f.created_by_user_id,
         f.created_at as family_created_at,
         f.updated_at as family_updated_at,

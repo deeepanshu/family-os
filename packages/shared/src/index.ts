@@ -20,13 +20,23 @@ export type AuthSessionResponse = {
   userId: string;
 };
 
+export type BootstrapResponse = {
+  family: Family;
+  profiles: HealthProfile[];
+  selfProfile: HealthProfile | null;
+  needsProfileSetup: boolean;
+};
+
 export type FamilyRole = "manager" | "member";
 
 export type MembershipStatus = "active" | "invited" | "removed";
 
+export type FamilyKind = "personal" | "family";
+
 export type Family = {
   id: string;
   name: string;
+  kind: FamilyKind;
   createdByUserId: string;
   createdAt: string;
   updatedAt: string;

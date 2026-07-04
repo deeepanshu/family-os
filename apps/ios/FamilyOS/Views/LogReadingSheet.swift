@@ -23,7 +23,7 @@ struct LogReadingSheet: View {
                             .keyboardType(.numberPad)
                     }
                 case .bloodSugar:
-                    Section("Diabetes") {
+                    Section("Blood Sugar") {
                         TextField("Blood sugar mg/dL", text: $viewModel.readings.glucoseValue)
                             .keyboardType(.decimalPad)
                         Picker("Context", selection: $viewModel.readings.glucoseContext) {
@@ -81,7 +81,7 @@ enum LogKind: Identifiable {
         case .bloodPressure:
             return "Record BP"
         case .bloodSugar:
-            return "Record Diabetes"
+            return "Record Blood Sugar"
         }
     }
 }

@@ -106,5 +106,6 @@ describe("Postgres repository wiring", () => {
       data: [{ systolic: 121, diastolic: 79, personId: profile.data.id }]
     });
   });
+
 });
 

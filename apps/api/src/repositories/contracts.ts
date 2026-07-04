@@ -2,6 +2,7 @@ import type {
   AuditLog,
   BloodGlucoseReading,
   BloodPressureReading,
+  BootstrapResponse,
   CreateInviteResponse,
   CurrentFamilyResponse,
   HealthProfile,
@@ -33,6 +34,7 @@ import type {
 export interface FamilyStore {
   createFamily(input: CreateFamilyInput): Promise<CurrentFamilyResponse>;
   getCurrentFamily(userId: string): Promise<CurrentFamilyResponse>;
+  bootstrap(userId: string): Promise<BootstrapResponse>;
 }
 
 export interface InviteStore {
@@ -45,6 +47,8 @@ export interface ProfileStore {
   listProfiles(actorUserId: string): Promise<HealthProfile[]>;
   getProfile(actorUserId: string, profileId: string): Promise<HealthProfile>;
   createProfile(input: CreateProfileInput): Promise<HealthProfile>;
+  createSelfProfile(actorUserId: string, displayName: string): Promise<HealthProfile>;
+  getSelfProfile(actorUserId: string): Promise<HealthProfile | null>;
   updateProfile(actorUserId: string, profileId: string, input: UpdateProfileInput): Promise<HealthProfile>;
   deleteProfile(actorUserId: string, profileId: string): Promise<void>;
 }

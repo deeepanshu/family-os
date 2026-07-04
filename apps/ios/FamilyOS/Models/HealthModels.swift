@@ -13,6 +13,14 @@ struct SessionResponse: Decodable {
     let userId: String
 }
 
+struct BootstrapResponse: Decodable {
+    let family: Family
+    let membership: FamilyMembership
+    let profiles: [HealthProfile]
+    let selfProfile: HealthProfile?
+    let needsProfileSetup: Bool
+}
+
 struct FamilyResponse: Decodable {
     let family: Family
     let membership: FamilyMembership
@@ -21,6 +29,12 @@ struct FamilyResponse: Decodable {
 struct Family: Decodable {
     let id: String
     let name: String
+    let kind: FamilyKind
+}
+
+enum FamilyKind: String, Decodable {
+    case personal
+    case family
 }
 
 struct FamilyMembership: Decodable {

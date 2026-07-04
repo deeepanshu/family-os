@@ -19,6 +19,9 @@ struct FamilyOSApp: App {
                     viewModel.handleNotification(userInfo: notification.userInfo ?? [:])
                     NotificationAppDelegate.pendingNotificationUserInfo = nil
                 }
+                .onOpenURL { url in
+                    _ = viewModel.handleInviteURL(url)
+                }
         }
     }
 }

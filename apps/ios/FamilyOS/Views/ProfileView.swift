@@ -6,24 +6,15 @@ struct ProfileView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Current Profile") {
-                    ProfilePicker(viewModel: viewModel)
-                    if let selected = viewModel.selectedProfile {
-                        LabeledContent("Name", value: selected.displayName)
-                        if let relationship = selected.relationshipLabel {
+                Section("Your profile") {
+                    if let selfProfile = viewModel.selfProfile {
+                        LabeledContent("Name", value: selfProfile.displayName)
+                        if let relationship = selfProfile.relationshipLabel {
                             LabeledContent("Relationship", value: relationship)
                         }
                     } else {
-                        Text("Create or choose the health profile you usually record for.")
+                        Text("Finish setting up your profile to record readings and sync HealthKit.")
                             .foregroundStyle(.secondary)
-                    }
-                }
-
-                Section("Create Profile") {
-                    TextField("Name", text: $viewModel.profiles.profileName)
-                    TextField("Relationship", text: $viewModel.profiles.profileRelationship)
-                    Button("Save Profile") {
-                        Task { await viewModel.createProfile() }
                     }
                 }
 
@@ -42,7 +33,6 @@ struct ProfileView: View {
             }
             .navigationTitle("Profile")
             .task {
-                await viewModel.loadProfiles()
                 await viewModel.loadHealthKitStatus()
             }
         }

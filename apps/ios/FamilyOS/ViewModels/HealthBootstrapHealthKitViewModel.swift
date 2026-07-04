@@ -5,6 +5,7 @@ extension HealthBootstrapViewModel {
         healthKit.isAvailable = healthKitClient.isAvailable
         await request {
             healthKit.status = try await client.healthKitSyncStatus(baseURL: connection.baseURL, accessToken: auth.accessToken)
+            healthKit.linkedProfileId = healthKit.status?.linkedProfileId
             if let linkedProfileId = healthKit.linkedProfileId {
                 healthKit.dailySummaries = try await client.listHealthKitDailySummaries(
                     baseURL: connection.baseURL,

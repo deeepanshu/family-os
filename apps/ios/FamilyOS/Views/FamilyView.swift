@@ -6,36 +6,13 @@ struct FamilyView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Family") {
-                    if let familyName = viewModel.family.currentFamilyName {
-                        LabeledContent("Name", value: familyName)
-                        LabeledContent("Your role", value: viewModel.family.currentFamilyRole?.displayName ?? "Member")
-                    } else {
-                        TextField("Family name", text: $viewModel.family.familyName)
-                        Button("Create Family") {
-                            Task { await viewModel.createFamily() }
-                        }
-                    }
+                if viewModel.family.isPersonalWorkspace {
+                    personalWorkspaceSection
+                } else {
+                    familyWorkspaceSection
                 }
 
-                Section("Invites") {
-                    Button("Create Invite") {
-                        Task { await viewModel.createInvite() }
-                    }
-                    if let token = viewModel.family.lastCreatedInviteToken {
-                        Text(token)
-                            .font(.footnote.monospaced())
-                            .textSelection(.enabled)
-                    }
-
-                    TextField("Invite token", text: $viewModel.family.inviteToken)
-                        .textInputAutocapitalization(.never)
-                    Button("Join Family") {
-                        Task { await viewModel.acceptInvite() }
-                    }
-                }
-
-                Section("Family Profiles") {
+                Section("Health Profiles") {
                     if viewModel.profiles.profiles.isEmpty {
                         EmptyRow("No profiles yet.")
                     } else {
@@ -57,6 +34,34 @@ struct FamilyView: View {
                     }
                 }
 
+                if viewModel.family.isPersonalWorkspace {
+                    Section("Add another health profile") {
+                        TextField("Name", text: $viewModel.profiles.profileName)
+                        TextField("Relationship", text: $viewModel.profiles.profileRelationship)
+                        Button("Save Profile") {
+                            Task { await viewModel.createProfile() }
+                        }
+                        .disabled(viewModel.profiles.profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+
+                    Section("Invite family") {
+                        Button("Create Invite") {
+                            Task { await viewModel.createInvite() }
+                        }
+                        if let token = viewModel.family.lastCreatedInviteToken {
+                            Text(token)
+                                .font(.footnote.monospaced())
+                                .textSelection(.enabled)
+                        }
+
+                        TextField("Invite token", text: $viewModel.family.inviteToken)
+                            .textInputAutocapitalization(.never)
+                        Button("Join Family") {
+                            Task { await viewModel.acceptInvite() }
+                        }
+                    }
+                }
+
                 Section("Connection") {
                     Button("Refresh Family") {
                         Task {
@@ -71,6 +76,30 @@ struct FamilyView: View {
             .task {
                 await viewModel.loadCurrentFamily()
                 await viewModel.loadProfiles()
+            }
+        }
+    }
+
+    private var personalWorkspaceSection: some View {
+        Section("Family") {
+            Text("You are using Family OS for yourself")
+                .foregroundStyle(.secondary)
+            if let familyName = viewModel.family.currentFamilyName {
+                LabeledContent("Workspace", value: familyName)
+            }
+        }
+    }
+
+    private var familyWorkspaceSection: some View {
+        Section("Family") {
+            if let familyName = viewModel.family.currentFamilyName {
+                LabeledContent("Name", value: familyName)
+                LabeledContent("Your role", value: viewModel.family.currentFamilyRole?.displayName ?? "Member")
+            } else {
+                TextField("Family name", text: $viewModel.family.familyName)
+                Button("Create Family") {
+                    Task { await viewModel.createFamily() }
+                }
             }
         }
     }

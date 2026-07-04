@@ -1,4 +1,4 @@
-import type { CreateInviteResponse, CurrentFamilyResponse, HealthProfile, PublicInviteResponse } from "@family-os/shared";
+import type { BootstrapResponse, CreateInviteResponse, CurrentFamilyResponse, HealthProfile, PublicInviteResponse } from "@family-os/shared";
 import { HttpError } from "../../errors";
 import type { CreateFamilyInput, CreateInviteInput, CreateProfileInput, UpdateProfileInput } from "../families";
 import { currentInviteStatus, hashToken, PostgresRepositoryContext } from "./context";
@@ -14,10 +14,11 @@ export class PostgresFamilyStore {
       throw new HttpError(409, "family_already_exists", "User already has an active family.");
     }
 
+    const kind = input.kind ?? "family";
     return this.context.sql.begin(async (tx: any) => {
       const [family] = await tx`
-        insert into families (name, created_by_user_id)
-        values (${input.name}, ${input.userId})
+        insert into families (name, kind, created_by_user_id)
+        values (${input.name}, ${kind}, ${input.userId})
         returning *
       `;
       const createdFamily = requireRow(family, "Failed to create family.");
@@ -46,8 +47,78 @@ export class PostgresFamilyStore {
     return this.context.getCurrentFamily(userId);
   }
 
+  async bootstrap(userId: string): Promise<BootstrapResponse> {
+    await this.context.syncAuthUser(userId);
+    let current = await this.context.getCurrentFamily(userId);
+    if (!current) {
+      const created = await this.createFamily({ name: "My Health", userId, kind: "personal" });
+      if (!created) {
+        throw new HttpError(500, "bootstrap_failed", "Failed to create personal workspace.");
+      }
+      current = created;
+    }
+
+    const profiles = await this.listProfiles(userId);
+    const selfProfile = profiles.find((profile) => profile.linkedUserId === userId && profile.relationshipLabel === "Self") ?? null;
+
+    return {
+      family: current.family,
+      profiles,
+      selfProfile,
+      needsProfileSetup: selfProfile === null
+    };
+  }
+
+  async createSelfProfile(actorUserId: string, displayName: string): Promise<HealthProfile> {
+    const current = await this.context.requireActiveMember(actorUserId);
+    const existing = await this.getSelfProfile(actorUserId);
+    if (existing) {
+      return existing;
+    }
+
+    const [profile] = await this.context.sql`
+      insert into people (family_id, linked_user_id, created_by_user_id, display_name, relationship_label, status)
+      values (${current.family.id}, ${actorUserId}, ${actorUserId}, ${displayName}, 'Self', 'active')
+      returning *
+    `;
+    const createdProfile = requireRow(profile, "Failed to create self profile.");
+    await this.context.audit({
+      familyId: current.family.id,
+      actorUserId,
+      action: "profile.created",
+      resourceType: "profile",
+      resourceId: createdProfile.id
+    });
+    return mapProfile(createdProfile);
+  }
+
+  async getSelfProfile(actorUserId: string): Promise<HealthProfile | null> {
+    const current = await this.context.getCurrentFamily(actorUserId);
+    if (!current) {
+      return null;
+    }
+    const [profile] = await this.context.sql`
+      select *
+      from people
+      where family_id = ${current.family.id}
+        and linked_user_id = ${actorUserId}
+        and relationship_label = 'Self'
+        and status = 'active'
+    `;
+    return profile ? mapProfile(profile) : null;
+  }
+
   async createInvite(input: CreateInviteInput): Promise<CreateInviteResponse> {
     const current = await this.context.requireManager(input.actorUserId, "Only family managers can create invites.");
+
+    if (current.family.kind === "personal") {
+      await this.context.sql`
+        update families
+        set kind = 'family'
+        where id = ${current.family.id}
+      `;
+    }
+
     const token = crypto.randomUUID().replaceAll("-", "");
     const [invite] = await this.context.sql`
       insert into family_invites (family_id, invited_by_user_id, email, token_hash, role, status, expires_at)
@@ -108,15 +179,24 @@ export class PostgresFamilyStore {
         throw new HttpError(403, "invite_email_mismatch", "Invite is assigned to a different email.");
       }
 
-      const [existing] = await tx`
-        select 1
+      const [existingMembership] = await tx`
+        select *
         from family_memberships
         where user_id = ${userId}
           and status = 'active'
-        limit 1
+        for update
       `;
-      if (existing) {
-        throw new HttpError(409, "family_already_exists", "User already has an active family.");
+      if (existingMembership) {
+        const [existingFamily] = await tx`select * from families where id = ${existingMembership.family_id}`;
+        if (!existingFamily || existingFamily.kind === "family") {
+          throw new HttpError(409, "family_already_exists", "User already has an active family.");
+        }
+        await this.assertSafePersonalSwitch(tx, existingMembership.family_id, userId);
+        await tx`
+          update family_memberships
+          set status = 'removed', updated_at = now()
+          where id = ${existingMembership.id}
+        `;
       }
 
       await tx`
@@ -146,6 +226,50 @@ export class PostgresFamilyStore {
 
       return { family: mapFamily(acceptedFamily), membership: mapMembership(createdMembership) };
     });
+  }
+
+  private async assertSafePersonalSwitch(tx: any, familyId: string, userId: string) {
+    const [memberCount] = await tx`
+      select count(*) as count
+      from family_memberships
+      where family_id = ${familyId}
+        and status = 'active'
+    `;
+    if (!memberCount || Number(memberCount.count) !== 1) {
+      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has more than one active member.");
+    }
+
+    const [reminderCount] = await tx`
+      select count(*) as count
+      from reminders
+      where family_id = ${familyId}
+        and deleted_at is null
+    `;
+    if (reminderCount && Number(reminderCount.count) > 0) {
+      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has reminders.");
+    }
+
+    const [bpCount] = await tx`
+      select count(*) as count
+      from blood_pressure_readings
+      where family_id = ${familyId}
+        and deleted_at is null
+        and source = 'manual'
+    `;
+    if (bpCount && Number(bpCount.count) > 0) {
+      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has manual blood pressure readings.");
+    }
+
+    const [glucoseCount] = await tx`
+      select count(*) as count
+      from blood_glucose_readings
+      where family_id = ${familyId}
+        and deleted_at is null
+        and source = 'manual'
+    `;
+    if (glucoseCount && Number(glucoseCount.count) > 0) {
+      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has manual blood sugar readings.");
+    }
   }
 
   async listProfiles(actorUserId: string): Promise<HealthProfile[]> {

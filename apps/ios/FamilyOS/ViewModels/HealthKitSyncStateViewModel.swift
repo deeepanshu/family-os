@@ -6,13 +6,10 @@ final class HealthKitSyncStateViewModel: ObservableObject {
     @Published var dailySummaries: [HealthMetricDailySummary] = []
     @Published var isAvailable = false
     @Published var isSyncing = false
+    @Published var linkedProfileId: String?
 
     var enabledMetrics: [HealthKitMetricType] {
         status?.enabledMetrics ?? []
-    }
-
-    var linkedProfileId: String? {
-        status?.linkedProfileId
     }
 
     func clear() {
@@ -20,5 +17,6 @@ final class HealthKitSyncStateViewModel: ObservableObject {
         dailySummaries = []
         isAvailable = false
         isSyncing = false
+        linkedProfileId = nil
     }
 }

@@ -35,6 +35,25 @@ struct HealthAPIClient {
         return try await get(path: "me", baseURL: baseURL, accessToken: accessToken)
     }
 
+    func bootstrap(baseURL: String, accessToken: String) async throws -> BootstrapResponse {
+        guard !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw HealthAPIError.missingToken
+        }
+        return try await post(path: "bootstrap", baseURL: baseURL, accessToken: accessToken, body: EmptyRequest())
+    }
+
+    func createSelfProfile(baseURL: String, accessToken: String, displayName: String) async throws -> HealthProfile {
+        guard !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw HealthAPIError.missingToken
+        }
+        return try await post(
+            path: "bootstrap/me/profile",
+            baseURL: baseURL,
+            accessToken: accessToken,
+            body: CreateSelfProfileRequest(displayName: displayName)
+        )
+    }
+
     func currentFamily(baseURL: String, accessToken: String) async throws -> FamilyResponse? {
         guard !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw HealthAPIError.missingToken
@@ -278,6 +297,10 @@ private struct CreateInviteRequest: Encodable {
 private struct CreateProfileRequest: Encodable {
     let displayName: String
     let relationshipLabel: String?
+}
+
+private struct CreateSelfProfileRequest: Encodable {
+    let displayName: String
 }
 
 private struct CreateBloodPressureRequest: Encodable {

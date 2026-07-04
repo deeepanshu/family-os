@@ -3,6 +3,7 @@ import type {
   AuditLog,
   BloodGlucoseReading,
   BloodPressureReading,
+  BootstrapResponse,
   CreateInviteResponse,
   CurrentFamilyResponse,
   HealthKitImportResult,
@@ -69,6 +70,10 @@ export class PostgresFamilyRepository implements FamilyRepository {
     return this.familyStore.getCurrentFamily(userId);
   }
 
+  bootstrap(userId: string): Promise<BootstrapResponse> {
+    return this.familyStore.bootstrap(userId);
+  }
+
   createInvite(input: CreateInviteInput): Promise<CreateInviteResponse> {
     return this.familyStore.createInvite(input);
   }
@@ -91,6 +96,14 @@ export class PostgresFamilyRepository implements FamilyRepository {
 
   createProfile(input: CreateProfileInput): Promise<HealthProfile> {
     return this.familyStore.createProfile(input);
+  }
+
+  createSelfProfile(actorUserId: string, displayName: string): Promise<HealthProfile> {
+    return this.familyStore.createSelfProfile(actorUserId, displayName);
+  }
+
+  getSelfProfile(actorUserId: string): Promise<HealthProfile | null> {
+    return this.familyStore.getSelfProfile(actorUserId);
   }
 
   updateProfile(actorUserId: string, profileId: string, input: UpdateProfileInput): Promise<HealthProfile> {

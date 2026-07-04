@@ -29,6 +29,13 @@
       "when": 1782820930723,
       "tag": "0003_healthkit_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783148824420,
+      "tag": "0004_parched_hex",
+      "breakpoints": true
     }
   ]
 }

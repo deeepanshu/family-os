@@ -7,6 +7,11 @@ final class HealthFamilyViewModel: ObservableObject {
     @Published var lastCreatedInviteToken: String?
     @Published var currentFamilyName: String?
     @Published var currentFamilyRole: FamilyRole?
+    @Published var familyKind: FamilyKind?
+
+    var isPersonalWorkspace: Bool {
+        familyKind == .personal
+    }
 
     func clear() {
         familyName = ""
@@ -14,5 +19,6 @@ final class HealthFamilyViewModel: ObservableObject {
         lastCreatedInviteToken = nil
         currentFamilyName = nil
         currentFamilyRole = nil
+        familyKind = nil
     }
 }

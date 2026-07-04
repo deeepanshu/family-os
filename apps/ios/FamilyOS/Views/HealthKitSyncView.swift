@@ -11,10 +11,8 @@ struct HealthKitSyncView: View {
                let profile = viewModel.profiles.profiles.first(where: { $0.id == linkedProfileId }) {
                 LabeledContent("Linked profile", value: profile.displayName)
             } else {
-                Button("Link Selected Profile") {
-                    Task { await viewModel.linkSelectedProfileForHealthKit() }
-                }
-                .disabled(!viewModel.hasSelectedProfile)
+                Text("Create your profile to enable HealthKit sync.")
+                    .foregroundStyle(.secondary)
             }
 
             if viewModel.healthKit.enabledMetrics.isEmpty {

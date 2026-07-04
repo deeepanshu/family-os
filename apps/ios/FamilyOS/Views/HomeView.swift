@@ -26,7 +26,7 @@ struct HomeView: View {
                         }
 
                         PrimaryActionButton(
-                            title: "Record Diabetes",
+                            title: "Record Blood Sugar",
                             subtitle: "Blood sugar reading",
                             systemImage: "drop.fill",
                             tint: .blue

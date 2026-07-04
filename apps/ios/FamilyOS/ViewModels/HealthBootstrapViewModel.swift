@@ -12,6 +12,9 @@ final class HealthBootstrapViewModel: ObservableObject {
 
     @Published var statusMessage = "Online-only Phase 1 bootstrap is ready."
     @Published var isError = false
+    @Published var isStartingUp = false
+    @Published var needsProfileSetup = false
+    @Published var startupError: Error?
 
     let client: HealthAPIClient
     let healthKitClient: HealthKitClient
@@ -94,8 +97,89 @@ final class HealthBootstrapViewModel: ObservableObject {
         profiles.clear()
         readings.clear()
         healthKit.clear()
+        pendingInviteToken = nil
+        needsProfileSetup = false
+        startupError = nil
         statusMessage = "Signed out."
         isError = false
+    }
+
+    var pendingInviteToken: String? {
+        get { defaults.string(forKey: DefaultsKey.pendingInviteToken) }
+        set {
+            if let newValue {
+                defaults.set(newValue, forKey: DefaultsKey.pendingInviteToken)
+            } else {
+                defaults.removeObject(forKey: DefaultsKey.pendingInviteToken)
+            }
+        }
+    }
+
+    var selfProfile: HealthProfile? {
+        profiles.profiles.first {
+            $0.relationshipLabel == "Self" && ($0.linkedUserId == auth.signedInUserId || auth.signedInUserId == nil)
+        }
+    }
+
+    func startup() async {
+        guard hasAccessToken else {
+            isStartingUp = false
+            needsProfileSetup = false
+            return
+        }
+        isStartingUp = true
+        startupError = nil
+        defer { isStartingUp = false }
+
+        do {
+            if let token = pendingInviteToken {
+                _ = try await client.acceptInvite(baseURL: connection.baseURL, accessToken: auth.accessToken, token: token)
+                pendingInviteToken = nil
+            }
+
+            let bootstrap = try await client.bootstrap(baseURL: connection.baseURL, accessToken: auth.accessToken)
+            applyBootstrap(bootstrap)
+        } catch {
+            startupError = error
+            statusMessage = error.localizedDescription
+            isError = true
+        }
+    }
+
+    func createSelfProfile(displayName: String) async {
+        guard !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            isError = true
+            statusMessage = "Please enter your name."
+            return
+        }
+        await request {
+            let profile = try await client.createSelfProfile(
+                baseURL: connection.baseURL,
+                accessToken: auth.accessToken,
+                displayName: displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            if !self.profiles.profiles.contains(where: { $0.id == profile.id }) {
+                self.profiles.profiles.append(profile)
+            }
+            self.profiles.selectedProfileId = profile.id
+            self.healthKit.linkedProfileId = profile.id
+            self.needsProfileSetup = false
+            return "Profile created."
+        }
+    }
+
+    private func applyBootstrap(_ response: BootstrapResponse) {
+        family.currentFamilyName = response.family.name
+        family.familyKind = response.family.kind
+        family.currentFamilyRole = response.membership.role
+        profiles.profiles = response.profiles
+        if let selfProfile = response.selfProfile {
+            profiles.selectedProfileId = selfProfile.id
+        } else if profiles.profiles.count == 1 {
+            profiles.selectedProfileId = profiles.profiles[0].id
+        }
+        needsProfileSetup = response.needsProfileSetup
+        healthKit.linkedProfileId = response.selfProfile?.id
     }
 
     func request(_ action: () async throws -> String) async {
@@ -114,6 +198,24 @@ final class HealthBootstrapViewModel: ObservableObject {
         saveConnectionSettings()
     }
 
+    func handleInviteURL(_ url: URL) -> Bool {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: true) else {
+            return false
+        }
+        let pathComponents = components.path.split(separator: "/").map(String.init)
+        if components.host == "invite" || pathComponents.first == "invite" {
+            let token = components.host == "invite" ? pathComponents.first : pathComponents.dropFirst().first
+            guard let token, !token.isEmpty else { return false }
+            pendingInviteToken = token
+            return true
+        }
+        if let queryToken = components.queryItems?.first(where: { $0.name == "invite" })?.value, !queryToken.isEmpty {
+            pendingInviteToken = queryToken
+            return true
+        }
+        return false
+    }
+
     private func republishChanges<Object: ObservableObject>(from object: Object)
     where Object.ObjectWillChangePublisher == ObservableObjectPublisher {
         object.objectWillChange
@@ -130,4 +232,5 @@ enum DefaultsKey {
     static let refreshToken = "familyOS.refreshToken"
     static let userId = "familyOS.userId"
     static let userEmail = "familyOS.userEmail"
+    static let pendingInviteToken = "familyOS.pendingInviteToken"
 }

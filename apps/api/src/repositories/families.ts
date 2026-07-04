@@ -4,6 +4,7 @@ import type {
   CreateInviteResponse,
   BloodPressureReading,
   BloodGlucoseReading,
+  BootstrapResponse,
   HealthKitImportResult,
   HealthKitMetricType,
   HealthKitSampleInput,
@@ -18,6 +19,7 @@ import type {
   CurrentFamilyResponse,
   Family,
   FamilyInvite,
+  FamilyKind,
   FamilyMembership,
   FamilyRole,
   HealthProfile,
@@ -41,6 +43,7 @@ import type {
 export type CreateFamilyInput = {
   name: string;
   userId: string;
+  kind?: "personal" | "family";
 };
 
 export type CreateInviteInput = {
@@ -170,6 +173,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     const family: Family = {
       id: crypto.randomUUID(),
       name: input.name,
+      kind: input.kind ?? "family",
       createdByUserId: input.userId,
       createdAt: now,
       updatedAt: now
@@ -213,10 +217,80 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     return { family, membership };
   }
 
+  async bootstrap(userId: string): Promise<BootstrapResponse> {
+    let current = await this.getCurrentFamily(userId);
+    if (!current) {
+      const created = await this.createFamily({ name: "My Health", userId, kind: "personal" });
+      if (!created) {
+        throw new HttpError(500, "bootstrap_failed", "Failed to create personal workspace.");
+      }
+      current = created;
+    }
+
+    const profiles = await this.listProfiles(userId);
+    const selfProfile = profiles.find((profile) => profile.linkedUserId === userId && profile.relationshipLabel === "Self") ?? null;
+
+    return {
+      family: current.family,
+      profiles,
+      selfProfile,
+      needsProfileSetup: selfProfile === null
+    };
+  }
+
+  async createSelfProfile(actorUserId: string, displayName: string): Promise<HealthProfile> {
+    const current = this.requireActiveMember(actorUserId);
+    const existing = await this.getSelfProfile(actorUserId);
+    if (existing) {
+      return existing;
+    }
+
+    const now = new Date().toISOString();
+    const profile: HealthProfile = {
+      id: crypto.randomUUID(),
+      familyId: current.family.id,
+      linkedUserId: actorUserId,
+      displayName,
+      relationshipLabel: "Self",
+      status: "active",
+      createdAt: now,
+      updatedAt: now
+    };
+    this.profiles.set(profile.id, profile);
+    this.audit({
+      familyId: current.family.id,
+      actorUserId,
+      action: "profile.created",
+      resourceType: "profile",
+      resourceId: profile.id
+    });
+    return profile;
+  }
+
+  async getSelfProfile(actorUserId: string): Promise<HealthProfile | null> {
+    const current = await this.getCurrentFamily(actorUserId);
+    if (!current) {
+      return null;
+    }
+    return (
+      [...this.profiles.values()].find(
+        (profile) =>
+          profile.familyId === current.family.id &&
+          profile.linkedUserId === actorUserId &&
+          profile.relationshipLabel === "Self" &&
+          profile.status === "active"
+      ) ?? null
+    );
+  }
+
   async createInvite(input: CreateInviteInput): Promise<CreateInviteResponse> {
     const current = this.getCurrentFamilySync(input.actorUserId);
     if (!current || current.membership.role !== "manager") {
       throw new HttpError(403, "manager_required", "Only family managers can create invites.");
+    }
+
+    if (current.family.kind === "personal") {
+      this.families.set(current.family.id, { ...current.family, kind: "family", updatedAt: new Date().toISOString() });
     }
 
     const token = crypto.randomUUID().replaceAll("-", "");
@@ -270,7 +344,17 @@ export class InMemoryFamilyRepository implements FamilyRepository {
 
     const existingCurrent = this.getCurrentFamilySync(userId);
     if (existingCurrent) {
-      throw new HttpError(409, "family_already_exists", "User already has an active family.");
+      if (existingCurrent.family.kind === "family") {
+        throw new HttpError(409, "family_already_exists", "User already has an active family.");
+      }
+      this.assertSafePersonalSwitch(existingCurrent.family.id, userId);
+      const membership = [...this.memberships.values()].find(
+        (candidate) => candidate.userId === userId && candidate.status === "active"
+      );
+      if (membership) {
+        membership.status = "removed";
+        membership.updatedAt = new Date().toISOString();
+      }
     }
 
     invite.status = "accepted";
@@ -300,6 +384,36 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     }
 
     return { family, membership };
+  }
+
+  private assertSafePersonalSwitch(familyId: string, userId: string) {
+    const activeMemberships = [...this.memberships.values()].filter(
+      (candidate) => candidate.familyId === familyId && candidate.status === "active"
+    );
+    if (activeMemberships.length !== 1 || activeMemberships[0]?.userId !== userId) {
+      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has more than one active member.");
+    }
+
+    const hasReminders = [...this.reminders.values()].some(
+      (reminder) => reminder.familyId === familyId && !reminder.deletedAt
+    );
+    if (hasReminders) {
+      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has reminders.");
+    }
+
+    const hasBloodPressure = [...this.bloodPressureReadings.values()].some(
+      (reading) => reading.familyId === familyId && !reading.deletedAt && reading.source === "manual"
+    );
+    if (hasBloodPressure) {
+      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has manual blood pressure readings.");
+    }
+
+    const hasBloodGlucose = [...this.bloodGlucoseReadings.values()].some(
+      (reading) => reading.familyId === familyId && !reading.deletedAt && reading.source === "manual"
+    );
+    if (hasBloodGlucose) {
+      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has manual blood sugar readings.");
+    }
   }
 
   private findInvite(token: string) {
@@ -589,12 +703,13 @@ export class InMemoryFamilyRepository implements FamilyRepository {
 
   async getHealthKitSyncStatus(actorUserId: string): Promise<HealthKitSyncStatus> {
     this.requireActiveMember(actorUserId);
+    const selfProfile = await this.getSelfProfile(actorUserId);
     const setting = this.healthKitSettings.get(actorUserId);
     const lastSync = [...this.healthKitSyncRuns.values()]
       .filter((run) => run.userId === actorUserId)
       .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0];
     return {
-      linkedProfileId: setting?.personId,
+      linkedProfileId: selfProfile?.id,
       enabledMetrics: setting?.enabledMetrics ?? [],
       lastSync: lastSync
         ? {
@@ -637,13 +752,14 @@ export class InMemoryFamilyRepository implements FamilyRepository {
 
   async updateHealthKitSyncSettings(actorUserId: string, enabledMetrics: HealthKitMetricType[]): Promise<HealthKitSyncStatus> {
     const current = this.requireActiveMember(actorUserId);
-    const setting = this.healthKitSettings.get(actorUserId);
-    if (!setting) {
-      throw new HttpError(409, "healthkit_profile_required", "Link your profile before enabling HealthKit sync.");
+    const selfProfile = await this.getSelfProfile(actorUserId);
+    if (!selfProfile) {
+      throw new HttpError(409, "healthkit_profile_required", "Create your self profile before enabling HealthKit sync.");
     }
     const uniqueMetrics = [...new Set(enabledMetrics)].filter(isHealthKitMetricType);
     this.healthKitSettings.set(actorUserId, {
-      ...setting,
+      userId: actorUserId,
+      personId: selfProfile.id,
       enabledMetrics: uniqueMetrics
     });
     this.audit({
@@ -651,7 +767,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       actorUserId,
       action: "healthkit.settings_updated",
       resourceType: "health_profile",
-      resourceId: setting.personId,
+      resourceId: selfProfile.id,
       metadata: { enabledMetrics: uniqueMetrics }
     });
     return this.getHealthKitSyncStatus(actorUserId);
@@ -659,11 +775,12 @@ export class InMemoryFamilyRepository implements FamilyRepository {
 
   async importHealthKitSamples(actorUserId: string, samples: HealthKitSampleInput[]): Promise<HealthKitImportResult> {
     const current = this.requireActiveMember(actorUserId);
-    const setting = this.healthKitSettings.get(actorUserId);
-    if (!setting) {
-      throw new HttpError(409, "healthkit_profile_required", "Link your profile before importing HealthKit data.");
+    const selfProfile = await this.getSelfProfile(actorUserId);
+    if (!selfProfile) {
+      throw new HttpError(409, "healthkit_profile_required", "Create your self profile before importing HealthKit data.");
     }
-    const enabled = new Set(setting.enabledMetrics);
+    const setting = this.healthKitSettings.get(actorUserId);
+    const enabled = new Set(setting?.enabledMetrics ?? []);
     const syncRunId = crypto.randomUUID();
     const now = new Date().toISOString();
     let importedCount = 0;
@@ -675,7 +792,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
         skippedCount += 1;
         continue;
       }
-      const sampleKey = `${setting.personId}:${sample.sourceSampleKey}`;
+      const sampleKey = `${selfProfile.id}:${sample.sourceSampleKey}`;
       if (this.healthKitSamples.has(sampleKey)) {
         skippedCount += 1;
         continue;
@@ -688,7 +805,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
         ...sample,
         id: crypto.randomUUID(),
         familyId: current.family.id,
-        personId: setting.personId,
+        personId: selfProfile.id,
         userId: actorUserId,
         syncRunId
       });
@@ -696,7 +813,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
         const reading: BloodPressureReading = {
           id: crypto.randomUUID(),
           familyId: current.family.id,
-          personId: setting.personId,
+          personId: selfProfile.id,
           recordedByUserId: actorUserId,
           systolic: sample.systolic!,
           diastolic: sample.diastolic!,
@@ -711,7 +828,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
         const reading: BloodGlucoseReading = {
           id: crypto.randomUUID(),
           familyId: current.family.id,
-          personId: setting.personId,
+          personId: selfProfile.id,
           recordedByUserId: actorUserId,
           value: sample.value!,
           unit: "mg/dL",
@@ -726,11 +843,11 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       importedCount += 1;
     }
 
-    this.rebuildHealthMetricSummaries(current.family.id, setting.personId);
+    this.rebuildHealthMetricSummaries(current.family.id, selfProfile.id);
     const run = {
       id: syncRunId,
       userId: actorUserId,
-      personId: setting.personId,
+      personId: selfProfile.id,
       status: failedCount > 0 ? "failed" as const : "completed" as const,
       startedAt: now,
       finishedAt: new Date().toISOString(),

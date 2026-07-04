@@ -15,7 +15,7 @@ struct LatestReadingsSummary: View {
                     detail: "mmHg"
                 )
                 MetricTile(
-                    title: "Diabetes",
+                    title: "Blood Sugar",
                     value: viewModel.readings.bloodGlucoseReadings.first.map { String(format: "%.0f", $0.value) } ?? "--",
                     detail: "mg/dL"
                 )

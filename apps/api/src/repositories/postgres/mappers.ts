@@ -21,6 +21,7 @@ export function mapCurrentFamily(row: Row): CurrentFamilyResponse {
     family: {
       id: row.family_id,
       name: row.family_name,
+      kind: row.family_kind ?? "family",
       createdByUserId: row.created_by_user_id,
       createdAt: toIso(row.family_created_at),
       updatedAt: toIso(row.family_updated_at)
@@ -41,6 +42,7 @@ export function mapFamily(row: Row): Family {
   return {
     id: row.id,
     name: row.name,
+    kind: row.kind ?? "family",
     createdByUserId: row.created_by_user_id,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at)
