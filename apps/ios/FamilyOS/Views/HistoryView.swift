@@ -27,7 +27,7 @@ struct HistoryView: View {
                     }
                 }
 
-                Section("Diabetes") {
+                Section("Blood Sugar") {
                     if viewModel.readings.bloodGlucoseReadings.isEmpty {
                         EmptyRow("No blood sugar readings yet.")
                     } else {
