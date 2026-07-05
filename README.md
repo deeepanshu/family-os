@@ -150,5 +150,6 @@ npm run hooks:install
 ```
 
 - `pre-commit` runs `npm run typecheck`.
-- `pre-push` runs the Health API typecheck and tests. iOS build/test is skipped
-  locally by default because it requires a simulator; CI covers it.
+- `pre-push` runs the Health API typecheck and unit tests. Postgres/RLS
+  integration tests and iOS build/test are skipped locally by default; CI covers
+  them.
