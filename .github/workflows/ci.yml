@@ -134,8 +134,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.app
+      - name: Print selected Xcode
+        run: |
+          echo "Xcode path: $(xcode-select -p)"
+          xcodebuild -version
 
       - name: Find available iPhone simulator
         id: simulator

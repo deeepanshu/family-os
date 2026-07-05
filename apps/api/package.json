@@ -7,6 +7,8 @@
     "dev": "bun --hot src/server.ts",
     "start": "bun src/server.ts",
     "test": "vitest run",
+    "test:unit": "vitest run --exclude test/postgresRepository.test.ts",
+    "test:integration": "vitest run test/postgresRepository.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

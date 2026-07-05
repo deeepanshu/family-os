@@ -4,8 +4,11 @@ set -eu
 echo "[pre-push] Running API typecheck..."
 npm run typecheck -w @family-os/health-api
 
-echo "[pre-push] Running API tests..."
-npm run test -w @family-os/health-api
+echo "[pre-push] Running unit API tests (no Postgres)..."
+npm run test:unit -w @family-os/health-api
 
-echo "[pre-push] Skipping iOS build/test by default. Run it manually with:"
+echo "[pre-push] Skipping iOS build/test and Postgres/RLS integration tests by default."
+echo "  - Full API suite (with Postgres): npm run test -w @family-os/health-api"
+echo "  - Postgres/RLS integration tests: npm run test:integration -w @family-os/health-api"
+echo "  - iOS simulator tests: run manually with:"
 echo "  xcodebuild -project apps/ios/FamilyOS.xcodeproj -scheme FamilyOS -destination 'platform=iOS Simulator,name=iPhone 17' CODE_SIGNING_ALLOWED=NO test"
