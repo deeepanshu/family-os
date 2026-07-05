@@ -1,4 +1,4 @@
-import type { BootstrapResponse, CreateInviteResponse, CurrentFamilyResponse, HealthProfile, PublicInviteResponse } from "@family-os/shared";
+import type { BootstrapResponse, CreateInviteResponse, CurrentFamilyResponse, FamilyMember, FamilyMembership, HealthProfile, PublicInviteResponse } from "@family-os/shared";
 import { HttpError } from "../../errors";
 import type { CreateFamilyInput, CreateInviteInput, CreateProfileInput, UpdateProfileInput } from "../families";
 import { currentInviteStatus, hashToken, PostgresRepositoryContext } from "./context";
@@ -47,6 +47,30 @@ export class PostgresFamilyStore {
     return this.context.getCurrentFamily(userId);
   }
 
+  async listMembers(actorUserId: string): Promise<FamilyMember[]> {
+    const current = await this.context.requireActiveMember(actorUserId);
+    const rows = await this.context.sql`
+      select
+        fm.*,
+        u.email as user_email,
+        p.display_name as self_display_name
+      from family_memberships fm
+      left join auth.users u on u.id = fm.user_id
+      left join people p on p.family_id = fm.family_id
+        and p.linked_user_id = fm.user_id
+        and p.relationship_label = 'Self'
+        and p.status = 'active'
+      where fm.family_id = ${current.family.id}
+        and fm.status = 'active'
+      order by fm.created_at asc
+    `;
+    return rows.map((row: any) => ({
+      membership: mapMembership(row),
+      email: row.user_email ?? undefined,
+      displayName: row.self_display_name ?? undefined
+    }));
+  }
+
   async bootstrap(userId: string): Promise<BootstrapResponse> {
     await this.context.syncAuthUser(userId);
     let current = await this.context.getCurrentFamily(userId);
@@ -63,6 +87,7 @@ export class PostgresFamilyStore {
 
     return {
       family: current.family,
+      membership: current.membership,
       profiles,
       selfProfile,
       needsProfileSetup: selfProfile === null
@@ -111,38 +136,43 @@ export class PostgresFamilyStore {
   async createInvite(input: CreateInviteInput): Promise<CreateInviteResponse> {
     const current = await this.context.requireManager(input.actorUserId, "Only family managers can create invites.");
 
-    if (current.family.kind === "personal") {
-      await this.context.sql`
-        update families
-        set kind = 'family'
-        where id = ${current.family.id}
-      `;
-    }
+    return this.context.sql.begin(async (tx: any) => {
+      if (current.family.kind === "personal") {
+        await tx`
+          update families
+          set kind = 'family'
+          where id = ${current.family.id}
+        `;
+      }
 
-    const token = crypto.randomUUID().replaceAll("-", "");
-    const [invite] = await this.context.sql`
-      insert into family_invites (family_id, invited_by_user_id, email, token_hash, role, status, expires_at)
-      values (
-        ${current.family.id},
-        ${input.actorUserId},
-        ${input.email ?? null},
-        ${hashToken(token)},
-        ${input.role},
-        'pending',
-        now() + interval '7 days'
-      )
-      returning *
-    `;
-    const createdInvite = requireRow(invite, "Failed to create invite.");
-    await this.context.audit({
-      familyId: current.family.id,
-      actorUserId: input.actorUserId,
-      action: "invite.created",
-      resourceType: "invite",
-      resourceId: createdInvite.id,
-      metadata: { role: input.role }
+      const token = crypto.randomUUID().replaceAll("-", "");
+      const [invite] = await tx`
+        insert into family_invites (family_id, invited_by_user_id, email, token_hash, role, status, expires_at)
+        values (
+          ${current.family.id},
+          ${input.actorUserId},
+          ${input.email ?? null},
+          ${hashToken(token)},
+          ${input.role},
+          'pending',
+          now() + interval '7 days'
+        )
+        returning *
+      `;
+      const createdInvite = requireRow(invite, "Failed to create invite.");
+      await this.context.audit(
+        {
+          familyId: current.family.id,
+          actorUserId: input.actorUserId,
+          action: "invite.created",
+          resourceType: "invite",
+          resourceId: createdInvite.id,
+          metadata: { role: input.role }
+        },
+        tx
+      );
+      return { invite: mapInvite(createdInvite), token };
     });
-    return { invite: mapInvite(createdInvite), token };
   }
 
   async getInviteByToken(token: string): Promise<PublicInviteResponse> {

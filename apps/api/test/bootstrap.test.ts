@@ -50,6 +50,11 @@ describe("solo-first bootstrap", () => {
       kind: "personal",
       createdByUserId: userId
     });
+    expect(body.data.membership).toMatchObject({
+      userId,
+      role: "manager",
+      status: "active"
+    });
     expect(body.data.profiles).toEqual([]);
     expect(body.data.selfProfile).toBeNull();
     expect(body.data.needsProfileSetup).toBe(true);
@@ -85,7 +90,7 @@ describe("solo-first bootstrap", () => {
       headers: { authorization: `Bearer ${token}` }
     });
 
-    const response = await api.request(`${HEALTH_API_PREFIX}/bootstrap/me/profile`, {
+    const response = await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ displayName: "Deepanshu" })
@@ -121,14 +126,14 @@ describe("solo-first bootstrap", () => {
       headers: { authorization: `Bearer ${token}` }
     });
 
-    const first = await api.request(`${HEALTH_API_PREFIX}/bootstrap/me/profile`, {
+    const first = await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ displayName: "Deepanshu" })
     });
     const firstBody = await first.json();
 
-    const second = await api.request(`${HEALTH_API_PREFIX}/bootstrap/me/profile`, {
+    const second = await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ displayName: "Changed" })
@@ -144,7 +149,7 @@ describe("solo-first bootstrap", () => {
     const api = app();
     const token = await jwtFor(userId);
 
-    const response = await api.request(`${HEALTH_API_PREFIX}/bootstrap/me/profile`, {
+    const response = await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ displayName: "Deepanshu" })
@@ -335,7 +340,7 @@ describe("solo-first bootstrap", () => {
       method: "POST",
       headers: { authorization: `Bearer ${secondToken}` }
     });
-    const secondSelfProfile = await (await api.request(`${HEALTH_API_PREFIX}/bootstrap/me/profile`, {
+    const secondSelfProfile = await (await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
       method: "POST",
       headers: { authorization: `Bearer ${secondToken}`, "content-type": "application/json" },
       body: JSON.stringify({ displayName: "Second" })
@@ -380,7 +385,7 @@ describe("solo-first bootstrap", () => {
       method: "POST",
       headers: { authorization: `Bearer ${secondToken}` }
     });
-    const secondSelfProfile = await (await api.request(`${HEALTH_API_PREFIX}/bootstrap/me/profile`, {
+    const secondSelfProfile = await (await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
       method: "POST",
       headers: { authorization: `Bearer ${secondToken}`, "content-type": "application/json" },
       body: JSON.stringify({ displayName: "Second" })
@@ -433,7 +438,7 @@ describe("solo-first bootstrap", () => {
       method: "POST",
       headers: { authorization: `Bearer ${token}` }
     });
-    await api.request(`${HEALTH_API_PREFIX}/bootstrap/me/profile`, {
+    await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ displayName: "Deepanshu" })

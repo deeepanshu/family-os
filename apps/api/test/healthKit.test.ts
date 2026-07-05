@@ -35,15 +35,14 @@ async function jwtFor(subject: string) {
 
 async function setup(api: ReturnType<typeof app>) {
   const token = await jwtFor(userId);
-  await api.request(`${HEALTH_API_PREFIX}/families`, {
+  await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
     method: "POST",
-    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ name: "Jain Family" })
+    headers: { authorization: `Bearer ${token}` }
   });
-  const profile = await (await api.request(`${HEALTH_API_PREFIX}/people`, {
+  const profile = await (await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ displayName: "Deepanshu", relationshipLabel: "Self" })
+    body: JSON.stringify({ displayName: "Deepanshu" })
   })).json();
   return { token, profileId: profile.data.id };
 }
@@ -51,7 +50,11 @@ async function setup(api: ReturnType<typeof app>) {
 describe("HealthKit sync", () => {
   it("requires a linked profile before import", async () => {
     const api = app();
-    const { token } = await setup(api);
+    const token = await jwtFor(userId);
+    await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` }
+    });
 
     const response = await api.request(`${HEALTH_API_PREFIX}/healthkit/samples/batch`, {
       method: "POST",
@@ -193,7 +196,26 @@ describe("HealthKit sync", () => {
     expect(response.status).toBe(403);
   });
 
-  it("blocks another family member from linking an already linked profile", async () => {
+  it("blocks linking a profile that is not the actor's self profile", async () => {
+    const api = app();
+    const { token } = await setup(api);
+
+    const otherProfile = await (await api.request(`${HEALTH_API_PREFIX}/people`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "Mom", relationshipLabel: "Mother" })
+    })).json();
+
+    const response = await api.request(`${HEALTH_API_PREFIX}/healthkit/link-profile`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ personId: otherProfile.data.id })
+    });
+
+    expect(response.status).toBe(409);
+  });
+
+  it("blocks another family member from linking the manager's self profile", async () => {
     const api = app();
     const { token, profileId } = await setup(api);
 

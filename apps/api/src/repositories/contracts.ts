@@ -5,6 +5,8 @@ import type {
   BootstrapResponse,
   CreateInviteResponse,
   CurrentFamilyResponse,
+  FamilyMember,
+  FamilyMembership,
   HealthProfile,
   HealthKitImportResult,
   HealthKitMetricType,
@@ -35,6 +37,7 @@ export interface FamilyStore {
   createFamily(input: CreateFamilyInput): Promise<CurrentFamilyResponse>;
   getCurrentFamily(userId: string): Promise<CurrentFamilyResponse>;
   bootstrap(userId: string): Promise<BootstrapResponse>;
+  listMembers(actorUserId: string): Promise<FamilyMember[]>;
 }
 
 export interface InviteStore {

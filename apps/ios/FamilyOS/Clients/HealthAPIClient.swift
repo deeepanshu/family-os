@@ -47,7 +47,7 @@ struct HealthAPIClient {
             throw HealthAPIError.missingToken
         }
         return try await post(
-            path: "bootstrap/me/profile",
+            path: "me/profile",
             baseURL: baseURL,
             accessToken: accessToken,
             body: CreateSelfProfileRequest(displayName: displayName)
@@ -59,6 +59,13 @@ struct HealthAPIClient {
             throw HealthAPIError.missingToken
         }
         return try await get(path: "families/current", baseURL: baseURL, accessToken: accessToken)
+    }
+
+    func listMembers(baseURL: String, accessToken: String) async throws -> [FamilyMember] {
+        guard !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw HealthAPIError.missingToken
+        }
+        return try await get(path: "families/members", baseURL: baseURL, accessToken: accessToken)
     }
 
     func createFamily(baseURL: String, accessToken: String, name: String) async throws -> FamilyResponse {

@@ -59,23 +59,26 @@ export class PostgresHealthKitStore {
 
   async linkHealthKitProfile(actorUserId: string, personId: string): Promise<HealthKitSyncStatus> {
     const current = await this.context.requireActiveMember(actorUserId);
-    const [profile] = await this.context.sql`
-      select *
+    const [selfProfile] = await this.context.sql`
+      select id
       from people
-      where id = ${personId}
-        and family_id = ${current.family.id}
+      where family_id = ${current.family.id}
+        and linked_user_id = ${actorUserId}
+        and relationship_label = 'Self'
         and status = 'active'
+      limit 1
     `;
-    if (!profile) {
-      throw new HttpError(404, "profile_not_found", "Health profile was not found.");
+    if (!selfProfile) {
+      throw new HttpError(409, "healthkit_profile_required", "Create your self profile before using HealthKit sync.");
     }
-    if (profile.linked_user_id && profile.linked_user_id !== actorUserId) {
-      throw new HttpError(409, "profile_already_linked", "This health profile is already linked to another user.");
+    if (selfProfile.id !== personId) {
+      throw new HttpError(409, "healthkit_profile_must_be_self", "HealthKit sync can only target your own self profile.");
     }
     await this.context.sql`
       update people
-      set linked_user_id = ${actorUserId}
+      set linked_user_id = ${actorUserId}, relationship_label = 'Self'
       where id = ${personId}
+        and family_id = ${current.family.id}
     `;
     await this.context.audit({
       familyId: current.family.id,

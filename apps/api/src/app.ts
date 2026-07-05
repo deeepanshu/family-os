@@ -15,6 +15,7 @@ import { createReminderRoutes } from "./routes/reminders";
 import { createDeviceRoutes } from "./routes/devices";
 import { createAuditLogRoutes } from "./routes/auditLogs";
 import { createBootstrapRoutes } from "./routes/bootstrap";
+import { createMeRoutes } from "./routes/me";
 import { corsMiddleware, requestLoggingMiddleware, writeRateLimitMiddleware } from "./middleware/hardening";
 import { createDependencies, repositoriesFromFamilyRepository } from "./dependencies";
 import type { AppRepositories } from "./repositories/contracts";
@@ -58,7 +59,8 @@ export function createApp(options: AppOptions = {}) {
     return c.json({ data: body });
   });
 
-  health.route("/bootstrap", createBootstrapRoutes(repositories.families, repositories.profiles));
+  health.route("/bootstrap", createBootstrapRoutes(repositories.families));
+  health.route("/me", createMeRoutes(repositories.profiles));
   health.route("/families", createFamilyRoutes(repositories.families));
   health.route("/invites", createInviteRoutes(repositories.invites));
   health.route("/people", createPeopleRoutes(repositories.profiles));

@@ -34,7 +34,7 @@ struct FamilyView: View {
                     }
                 }
 
-                if viewModel.family.isPersonalWorkspace {
+                if viewModel.family.isManager {
                     Section("Add another health profile") {
                         TextField("Name", text: $viewModel.profiles.profileName)
                         TextField("Relationship", text: $viewModel.profiles.profileRelationship)
@@ -90,17 +90,44 @@ struct FamilyView: View {
         }
     }
 
+    private func memberIdentity(_ member: FamilyMember) -> String {
+        if let displayName = member.displayName, !displayName.isEmpty {
+            return displayName
+        }
+        if let email = member.email, !email.isEmpty {
+            return email
+        }
+        return "Member"
+    }
+
     private var familyWorkspaceSection: some View {
-        Section("Family") {
-            if let familyName = viewModel.family.currentFamilyName {
-                LabeledContent("Name", value: familyName)
-                LabeledContent("Your role", value: viewModel.family.currentFamilyRole?.displayName ?? "Member")
-            } else {
-                TextField("Family name", text: $viewModel.family.familyName)
-                Button("Create Family") {
-                    Task { await viewModel.createFamily() }
+        Group {
+            Section("Family") {
+                if let familyName = viewModel.family.currentFamilyName {
+                    LabeledContent("Name", value: familyName)
+                    LabeledContent("Your role", value: viewModel.family.currentFamilyRole?.displayName ?? "Member")
+                } else {
+                    TextField("Family name", text: $viewModel.family.familyName)
+                    Button("Create Family") {
+                        Task { await viewModel.createFamily() }
+                    }
                 }
             }
+
+                Section("Members") {
+                    if viewModel.family.members.isEmpty {
+                        EmptyRow("No members yet.")
+                    } else {
+                        ForEach(viewModel.family.members) { member in
+                            HStack {
+                                Text(memberIdentity(member))
+                                Spacer()
+                                Text(member.membership.role.displayName)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
         }
     }
 }

@@ -22,6 +22,7 @@ export type AuthSessionResponse = {
 
 export type BootstrapResponse = {
   family: Family;
+  membership: FamilyMembership;
   profiles: HealthProfile[];
   selfProfile: HealthProfile | null;
   needsProfileSetup: boolean;
@@ -50,6 +51,12 @@ export type FamilyMembership = {
   status: MembershipStatus;
   createdAt: string;
   updatedAt: string;
+};
+
+export type FamilyMember = {
+  membership: FamilyMembership;
+  email?: string;
+  displayName?: string;
 };
 
 export type CurrentFamilyResponse = {

@@ -30,5 +30,11 @@ export function createFamilyRoutes(repository: FamilyStore) {
     return c.json({ data });
   });
 
+  families.get("/members", async (c) => {
+    const user = c.get("user");
+    const data = await repository.listMembers(user.id);
+    return c.json({ data });
+  });
+
   return families;
 }

@@ -12,6 +12,21 @@ extension HealthBootstrapViewModel {
             }
             return "Current family: \(response.family.name)."
         }
+        if family.currentFamilyName != nil {
+            await loadMembers()
+        }
+    }
+
+    func loadMembers() async {
+        await request {
+            let members = try await client.listMembers(baseURL: connection.baseURL, accessToken: auth.accessToken)
+            family.members = members
+            return "Loaded \(members.count) member(s)."
+        }
+    }
+
+    func refreshFamilyAfterInvite() async {
+        await loadCurrentFamily()
     }
 
     func createFamily() async {
@@ -30,6 +45,9 @@ extension HealthBootstrapViewModel {
             let response = try await client.createInvite(baseURL: connection.baseURL, accessToken: auth.accessToken)
             family.lastCreatedInviteToken = response.token
             return "Created invite token: \(response.token)"
+        }
+        if family.lastCreatedInviteToken != nil {
+            await refreshFamilyAfterInvite()
         }
     }
 

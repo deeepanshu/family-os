@@ -5,6 +5,7 @@ import type {
   BloodPressureReading,
   BloodGlucoseReading,
   BootstrapResponse,
+  FamilyMember,
   HealthKitImportResult,
   HealthKitMetricType,
   HealthKitSampleInput,
@@ -217,6 +218,25 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     return { family, membership };
   }
 
+  async listMembers(actorUserId: string): Promise<FamilyMember[]> {
+    const current = this.requireActiveMember(actorUserId);
+    return [...this.memberships.values()]
+      .filter((membership) => membership.familyId === current.family.id && membership.status === "active")
+      .map((membership) => {
+        const selfProfile = [...this.profiles.values()].find(
+          (profile) =>
+            profile.familyId === current.family.id &&
+            profile.linkedUserId === membership.userId &&
+            profile.relationshipLabel === "Self" &&
+            profile.status === "active"
+        );
+        return {
+          membership,
+          displayName: selfProfile?.displayName
+        };
+      });
+  }
+
   async bootstrap(userId: string): Promise<BootstrapResponse> {
     let current = await this.getCurrentFamily(userId);
     if (!current) {
@@ -232,6 +252,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
 
     return {
       family: current.family,
+      membership: current.membership,
       profiles,
       selfProfile,
       needsProfileSetup: selfProfile === null
@@ -727,14 +748,14 @@ export class InMemoryFamilyRepository implements FamilyRepository {
 
   async linkHealthKitProfile(actorUserId: string, personId: string): Promise<HealthKitSyncStatus> {
     const current = this.requireActiveMember(actorUserId);
-    const profile = this.profiles.get(personId);
-    if (!profile || profile.familyId !== current.family.id || profile.status !== "active") {
-      throw new HttpError(404, "profile_not_found", "Health profile was not found.");
+    const selfProfile = await this.getSelfProfile(actorUserId);
+    if (!selfProfile) {
+      throw new HttpError(409, "healthkit_profile_required", "Create your self profile before using HealthKit sync.");
     }
-    if (profile.linkedUserId && profile.linkedUserId !== actorUserId) {
-      throw new HttpError(409, "profile_already_linked", "This health profile is already linked to another user.");
+    if (selfProfile.id !== personId) {
+      throw new HttpError(409, "healthkit_profile_must_be_self", "HealthKit sync can only target your own self profile.");
     }
-    this.profiles.set(personId, { ...profile, linkedUserId: actorUserId, updatedAt: new Date().toISOString() });
+    this.profiles.set(personId, { ...selfProfile, linkedUserId: actorUserId, relationshipLabel: "Self", updatedAt: new Date().toISOString() });
     this.healthKitSettings.set(actorUserId, {
       userId: actorUserId,
       personId,

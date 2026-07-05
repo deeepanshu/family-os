@@ -37,9 +37,19 @@ enum FamilyKind: String, Decodable {
     case family
 }
 
-struct FamilyMembership: Decodable {
+struct FamilyMembership: Decodable, Identifiable {
+    let id: String
+    let userId: String
     let role: FamilyRole
     let status: MembershipStatus
+}
+
+struct FamilyMember: Decodable, Identifiable {
+    var id: String { membership.id }
+
+    let membership: FamilyMembership
+    let email: String?
+    let displayName: String?
 }
 
 enum FamilyRole: String, Codable {

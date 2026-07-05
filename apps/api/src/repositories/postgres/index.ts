@@ -6,6 +6,8 @@ import type {
   BootstrapResponse,
   CreateInviteResponse,
   CurrentFamilyResponse,
+  FamilyMember,
+  FamilyMembership,
   HealthKitImportResult,
   HealthKitMetricType,
   HealthKitSampleInput,
@@ -72,6 +74,10 @@ export class PostgresFamilyRepository implements FamilyRepository {
 
   bootstrap(userId: string): Promise<BootstrapResponse> {
     return this.familyStore.bootstrap(userId);
+  }
+
+  listMembers(actorUserId: string): Promise<FamilyMember[]> {
+    return this.familyStore.listMembers(actorUserId);
   }
 
   createInvite(input: CreateInviteInput): Promise<CreateInviteResponse> {
