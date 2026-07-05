@@ -1,0 +1,168 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workspace:
+    name: Workspace Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck workspaces
+        run: npm run typecheck
+
+  api:
+    name: API Tests
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://family_os:family_os@localhost:5432/family_os
+      HEALTH_API_REPOSITORY: postgres
+      HEALTH_API_SYNC_LOCAL_AUTH_USERS: "true"
+      SUPABASE_URL: https://project.supabase.co
+      SUPABASE_JWT_SECRET: test-supabase-jwt-secret-with-enough-length
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start Postgres
+        run: docker compose up -d postgres
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            if docker exec family-os-postgres pg_isready -U family_os -d family_os; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Postgres did not become ready in time"
+          exit 1
+
+      - name: Run local migrations
+        run: npm run db:migrate:local
+
+      - name: Typecheck API
+        run: npm run typecheck -w @family-os/health-api
+
+      - name: Test API
+        run: npm run test -w @family-os/health-api
+
+      - name: Stop Postgres
+        if: always()
+        run: docker compose down
+
+  drizzle:
+    name: Drizzle Migrations
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://family_os:family_os@localhost:5432/family_os
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start Postgres
+        run: docker compose up -d postgres
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            if docker exec family-os-postgres pg_isready -U family_os -d family_os; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Postgres did not become ready in time"
+          exit 1
+
+      - name: Check migrations
+        run: npm run db:check
+
+      - name: Detect uncommitted migration drift
+        run: |
+          npm run db:generate
+          if [ -n "$(git status --porcelain db/migrations)" ]; then
+            echo "Uncommitted Drizzle migration output detected. Run 'npm run db:generate' locally and commit the results."
+            git status --short db/migrations
+            exit 1
+          fi
+
+      - name: Stop Postgres
+        if: always()
+        run: docker compose down
+
+  ios:
+    name: iOS Build and Test
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.app
+
+      - name: Find available iPhone simulator
+        id: simulator
+        run: |
+          device=$(xcrun simctl list devices available -j | \
+            python3 -c "import json,sys; data=json.load(sys.stdin); print(next((d['udid'] for runtime, devices in data.get('devices', {}).items() for d in devices if isinstance(d, dict) and d.get('isAvailable') and 'iPhone' in d.get('name', '')), ''))")
+          if [ -z "$device" ]; then
+            echo "No available iPhone simulator found"
+            exit 1
+          fi
+          echo "udid=$device" >> "$GITHUB_OUTPUT"
+          echo "Using simulator UDID: $device"
+
+      - name: Build iOS app
+        run: |
+          xcodebuild \
+            -project apps/ios/FamilyOS.xcodeproj \
+            -scheme FamilyOS \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Test iOS app
+        run: |
+          xcodebuild \
+            -project apps/ios/FamilyOS.xcodeproj \
+            -scheme FamilyOS \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            test

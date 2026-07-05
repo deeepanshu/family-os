@@ -126,3 +126,29 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   build
 ```
+
+## CI and Local Hooks
+
+GitHub Actions in `.github/workflows/ci.yml` are the authoritative quality gate
+for `main` and pull requests. The workflow runs:
+
+- `workspace` - typechecks the whole monorepo.
+- `api` - starts Docker Postgres, applies local migrations, typechecks the
+  Health API, and runs API tests including RLS against Postgres.
+- `drizzle` - runs `db:check` and fails if schema changes would produce
+  uncommitted migration output.
+- `ios` - builds and tests the `FamilyOS` scheme on a macOS runner with
+  `CODE_SIGNING_ALLOWED=NO`.
+
+CI uses fake JWT/Supabase values only; no production secrets are included.
+
+Install the repo-managed local git hooks for faster pre-commit and pre-push
+feedback:
+
+```sh
+npm run hooks:install
+```
+
+- `pre-commit` runs `npm run typecheck`.
+- `pre-push` runs the Health API typecheck and tests. iOS build/test is skipped
+  locally by default because it requires a simulator; CI covers it.
