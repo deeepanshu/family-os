@@ -55,6 +55,11 @@ extension HealthBootstrapViewModel {
             statusMessage = "Link your profile before syncing HealthKit."
             return
         }
+        guard linkedProfileId == selfProfile?.id else {
+            isError = true
+            statusMessage = "HealthKit sync must target your own profile."
+            return
+        }
         healthKit.isSyncing = true
         defer { healthKit.isSyncing = false }
         await request {

@@ -168,7 +168,7 @@ final class HealthBootstrapViewModel: ObservableObject {
         }
     }
 
-    private func applyBootstrap(_ response: BootstrapResponse) {
+    func applyBootstrap(_ response: BootstrapResponse) {
         family.currentFamilyName = response.family.name
         family.familyKind = response.family.kind
         family.currentFamilyRole = response.membership.role

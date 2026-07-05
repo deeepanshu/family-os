@@ -13,6 +13,13 @@ struct AppEnvironment {
 
     static let current = AppEnvironment(bundle: .main)
 
+    init(name: AppEnvironmentName, apiBaseURL: String, supabaseURL: String, supabaseAnonKey: String = "") {
+        self.name = name
+        self.apiBaseURL = apiBaseURL
+        self.supabaseURL = supabaseURL
+        self.supabaseAnonKey = supabaseAnonKey
+    }
+
     init(bundle: Bundle) {
         let info = bundle.infoDictionary ?? [:]
         let configuredName = (info["FAMILY_OS_ENV"] as? String) ?? "release"
