@@ -5,6 +5,7 @@ DerivedData/
 .env.*
 !.env.example
 dist/
+build/
 coverage/
 **/*.xcodeproj/project.xcworkspace/
 **/*.xcworkspace/xcuserdata/
