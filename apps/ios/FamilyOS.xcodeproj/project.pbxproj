@@ -955,7 +955,7 @@
 				<key>CURRENT_PROJECT_VERSION</key>
 				<string>1</string>
 				<key>DEVELOPMENT_TEAM</key>
-				<string></string>
+				<string>LG9UP2KBHV</string>
 				<key>ENABLE_PREVIEWS</key>
 				<string>YES</string>
 				<key>FAMILY_OS_ENV</key>
@@ -1014,7 +1014,7 @@
 				<key>CURRENT_PROJECT_VERSION</key>
 				<string>1</string>
 				<key>DEVELOPMENT_TEAM</key>
-				<string></string>
+				<string>LG9UP2KBHV</string>
 				<key>FAMILY_OS_ENV</key>
 				<string>release</string>
 				<key>GENERATE_INFOPLIST_FILE</key>
@@ -1598,7 +1598,7 @@
 				<key>CURRENT_PROJECT_VERSION</key>
 				<string>1</string>
 				<key>DEVELOPMENT_TEAM</key>
-				<string></string>
+				<string>LG9UP2KBHV</string>
 				<key>GENERATE_INFOPLIST_FILE</key>
 				<string>YES</string>
 				<key>IPHONEOS_DEPLOYMENT_TARGET</key>
@@ -1642,7 +1642,7 @@
 				<key>CURRENT_PROJECT_VERSION</key>
 				<string>1</string>
 				<key>DEVELOPMENT_TEAM</key>
-				<string></string>
+				<string>LG9UP2KBHV</string>
 				<key>GENERATE_INFOPLIST_FILE</key>
 				<string>YES</string>
 				<key>IPHONEOS_DEPLOYMENT_TARGET</key>
