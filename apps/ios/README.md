@@ -46,7 +46,7 @@ Debug builds use the `local` environment:
 
 Release builds use the `release` environment:
 
-- Health API: `https://api.deepanshujain.com/health/v1`
+- Health API: `https://api.deepanshujain.me/health/v1`
 - Backend database: Supabase Postgres behind the Raspberry Pi API
 - Auth: Supabase Auth with Sign in with Apple
 

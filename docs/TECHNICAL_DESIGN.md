@@ -16,7 +16,7 @@
 - Notifications: APNs.
 - Backend host: Raspberry Pi.
 - Public ingress: Cloudflare Tunnel via `cloudflared`.
-- API base URL: `https://api.deepanshujain.com/health/v1`.
+- API base URL: `https://api.deepanshujain.me/health/v1`.
 - Distribution: TestFlight.
 
 ## Repository Structure
@@ -86,7 +86,7 @@ Reverse proxy / Bun service
 Public API hostname:
 
 ```text
-https://api.deepanshujain.com
+https://api.deepanshujain.me
 ```
 
 Health facet API prefix:
@@ -527,7 +527,7 @@ family-os-health-api: localhost:3001
 Cloudflare/Caddy style routing:
 
 ```text
-api.deepanshujain.com/health/* -> localhost:3001
+api.deepanshujain.me/health/* -> localhost:3001
 ```
 
 Operational requirements:

@@ -3,7 +3,7 @@
 Target public API:
 
 ```text
-https://api.deepanshujain.com/health/v1
+https://api.deepanshujain.me/health/v1
 ```
 
 Expected local backend target:

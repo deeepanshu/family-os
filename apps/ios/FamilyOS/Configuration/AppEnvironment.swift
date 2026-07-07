@@ -34,7 +34,7 @@ struct AppEnvironment {
         case .local:
             return "http://localhost:3001/health/v1"
         case .release:
-            return "https://api.deepanshujain.com/health/v1"
+            return "https://api.deepanshujain.me/health/v1"
         }
     }
 

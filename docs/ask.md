@@ -200,7 +200,7 @@ An active family member cannot:
 - Tapping a reminder opens the relevant add-reading screen when the reminder type is BP or blood sugar.
 - Deleted readings and reminders disappear from normal app views.
 - Phase 1 is online-only.
-- The backend is reachable at `https://api.deepanshujain.com/health/v1`.
+- The backend is reachable at `https://api.deepanshujain.me/health/v1`.
 - A user can import HealthKit readings for their own linked profile.
 
 ## Future Phases

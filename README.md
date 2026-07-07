@@ -18,7 +18,7 @@ iOS-only family management app. Health is the first facet.
 Base URL:
 
 ```text
-https://api.deepanshujain.com/health/v1
+https://api.deepanshujain.me/health/v1
 ```
 
 Local API URL:
@@ -35,7 +35,7 @@ The iOS app has two build-time environments:
   at the local Bun API from the iOS simulator. The local API uses Docker
   Postgres through `DATABASE_URL`.
 - `release` - Release builds. Uses
-  `https://api.deepanshujain.com/health/v1`, which points at the Raspberry
+  `https://api.deepanshujain.me/health/v1`, which points at the Raspberry
   Pi-hosted API. Release database storage is Supabase Postgres.
 
 Both environments use Supabase Auth for real Sign in with Apple. The local

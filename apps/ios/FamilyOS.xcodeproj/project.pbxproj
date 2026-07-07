@@ -1037,7 +1037,7 @@
 				<key>CODE_SIGN_STYLE</key>
 				<string>Automatic</string>
 				<key>CURRENT_PROJECT_VERSION</key>
-				<string>2</string>
+				<string>3</string>
 				<key>DEVELOPMENT_TEAM</key>
 				<string>LG9UP2KBHV</string>
 				<key>ENABLE_PREVIEWS</key>
@@ -1094,7 +1094,7 @@
 				<key>CODE_SIGN_STYLE</key>
 				<string>Automatic</string>
 				<key>CURRENT_PROJECT_VERSION</key>
-				<string>2</string>
+				<string>3</string>
 				<key>DEVELOPMENT_TEAM</key>
 				<string>LG9UP2KBHV</string>
 				<key>FAMILY_OS_ENV</key>
@@ -1102,7 +1102,7 @@
 				<key>GENERATE_INFOPLIST_FILE</key>
 				<string>NO</string>
 				<key>HEALTH_API_BASE_URL</key>
-				<string>https://api.deepanshujain.com/health/v1</string>
+				<string>https://api.deepanshujain.me/health/v1</string>
 				<key>INFOPLIST_FILE</key>
 				<string>FamilyOS/Resources/Info.plist</string>
 				<key>IPHONEOS_DEPLOYMENT_TARGET</key>
@@ -1674,7 +1674,7 @@
 				<key>CODE_SIGN_STYLE</key>
 				<string>Automatic</string>
 				<key>CURRENT_PROJECT_VERSION</key>
-				<string>2</string>
+				<string>3</string>
 				<key>DEVELOPMENT_TEAM</key>
 				<string>LG9UP2KBHV</string>
 				<key>GENERATE_INFOPLIST_FILE</key>
@@ -1718,7 +1718,7 @@
 				<key>CODE_SIGN_STYLE</key>
 				<string>Automatic</string>
 				<key>CURRENT_PROJECT_VERSION</key>
-				<string>2</string>
+				<string>3</string>
 				<key>DEVELOPMENT_TEAM</key>
 				<string>LG9UP2KBHV</string>
 				<key>GENERATE_INFOPLIST_FILE</key>
