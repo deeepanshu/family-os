@@ -14,8 +14,8 @@ Deploy or restart:
 
 ```sh
 cd <repo>
-docker compose -f infra/docker/compose.prod.yml up -d --build
-docker compose -f infra/docker/compose.prod.yml logs -f health-api
+docker compose --env-file .env -f infra/docker/compose.prod.yml up -d --build
+docker compose --env-file .env -f infra/docker/compose.prod.yml logs -f health-api
 ```
 
 Smoke test on the Pi:
