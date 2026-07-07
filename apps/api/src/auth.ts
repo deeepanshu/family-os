@@ -1,4 +1,4 @@
-import { createRemoteJWKSet, decodeProtectedHeader, jwtVerify } from "jose";
+import { createRemoteJWKSet, decodeJwt, decodeProtectedHeader, jwtVerify } from "jose";
 import { createMiddleware } from "hono/factory";
 import type { AppConfig } from "./config";
 import { HttpError } from "./errors";
@@ -74,6 +74,7 @@ export function requireAuth() {
       if (error instanceof HttpError) {
         throw error;
       }
+      logTokenVerificationFailure(token, error);
       throw new HttpError(401, "invalid_token", "Bearer token could not be verified.");
     }
   });
@@ -86,4 +87,31 @@ function jwksForIssuer(issuer: string) {
   const jwks = createRemoteJWKSet(new URL(`${issuer}/.well-known/jwks.json`));
   jwksByIssuer.set(issuer, jwks);
   return jwks;
+}
+
+function logTokenVerificationFailure(token: string, error: unknown) {
+  try {
+    const header = decodeProtectedHeader(token);
+    const claims = decodeJwt(token);
+    console.warn(
+      JSON.stringify({
+        event: "auth_token_verification_failed",
+        alg: header.alg,
+        kid: typeof header.kid === "string" ? "present" : "missing",
+        iss: claims.iss,
+        aud: claims.aud,
+        role: claims.role,
+        hasSub: Boolean(claims.sub),
+        error: error instanceof Error ? error.message : String(error)
+      })
+    );
+  } catch {
+    console.warn(
+      JSON.stringify({
+        event: "auth_token_verification_failed",
+        parseable: false,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    );
+  }
 }
