@@ -1,4 +1,4 @@
-import { jwtVerify } from "jose";
+import { createRemoteJWKSet, decodeProtectedHeader, jwtVerify } from "jose";
 import { createMiddleware } from "hono/factory";
 import type { AppConfig } from "./config";
 import { HttpError } from "./errors";
@@ -14,6 +14,8 @@ export type AppVariables = {
 };
 
 const bearerPrefix = "Bearer ";
+const hmacAlgorithms = new Set(["HS256", "HS384", "HS512"]);
+const jwksByIssuer = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
 export function requireAuth() {
   return createMiddleware<{ Variables: AppVariables }>(async (c, next) => {
@@ -39,16 +41,23 @@ export function requireAuth() {
       return;
     }
 
-    if (!config.SUPABASE_JWT_SECRET) {
+    const issuer = config.SUPABASE_URL ? `${config.SUPABASE_URL}/auth/v1` : undefined;
+    let alg: string | undefined;
+    try {
+      alg = decodeProtectedHeader(token).alg;
+    } catch {
+      throw new HttpError(401, "invalid_token", "Bearer token could not be verified.");
+    }
+
+    if (!config.SUPABASE_JWT_SECRET && (!issuer || hmacAlgorithms.has(alg ?? ""))) {
       throw new HttpError(500, "auth_not_configured", "Supabase JWT verification is not configured.");
     }
 
     try {
-      const secret = new TextEncoder().encode(config.SUPABASE_JWT_SECRET);
-      const { payload } = await jwtVerify(token, secret, {
-        issuer: config.SUPABASE_URL ? `${config.SUPABASE_URL}/auth/v1` : undefined,
-        audience: "authenticated"
-      });
+      const verifyOptions = { issuer, audience: "authenticated" };
+      const { payload } = hmacAlgorithms.has(alg ?? "")
+        ? await jwtVerify(token, new TextEncoder().encode(config.SUPABASE_JWT_SECRET), verifyOptions)
+        : await jwtVerify(token, jwksForIssuer(issuer!), verifyOptions);
       if (!payload.sub) {
         throw new HttpError(401, "invalid_token", "Token subject is required.");
       }
@@ -68,4 +77,13 @@ export function requireAuth() {
       throw new HttpError(401, "invalid_token", "Bearer token could not be verified.");
     }
   });
+}
+
+function jwksForIssuer(issuer: string) {
+  const cached = jwksByIssuer.get(issuer);
+  if (cached) return cached;
+
+  const jwks = createRemoteJWKSet(new URL(`${issuer}/.well-known/jwks.json`));
+  jwksByIssuer.set(issuer, jwks);
+  return jwks;
 }

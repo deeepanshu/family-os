@@ -1037,7 +1037,7 @@
 				<key>CODE_SIGN_STYLE</key>
 				<string>Automatic</string>
 				<key>CURRENT_PROJECT_VERSION</key>
-				<string>3</string>
+				<string>4</string>
 				<key>DEVELOPMENT_TEAM</key>
 				<string>LG9UP2KBHV</string>
 				<key>ENABLE_PREVIEWS</key>
@@ -1094,7 +1094,7 @@
 				<key>CODE_SIGN_STYLE</key>
 				<string>Automatic</string>
 				<key>CURRENT_PROJECT_VERSION</key>
-				<string>3</string>
+				<string>4</string>
 				<key>DEVELOPMENT_TEAM</key>
 				<string>LG9UP2KBHV</string>
 				<key>FAMILY_OS_ENV</key>
@@ -1674,7 +1674,7 @@
 				<key>CODE_SIGN_STYLE</key>
 				<string>Automatic</string>
 				<key>CURRENT_PROJECT_VERSION</key>
-				<string>3</string>
+				<string>4</string>
 				<key>DEVELOPMENT_TEAM</key>
 				<string>LG9UP2KBHV</string>
 				<key>GENERATE_INFOPLIST_FILE</key>
@@ -1718,7 +1718,7 @@
 				<key>CODE_SIGN_STYLE</key>
 				<string>Automatic</string>
 				<key>CURRENT_PROJECT_VERSION</key>
-				<string>3</string>
+				<string>4</string>
 				<key>DEVELOPMENT_TEAM</key>
 				<string>LG9UP2KBHV</string>
 				<key>GENERATE_INFOPLIST_FILE</key>
