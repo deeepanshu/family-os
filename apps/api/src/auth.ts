@@ -45,7 +45,8 @@ export function requireAuth() {
     let alg: string | undefined;
     try {
       alg = decodeProtectedHeader(token).alg;
-    } catch {
+    } catch (error) {
+      logTokenVerificationFailure(token, error);
       throw new HttpError(401, "invalid_token", "Bearer token could not be verified.");
     }
 

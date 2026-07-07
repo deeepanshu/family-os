@@ -38,6 +38,8 @@ final class HealthBootstrapViewModel: ObservableObject {
         readings = HealthReadingsViewModel()
         healthKit = HealthKitSyncStateViewModel()
 
+        clearInvalidCachedReleaseTokenIfNeeded()
+
         republishChanges(from: connection)
         republishChanges(from: auth)
         republishChanges(from: family)
@@ -221,6 +223,17 @@ final class HealthBootstrapViewModel: ObservableObject {
         object.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
+    }
+
+    private func clearInvalidCachedReleaseTokenIfNeeded() {
+        guard connection.environmentName == .release, hasAccessToken else {
+            return
+        }
+        if auth.accessToken == "dev-token" || auth.accessToken.split(separator: ".").count != 3 {
+            auth.clear(defaults: defaults, keychain: keychain)
+            statusMessage = "Please sign in."
+            isError = false
+        }
     }
 }
 
