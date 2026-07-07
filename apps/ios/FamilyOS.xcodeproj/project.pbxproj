@@ -234,6 +234,50 @@
 			<key>isa</key>
 			<string>PBXBuildFile</string>
 		</dict>
+		<key>DE0CF0000000000000000001</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>text.xcconfig</string>
+			<key>path</key>
+			<string>Local.xcconfig</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>DE0CF0000000000000000002</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>text.xcconfig</string>
+			<key>path</key>
+			<string>Release.xcconfig</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>DE0CF0000000000000000003</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>text.xcconfig</string>
+			<key>path</key>
+			<string>Local.private.xcconfig.example</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>DE0CF0000000000000000004</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>text.xcconfig</string>
+			<key>path</key>
+			<string>Release.private.xcconfig.example</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
 		<key>DE100000000000000000001B</key>
 		<dict>
 			<key>fileRef</key>
@@ -402,12 +446,29 @@
 		<dict>
 			<key>children</key>
 			<array>
+				<string>DE0CF0000000000000000005</string>
 				<string>DE1000000000000000000031</string>
 				<string>DE1000000000000000000032</string>
 				<string>DE5000000000000000000002</string>
 			</array>
 			<key>isa</key>
 			<string>PBXGroup</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>DE0CF0000000000000000005</key>
+		<dict>
+			<key>children</key>
+			<array>
+				<string>DE0CF0000000000000000001</string>
+				<string>DE0CF0000000000000000002</string>
+				<string>DE0CF0000000000000000003</string>
+				<string>DE0CF0000000000000000004</string>
+			</array>
+			<key>isa</key>
+			<string>PBXGroup</string>
+			<key>path</key>
+			<string>Config</string>
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
@@ -944,6 +1005,8 @@
 		</dict>
 		<key>DE1000000000000000000092</key>
 		<dict>
+			<key>baseConfigurationReference</key>
+			<string>DE0CF0000000000000000001</string>
 			<key>buildSettings</key>
 			<dict>
 				<key>ASSETCATALOG_COMPILER_APPICON_NAME</key>
@@ -979,10 +1042,6 @@
 				<string>com.deepanshujain.familyos</string>
 				<key>PRODUCT_NAME</key>
 				<string>$(TARGET_NAME)</string>
-				<key>SUPABASE_ANON_KEY</key>
-				<string></string>
-				<key>SUPABASE_URL</key>
-				<string></string>
 				<key>SUPPORTED_PLATFORMS</key>
 				<string>iphoneos iphonesimulator</string>
 				<key>SUPPORTS_MACCATALYST</key>
@@ -1003,6 +1062,8 @@
 		</dict>
 		<key>DE1000000000000000000093</key>
 		<dict>
+			<key>baseConfigurationReference</key>
+			<string>DE0CF0000000000000000002</string>
 			<key>buildSettings</key>
 			<dict>
 				<key>ASSETCATALOG_COMPILER_APPICON_NAME</key>
@@ -1036,10 +1097,6 @@
 				<string>com.deepanshujain.familyos</string>
 				<key>PRODUCT_NAME</key>
 				<string>$(TARGET_NAME)</string>
-				<key>SUPABASE_ANON_KEY</key>
-				<string></string>
-				<key>SUPABASE_URL</key>
-				<string></string>
 				<key>SUPPORTED_PLATFORMS</key>
 				<string>iphoneos iphonesimulator</string>
 				<key>SUPPORTS_MACCATALYST</key>

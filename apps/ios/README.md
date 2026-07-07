@@ -57,9 +57,27 @@ The app reads these generated Info.plist keys:
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
 
-`SUPABASE_URL` and `SUPABASE_ANON_KEY` are blank placeholders in source control.
-Set them through Xcode build settings or a local untracked configuration before
-using real Apple login.
+`SUPABASE_URL` and `SUPABASE_ANON_KEY` are read from tracked base config files:
+
+- `Config/Local.xcconfig`
+- `Config/Release.xcconfig`
+
+Those files include ignored private overrides:
+
+- `Config/Local.private.xcconfig`
+- `Config/Release.private.xcconfig`
+
+Create the private files from the examples and put real Supabase values there
+before using real Apple login:
+
+```sh
+cp apps/ios/Config/Local.private.xcconfig.example apps/ios/Config/Local.private.xcconfig
+cp apps/ios/Config/Release.private.xcconfig.example apps/ios/Config/Release.private.xcconfig
+```
+
+In `.xcconfig` files, write URLs as `https:/$()/your-project.supabase.co`.
+Xcode expands that to `https://your-project.supabase.co`; a literal `https://`
+is parsed as a comment after `https:`.
 
 The current bootstrap screen can call:
 

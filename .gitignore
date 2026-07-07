@@ -9,3 +9,5 @@ coverage/
 **/*.xcodeproj/project.xcworkspace/
 **/*.xcworkspace/xcuserdata/
 **/*.xcodeproj/xcuserdata/
+apps/ios/Config/*.private.xcconfig
+!apps/ios/Config/*.private.xcconfig.example
