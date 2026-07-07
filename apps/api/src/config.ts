@@ -4,6 +4,7 @@ const emptyToUndefined = (value: unknown) => (value === "" ? undefined : value);
 
 const envSchema = z.object({
   NODE_ENV: z.preprocess(emptyToUndefined, z.string().default("development")),
+  HOST: z.preprocess(emptyToUndefined, z.string().default("0.0.0.0")),
   PORT: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(3001)),
   DATABASE_URL: z.preprocess(emptyToUndefined, z.string().optional()),
   HEALTH_API_REPOSITORY: z.preprocess(emptyToUndefined, z.enum(["memory", "postgres"]).optional()),

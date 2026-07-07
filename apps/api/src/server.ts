@@ -5,6 +5,7 @@ const config = loadConfig();
 const app = createApp({ config });
 
 export default {
+  hostname: config.HOST,
   port: config.PORT,
   fetch: app.fetch
 };

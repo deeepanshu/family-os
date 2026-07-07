@@ -1,0 +1,17 @@
+services:
+  health-api:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: family-os-health-api:local
+    container_name: family-os-health-api
+    env_file:
+      - ../../.env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3001
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+    volumes:
+      - ${FAMILY_OS_SECRETS_DIR:?set FAMILY_OS_SECRETS_DIR in .env}:/run/secrets/family-os:ro
