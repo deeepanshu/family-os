@@ -17,7 +17,12 @@ const envSchema = z.object({
   HEALTH_API_CORS_ORIGIN: z.preprocess(emptyToUndefined, z.string().optional()),
   HEALTH_API_RATE_LIMIT_WINDOW_MS: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(60_000)),
   HEALTH_API_RATE_LIMIT_MAX_WRITES: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(120)),
-  HEALTH_API_RATE_LIMIT_MAX_BUCKETS: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(10_000))
+  HEALTH_API_RATE_LIMIT_MAX_BUCKETS: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(10_000)),
+  MCP_PUBLIC_BASE_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
+  MCP_RESOURCE_NAME: z.preprocess(emptyToUndefined, z.string().default("Family OS Health MCP")),
+  MCP_TOOL_TIMEOUT_MS: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(10_000)),
+  MCP_MAX_RESULT_CHARS: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(32_000)),
+  HEALTH_API_MCP_DEV_OAUTH_CLIENT_ID: z.preprocess(emptyToUndefined, z.string().default("family-os-dev"))
 });
 
 type ParsedAppConfig = z.infer<typeof envSchema>;

@@ -36,6 +36,7 @@ export function repositoriesFromFamilyRepository(familyRepository: FamilyReposit
     reminders: familyRepository,
     devices: familyRepository,
     notificationDeliveries: familyRepository,
-    auditLogs: familyRepository
+    auditLogs: familyRepository,
+    mcpConnections: familyRepository
   };
 }

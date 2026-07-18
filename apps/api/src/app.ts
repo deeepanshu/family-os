@@ -19,6 +19,7 @@ import { createMeRoutes } from "./routes/me";
 import { corsMiddleware, requestLoggingMiddleware, writeRateLimitMiddleware } from "./middleware/hardening";
 import { createDependencies, repositoriesFromFamilyRepository } from "./dependencies";
 import type { AppRepositories } from "./repositories/contracts";
+import { createMcpRoutes, createMcpWellKnownRoutes } from "./mcp/routes";
 
 export type AppOptions = {
   config?: Partial<AppConfig>;
@@ -71,6 +72,8 @@ export function createApp(options: AppOptions = {}) {
   health.route("/devices", createDeviceRoutes(repositories.devices));
   health.route("/audit-logs", createAuditLogRoutes(repositories.auditLogs));
 
+  app.route("/", createMcpWellKnownRoutes(config));
+  app.route("/mcp", createMcpRoutes({ config, repositories }));
   app.route(HEALTH_API_PREFIX, health);
 
   app.notFound((c) =>

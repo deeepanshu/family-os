@@ -11,6 +11,8 @@ import type {
   HealthKitSampleInput,
   HealthKitSyncStatus,
   HealthMetricDailySummary,
+  McpCapability,
+  McpConnectionGrant,
   Reminder,
   NotificationDelivery,
   NotificationDevice,
@@ -31,13 +33,17 @@ import type {
 import { HttpError } from "../errors";
 import type {
   AuditLogStore,
+  CreateMcpConnectionInput,
   DeviceStore,
   FamilyStore,
+  HealthKitSampleRecord,
   HealthKitStore,
   InviteStore,
+  McpConnectionStore,
   NotificationDeliveryStore,
   ProfileStore,
   ReadingStore,
+  RecordAuditInput,
   ReminderStore
 } from "./contracts";
 
@@ -146,7 +152,8 @@ export interface FamilyRepository
     ReminderStore,
     DeviceStore,
     NotificationDeliveryStore,
-    AuditLogStore {}
+    AuditLogStore,
+    McpConnectionStore {}
 
 export class InMemoryFamilyRepository implements FamilyRepository {
   private readonly families = new Map<string, Family>();
@@ -163,6 +170,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   private readonly devices = new Map<string, NotificationDevice>();
   private readonly deliveries = new Map<string, NotificationDelivery>();
   private readonly auditLogs: AuditLog[] = [];
+  private readonly mcpConnectionGrants = new Map<string, McpConnectionGrant>();
 
   async createFamily(input: CreateFamilyInput): Promise<CurrentFamilyResponse> {
     const existing = await this.getCurrentFamily(input.userId);
@@ -903,6 +911,86 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       .slice(0, limit);
   }
 
+  async listHealthKitSamplesForMetric(
+    actorUserId: string,
+    personId: string,
+    metricType: HealthKitMetricType,
+    rangeStartDate: string,
+    rangeEndDate: string
+  ): Promise<HealthKitSampleRecord[]> {
+    const current = this.requireActiveMember(actorUserId);
+    this.assertProfileInFamily(personId, current.family.id);
+    const rangeStartMs = Date.parse(`${rangeStartDate}T00:00:00.000Z`);
+    const rangeEndMs = Date.parse(`${rangeEndDate}T23:59:59.999Z`);
+    return [...this.healthKitSamples.values()]
+      .filter(
+        (sample) =>
+          sample.familyId === current.family.id &&
+          sample.personId === personId &&
+          sample.metricType === metricType
+      )
+      .filter((sample) => {
+        const startMs = Date.parse(sample.startDate);
+        return startMs >= rangeStartMs && startMs <= rangeEndMs;
+      })
+      .map((sample) => ({ ...sample }));
+  }
+
+  async createConnection(input: CreateMcpConnectionInput): Promise<McpConnectionGrant> {
+    const capabilities = normalizeMcpCapabilities(input.capabilities);
+    const now = new Date().toISOString();
+    for (const [id, grant] of this.mcpConnectionGrants) {
+      if (grant.userId === input.userId && grant.oauthClientId === input.oauthClientId && !grant.revokedAt) {
+        this.mcpConnectionGrants.set(id, { ...grant, revokedAt: now });
+      }
+    }
+    const connection: McpConnectionGrant = {
+      id: crypto.randomUUID(),
+      userId: input.userId,
+      oauthClientId: input.oauthClientId,
+      capabilities,
+      consentVersion: input.consentVersion,
+      createdAt: now,
+      expiresAt: input.expiresAt,
+      revokedAt: undefined
+    };
+    this.mcpConnectionGrants.set(connection.id, connection);
+    return connection;
+  }
+
+  async getActiveConnection(userId: string, oauthClientId: string): Promise<McpConnectionGrant | null> {
+    const now = Date.now();
+    const active = [...this.mcpConnectionGrants.values()]
+      .filter((grant) => grant.userId === userId && grant.oauthClientId === oauthClientId)
+      .filter((grant) => !grant.revokedAt)
+      .filter((grant) => !grant.expiresAt || Date.parse(grant.expiresAt) > now)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
+    return active ?? null;
+  }
+
+  async revokeConnection(userId: string, connectionId: string): Promise<McpConnectionGrant> {
+    const grant = this.mcpConnectionGrants.get(connectionId);
+    if (!grant || grant.userId !== userId) {
+      throw new HttpError(404, "mcp_connection_not_found", "MCP connection grant was not found.");
+    }
+    if (grant.revokedAt) {
+      return grant;
+    }
+    const revoked = { ...grant, revokedAt: new Date().toISOString() };
+    this.mcpConnectionGrants.set(connectionId, revoked);
+    return revoked;
+  }
+
+  async listConnections(userId: string): Promise<McpConnectionGrant[]> {
+    return [...this.mcpConnectionGrants.values()]
+      .filter((grant) => grant.userId === userId)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  }
+
+  async recordAudit(input: RecordAuditInput): Promise<void> {
+    this.audit(input);
+  }
+
   async createReminder(input: CreateReminderInput): Promise<Reminder> {
     const current = this.requireActiveMember(input.actorUserId);
     this.assertProfileInFamily(input.subjectPersonId, current.family.id);
@@ -1304,6 +1392,15 @@ function defaultUnit(metricType: HealthKitMetricType) {
 
 function isHealthKitMetricType(metricType: string): metricType is HealthKitMetricType {
   return ["steps", "walking_distance", "sleep", "weight", "blood_pressure", "blood_glucose"].includes(metricType);
+}
+
+function normalizeMcpCapabilities(capabilities: McpCapability[]): McpCapability[] {
+  const allowed = new Set<McpCapability>(["health_read"]);
+  const unique = [...new Set(capabilities)].filter((cap): cap is McpCapability => allowed.has(cap));
+  if (unique.length === 0) {
+    throw new HttpError(400, "mcp_capabilities_required", "At least one MCP capability is required.");
+  }
+  return unique;
 }
 
 function toPublicInviteRecord(invite: FamilyInvite): FamilyInvite {

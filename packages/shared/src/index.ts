@@ -247,3 +247,112 @@ export type AuditLog = {
   metadata?: Record<string, unknown>;
   createdAt: string;
 };
+
+export type McpHealthMetric = "steps" | "sleep" | "blood_pressure";
+
+export type McpHealthViewType =
+  | "hourly_series"
+  | "daily_series"
+  | "daily_duration_series"
+  | "daily_reading_table";
+
+export type McpStepsGranularity = "hourly" | "daily";
+
+export type McpCapability = "health_read";
+
+export type McpConnectionGrant = {
+  id: string;
+  userId: string;
+  oauthClientId: string;
+  capabilities: McpCapability[];
+  consentVersion: string;
+  createdAt: string;
+  expiresAt?: string;
+  revokedAt?: string;
+};
+
+export type McpAuthorizedProfile = {
+  personId: string;
+  label: string;
+  availableMetrics: McpHealthMetric[];
+};
+
+export type McpListAuthorizedProfilesResult = {
+  profiles: McpAuthorizedProfile[];
+  disclaimer: string;
+};
+
+export type McpGetHealthDataInput = {
+  personId: string;
+  healthMetric: McpHealthMetric;
+  rangeDays: number;
+  granularity?: McpStepsGranularity;
+  timezone?: string;
+};
+
+export type McpCoverage = {
+  requestedRangeDays: number;
+  rangeStart: string;
+  rangeEnd: string;
+  daysWithData: number;
+};
+
+export type McpSeriesPoint = {
+  bucket: string;
+  value: number;
+};
+
+export type McpBloodPressureReadingRow = {
+  localDate: string;
+  localTime: string;
+  systolic: number;
+  diastolic: number;
+  pulse?: number;
+};
+
+export type McpHealthDataBase = {
+  personId: string;
+  healthMetric: McpHealthMetric;
+  viewType: McpHealthViewType;
+  unit: string;
+  timezone: string;
+  coverage: McpCoverage;
+  lastSyncedAt?: string;
+  disclaimer: string;
+};
+
+export type McpHourlySeriesResult = McpHealthDataBase & {
+  viewType: "hourly_series";
+  healthMetric: "steps";
+  points: McpSeriesPoint[];
+};
+
+export type McpDailySeriesResult = McpHealthDataBase & {
+  viewType: "daily_series";
+  healthMetric: "steps";
+  points: McpSeriesPoint[];
+};
+
+export type McpDailyDurationSeriesResult = McpHealthDataBase & {
+  viewType: "daily_duration_series";
+  healthMetric: "sleep";
+  points: McpSeriesPoint[];
+};
+
+export type McpDailyReadingTableResult = McpHealthDataBase & {
+  viewType: "daily_reading_table";
+  healthMetric: "blood_pressure";
+  readings: McpBloodPressureReadingRow[];
+  truncated: boolean;
+};
+
+export type McpGetHealthDataResult =
+  | McpHourlySeriesResult
+  | McpDailySeriesResult
+  | McpDailyDurationSeriesResult
+  | McpDailyReadingTableResult;
+
+export const MCP_HEALTH_DISCLAIMER =
+  "Informational only. Not medical advice. Coverage and freshness metadata describe the stored Family OS data and may be incomplete or delayed." as const;
+
+export const MCP_RELEASE1_METRICS: readonly McpHealthMetric[] = ["steps", "sleep", "blood_pressure"] as const;

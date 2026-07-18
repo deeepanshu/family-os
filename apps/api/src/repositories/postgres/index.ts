@@ -34,9 +34,12 @@ import type {
   UpdateProfileInput,
   UpdateReminderInput
 } from "../families";
+import type { CreateMcpConnectionInput, HealthKitSampleRecord, RecordAuditInput } from "../contracts";
+import type { McpConnectionGrant } from "@family-os/shared";
 import { PostgresRepositoryContext } from "./context";
 import { PostgresFamilyStore } from "./familyStore";
 import { PostgresHealthKitStore } from "./healthKitStore";
+import { PostgresMcpConnectionStore } from "./mcpConnectionStore";
 import { PostgresReadingStore } from "./readingStore";
 import { PostgresReminderStore } from "./reminderStore";
 import type { PostgresRepositoryOptions } from "./types";
@@ -46,12 +49,14 @@ export class PostgresFamilyRepository implements FamilyRepository {
   private readonly healthKitStore: PostgresHealthKitStore;
   private readonly readingStore: PostgresReadingStore;
   private readonly reminderStore: PostgresReminderStore;
+  private readonly mcpConnectionStore: PostgresMcpConnectionStore;
 
   constructor(context: PostgresRepositoryContext) {
     this.familyStore = new PostgresFamilyStore(context);
     this.healthKitStore = new PostgresHealthKitStore(context);
     this.readingStore = new PostgresReadingStore(context);
     this.reminderStore = new PostgresReminderStore(context);
+    this.mcpConnectionStore = new PostgresMcpConnectionStore(context);
   }
 
   static fromDatabaseUrl(databaseUrl: string, options: PostgresRepositoryOptions = {}) {
@@ -178,6 +183,36 @@ export class PostgresFamilyRepository implements FamilyRepository {
 
   listHealthMetricDailySummaries(actorUserId: string, personId?: string, metricType?: HealthKitMetricType, limit?: number): Promise<HealthMetricDailySummary[]> {
     return this.healthKitStore.listHealthMetricDailySummaries(actorUserId, personId, metricType, limit);
+  }
+
+  listHealthKitSamplesForMetric(
+    actorUserId: string,
+    personId: string,
+    metricType: HealthKitMetricType,
+    rangeStartDate: string,
+    rangeEndDate: string
+  ): Promise<HealthKitSampleRecord[]> {
+    return this.healthKitStore.listHealthKitSamplesForMetric(actorUserId, personId, metricType, rangeStartDate, rangeEndDate);
+  }
+
+  createConnection(input: CreateMcpConnectionInput): Promise<McpConnectionGrant> {
+    return this.mcpConnectionStore.createConnection(input);
+  }
+
+  getActiveConnection(userId: string, oauthClientId: string): Promise<McpConnectionGrant | null> {
+    return this.mcpConnectionStore.getActiveConnection(userId, oauthClientId);
+  }
+
+  revokeConnection(userId: string, connectionId: string): Promise<McpConnectionGrant> {
+    return this.mcpConnectionStore.revokeConnection(userId, connectionId);
+  }
+
+  listConnections(userId: string): Promise<McpConnectionGrant[]> {
+    return this.mcpConnectionStore.listConnections(userId);
+  }
+
+  recordAudit(input: RecordAuditInput): Promise<void> {
+    return this.reminderStore.recordAudit(input);
   }
 
   createReminder(input: CreateReminderInput): Promise<Reminder> {

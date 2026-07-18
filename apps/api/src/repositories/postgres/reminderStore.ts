@@ -275,6 +275,17 @@ export class PostgresReminderStore {
     return rows.map(mapAuditLog);
   }
 
+  async recordAudit(input: {
+    familyId: string;
+    actorUserId?: string;
+    action: string;
+    resourceType: string;
+    resourceId: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
+    await this.context.audit(input);
+  }
+
   private async auditDelivery(delivery: NotificationDelivery, action: string, metadata?: Record<string, unknown>) {
     const [reminder] = await this.context.sql`select family_id from reminders where id = ${delivery.reminderId}`;
     if (!reminder) return;

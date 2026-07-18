@@ -6,9 +6,11 @@ import type {
   HealthMetricDailySummary
 } from "@family-os/shared";
 import { HttpError } from "../../errors";
+import type { HealthKitSampleRecord } from "../contracts";
 import { PostgresRepositoryContext } from "./context";
-import { toDateString } from "./dateUtils";
+import { toDateString, toIso, toOptionalIso } from "./dateUtils";
 import { mapHealthMetricDailySummary } from "./mappers";
+import type { Row } from "./types";
 
 const allMetricTypes: HealthKitMetricType[] = ["steps", "walking_distance", "sleep", "weight", "blood_pressure", "blood_glucose"];
 
@@ -263,6 +265,45 @@ export class PostgresHealthKitStore {
       limit ${limit}
     `;
     return rows.map(mapHealthMetricDailySummary);
+  }
+
+  async listHealthKitSamplesForMetric(
+    actorUserId: string,
+    personId: string,
+    metricType: HealthKitMetricType,
+    rangeStartDate: string,
+    rangeEndDate: string
+  ): Promise<HealthKitSampleRecord[]> {
+    const current = await this.context.requireActiveMember(actorUserId);
+    await this.context.requireProfileInFamily(personId, current.family.id);
+    const rows = await this.context.sql`
+      select *
+      from healthkit_samples
+      where family_id = ${current.family.id}
+        and person_id = ${personId}
+        and metric_type = ${metricType}
+        and deleted_at is null
+        and start_date >= ${`${rangeStartDate}T00:00:00.000Z`}::timestamptz
+        and start_date <= ${`${rangeEndDate}T23:59:59.999Z`}::timestamptz
+      order by start_date asc
+    `;
+    return rows.map((row: Row) => ({
+      id: row.id,
+      familyId: row.family_id,
+      personId: row.person_id,
+      userId: row.user_id,
+      syncRunId: row.sync_run_id,
+      metricType: row.metric_type,
+      sourceSampleKey: row.source_sample_key,
+      startDate: toIso(row.start_date),
+      endDate: toOptionalIso(row.end_date),
+      value: row.value === null || row.value === undefined ? undefined : Number(row.value),
+      unit: row.unit ?? undefined,
+      systolic: row.systolic ?? undefined,
+      diastolic: row.diastolic ?? undefined,
+      pulse: row.pulse ?? undefined,
+      glucoseContext: row.glucose_context ?? undefined
+    }));
   }
 
   private async requireLinkedSelfProfileId(actorUserId: string, familyId: string): Promise<string> {

@@ -370,3 +370,26 @@ export const auditLogs = pgTable(
     index("audit_logs_resource_idx").on(table.resourceType, table.resourceId)
   ]
 );
+
+export const mcpConnectionGrants = pgTable(
+  "mcp_connection_grants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    oauthClientId: text("oauth_client_id").notNull(),
+    capabilities: text("capabilities").array().notNull(),
+    consentVersion: text("consent_version").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    index("mcp_connection_grants_user_client_idx").on(table.userId, table.oauthClientId),
+    index("mcp_connection_grants_user_created_idx").on(table.userId, table.createdAt),
+    check(
+      "mcp_connection_grants_capabilities_check",
+      sql`cardinality(${table.capabilities}) > 0 and ${table.capabilities} <@ array['health_read']::text[]`
+    )
+  ]
+);

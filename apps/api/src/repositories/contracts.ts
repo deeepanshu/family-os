@@ -13,6 +13,8 @@ import type {
   HealthKitSampleInput,
   HealthKitSyncStatus,
   HealthMetricDailySummary,
+  McpCapability,
+  McpConnectionGrant,
   NotificationDelivery,
   NotificationDevice,
   PublicInviteResponse,
@@ -32,6 +34,15 @@ import type {
   UpdateProfileInput,
   UpdateReminderInput
 } from "./families";
+
+export type RecordAuditInput = {
+  familyId: string;
+  actorUserId?: string;
+  action: string;
+  resourceType: string;
+  resourceId: string;
+  metadata?: Record<string, unknown>;
+};
 
 export interface FamilyStore {
   createFamily(input: CreateFamilyInput): Promise<CurrentFamilyResponse>;
@@ -69,12 +80,42 @@ export interface ReadingStore {
   deleteBloodGlucose(actorUserId: string, readingId: string): Promise<void>;
 }
 
+export type HealthKitSampleRecord = HealthKitSampleInput & {
+  id: string;
+  familyId: string;
+  personId: string;
+  userId: string;
+  syncRunId: string;
+};
+
 export interface HealthKitStore {
   getHealthKitSyncStatus(actorUserId: string): Promise<HealthKitSyncStatus>;
   linkHealthKitProfile(actorUserId: string, personId: string): Promise<HealthKitSyncStatus>;
   updateHealthKitSyncSettings(actorUserId: string, enabledMetrics: HealthKitMetricType[]): Promise<HealthKitSyncStatus>;
   importHealthKitSamples(actorUserId: string, samples: HealthKitSampleInput[]): Promise<HealthKitImportResult>;
   listHealthMetricDailySummaries(actorUserId: string, personId?: string, metricType?: HealthKitMetricType, limit?: number): Promise<HealthMetricDailySummary[]>;
+  listHealthKitSamplesForMetric(
+    actorUserId: string,
+    personId: string,
+    metricType: HealthKitMetricType,
+    rangeStartDate: string,
+    rangeEndDate: string
+  ): Promise<HealthKitSampleRecord[]>;
+}
+
+export type CreateMcpConnectionInput = {
+  userId: string;
+  oauthClientId: string;
+  capabilities: McpCapability[];
+  consentVersion: string;
+  expiresAt?: string;
+};
+
+export interface McpConnectionStore {
+  createConnection(input: CreateMcpConnectionInput): Promise<McpConnectionGrant>;
+  getActiveConnection(userId: string, oauthClientId: string): Promise<McpConnectionGrant | null>;
+  revokeConnection(userId: string, connectionId: string): Promise<McpConnectionGrant>;
+  listConnections(userId: string): Promise<McpConnectionGrant[]>;
 }
 
 export interface ReminderStore {
@@ -99,6 +140,7 @@ export interface NotificationDeliveryStore {
 
 export interface AuditLogStore {
   listAuditLogs(actorUserId: string, limit?: number): Promise<AuditLog[]>;
+  recordAudit(input: RecordAuditInput): Promise<void>;
 }
 
 export type AppRepositories = {
@@ -111,4 +153,5 @@ export type AppRepositories = {
   devices: DeviceStore;
   notificationDeliveries: NotificationDeliveryStore;
   auditLogs: AuditLogStore;
+  mcpConnections: McpConnectionStore;
 };
