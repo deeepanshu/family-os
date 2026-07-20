@@ -7,12 +7,23 @@
 -- Without this hook, ChatGPT receives valid Supabase tokens that the MCP
 -- server correctly rejects for wrong audience.
 --
+-- Audience rewrite vs client allowlist:
+-- This hook sets aud for any OAuth token that includes client_id (including
+-- clients registered via Dynamic Client Registration). That is intentional:
+-- JWT audience only selects the MCP resource. Family OS still requires:
+--   1. MCP_ALLOWED_OAUTH_CLIENT_IDS allowlist (consent + tool checks)
+--   2. An active mcp_connection_grants row for (user_id, oauth_client_id)
+-- A non-allowlisted client can obtain a Supabase token with MCP aud but cannot
+-- create a grant or call health tools.
+--
 -- Deploy:
 -- 1. Supabase Dashboard → Authentication → Hooks → Custom Access Token
 --    (or enable via config.toml / Management API)
 -- 2. Point the hook at this Postgres function (or the equivalent Edge Function)
 -- 3. Replace the MCP resource URL below if your public origin/path differs
 -- 4. Issue a fresh OAuth token and confirm aud matches the MCP resource URL
+-- 5. Prefer disabling Dynamic Client Registration in production, or monitor
+--    registered clients (https://supabase.com/docs/guides/auth/oauth-server/mcp-authentication)
 --
 -- Docs:
 --   https://supabase.com/docs/guides/auth/auth-hooks/custom-access-token-hook
@@ -33,6 +44,7 @@ begin
 
   -- OAuth server tokens (and refreshes of those sessions) include client_id.
   -- Leave regular app session tokens as aud = authenticated for the Health API.
+  -- Allowlisting is enforced in the Family OS API, not in this hook.
   if client_id is not null and length(trim(client_id)) > 0 then
     claims := jsonb_set(claims, '{aud}', to_jsonb(mcp_resource_aud));
   end if;

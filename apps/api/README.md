@@ -193,7 +193,10 @@ Runtime hardening knobs:
 - `HEALTH_API_RATE_LIMIT_WINDOW_MS` defaults to `60000`.
 - `HEALTH_API_RATE_LIMIT_MAX_WRITES` defaults to `120` writes per window per bearer token, falling back to IP when no bearer token is present.
 - `HEALTH_API_RATE_LIMIT_MAX_BUCKETS` defaults to `10000` in-memory buckets per API process. The Phase 1 limiter is process-local; multi-process deployments need a shared limiter.
-- MCP tool rate limits are also process-local (`McpRateLimiter`). Move to gateway/Redis/Postgres before horizontal scale.
+- MCP tool rate limits are also process-local (`McpRateLimiter`). **Horizontal
+  multi-instance deploys are unsupported** until a shared limiter is in place
+  (Cloudflare on `/api/mcp*`, Redis, or Postgres). See
+  `infra/cloudflare/README.md`.
 
 ## MCP and OAuth public surface
 
@@ -211,9 +214,18 @@ Environment:
 ```text
 MCP_PUBLIC_ORIGIN=https://familyos.deepanshujain.me
 MCP_PUBLIC_PATH=/api/mcp
+MCP_ALLOWED_OAUTH_CLIENT_IDS=<supabase-oauth-client-id-for-chatgpt>
 SUPABASE_URL=https://<project>.supabase.co
 SUPABASE_ANON_KEY=...
 ```
+
+- `MCP_PUBLIC_ORIGIN` is **origin only** (scheme + host). Paths, queries, and
+  fragments are rejected so they are not silently combined into
+  `.../api/api/mcp`.
+- `MCP_ALLOWED_OAUTH_CLIENT_IDS` is required in production: comma-separated
+  Supabase OAuth client IDs eligible for MCP health grants. Outside production,
+  an empty list allows any registered client (local/dev only). Prefer keeping
+  Dynamic Client Registration off in production.
 
 Supabase Auth OAuth Server settings:
 
@@ -221,8 +233,10 @@ Supabase Auth OAuth Server settings:
 - Site URL must be the same public origin that hosts the API
 
 Consent flow creates the Family OS `mcp_connection_grants` row using the OAuth
-`client_id` from Supabase `getAuthorizationDetails`, never from a browser body.
-`POST /health/v1/mcp/connections` is not used for grant creation.
+`client_id` from Supabase `getAuthorizationDetails`, never from a browser body,
+only if that client is allowlisted. If Supabase approval then fails, the grant
+is revoked immediately. `POST /health/v1/mcp/connections` is not used for grant
+creation.
 
 ### JWT audience for MCP tokens
 

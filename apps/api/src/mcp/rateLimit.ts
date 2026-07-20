@@ -8,10 +8,13 @@ type Bucket = {
 /**
  * Process-local MCP tool rate limiter.
  *
- * WARNING: Counters live in an in-memory Map. Each API process applies its own
- * full limit, so horizontal scale multiplies effective throughput. Before
- * running more than one API instance, move this to a shared store (gateway
- * rate limit, Redis, or Postgres). Single-process Raspberry Pi deploys are fine.
+ * **Single-process only.** Counters live in an in-memory Map. Each API process
+ * applies its own full limit, so N instances multiply effective throughput by N.
+ *
+ * Horizontal scaling is unsupported until this is replaced with a shared
+ * limiter (Cloudflare rate limiting on `/api/mcp`, Redis, or Postgres). See
+ * `infra/cloudflare/README.md` for the gateway path. Single-process Raspberry Pi
+ * deploys are the intended production topology for Release 1.
  */
 export class McpRateLimiter {
   private readonly buckets = new Map<string, Bucket>();

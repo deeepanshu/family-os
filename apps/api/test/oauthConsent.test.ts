@@ -47,7 +47,11 @@ function mockOAuthClient(overrides?: Partial<SupabaseOAuthClient>): SupabaseOAut
   };
 }
 
-function consentApp(repo: InMemoryFamilyRepository, oauthClient: SupabaseOAuthClient) {
+function consentApp(
+  repo: InMemoryFamilyRepository,
+  oauthClient: SupabaseOAuthClient,
+  env: Record<string, unknown> = {}
+) {
   const config = loadConfig({
     NODE_ENV: "test",
     PORT: 3001,
@@ -56,7 +60,8 @@ function consentApp(repo: InMemoryFamilyRepository, oauthClient: SupabaseOAuthCl
     SUPABASE_ANON_KEY: "test-anon",
     MCP_PUBLIC_ORIGIN: "https://familyos.test.example",
     MCP_PUBLIC_PATH: "/api/mcp",
-    MCP_CONSENT_VERSION: "2026-07-18"
+    MCP_CONSENT_VERSION: "2026-07-18",
+    ...env
   });
 
   const app = new Hono<{ Variables: AppVariables }>();
@@ -196,5 +201,75 @@ describe("OAuth consent", () => {
     });
     expect(response.status).toBe(400);
     expect(await repo.listConnections(userId)).toHaveLength(0);
+  });
+
+  it("rejects approve when OAuth client is not on the MCP allowlist", async () => {
+    const repo = new InMemoryFamilyRepository();
+    const oauth = mockOAuthClient();
+    const api = consentApp(repo, oauth, {
+      MCP_ALLOWED_OAUTH_CLIENT_IDS: "only-this-client,another-allowed"
+    });
+    const token = await sessionJwt(userId);
+
+    const response = await api.request("/api/oauth/consent/decision", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ authorizationId, decision: "approve" })
+    });
+    expect(response.status).toBe(403);
+    const body = await response.json();
+    expect(body.error.code).toBe("oauth_client_not_allowed");
+    expect(await repo.listConnections(userId)).toHaveLength(0);
+    expect(oauth.approveAuthorization).not.toHaveBeenCalled();
+  });
+
+  it("allows approve when OAuth client is on the MCP allowlist", async () => {
+    const repo = new InMemoryFamilyRepository();
+    const oauth = mockOAuthClient();
+    const api = consentApp(repo, oauth, {
+      MCP_ALLOWED_OAUTH_CLIENT_IDS: `${oauthClientId},other-client`
+    });
+    const token = await sessionJwt(userId);
+
+    const response = await api.request("/api/oauth/consent/decision", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ authorizationId, decision: "approve" })
+    });
+    expect(response.status).toBe(200);
+    expect(await repo.listConnections(userId)).toHaveLength(1);
+    expect(oauth.approveAuthorization).toHaveBeenCalled();
+  });
+
+  it("revokes the Family OS grant when Supabase approveAuthorization fails", async () => {
+    const repo = new InMemoryFamilyRepository();
+    const oauth = mockOAuthClient({
+      approveAuthorization: vi.fn(async () => {
+        throw new HttpError(400, "oauth_authorization_error", "Supabase approval failed.");
+      })
+    });
+    const api = consentApp(repo, oauth);
+    const token = await sessionJwt(userId);
+
+    const response = await api.request("/api/oauth/consent/decision", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ authorizationId, decision: "approve" })
+    });
+    expect(response.status).toBe(400);
+    const connections = await repo.listConnections(userId);
+    expect(connections).toHaveLength(1);
+    expect(connections[0]?.revokedAt).toBeDefined();
+    expect(await repo.getActiveConnection(userId, oauthClientId)).toBeNull();
+    expect(oauth.approveAuthorization).toHaveBeenCalledWith(token, authorizationId);
   });
 });

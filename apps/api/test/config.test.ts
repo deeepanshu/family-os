@@ -49,12 +49,13 @@ describe("configuration", () => {
         HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
         MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
         SUPABASE_URL: "https://project.supabase.co",
-        SUPABASE_ANON_KEY: "anon-key"
+        SUPABASE_ANON_KEY: "anon-key",
+        MCP_ALLOWED_OAUTH_CLIENT_IDS: "chatgpt-prod"
       })
     ).toThrow("HEALTH_API_REPOSITORY=memory is not allowed in production.");
   });
 
-  it("requires MCP public origin, Supabase URL, and anon key in production", () => {
+  it("requires MCP public origin, Supabase URL, anon key, and OAuth client allowlist in production", () => {
     expect(() =>
       loadConfig({
         NODE_ENV: "production",
@@ -71,7 +72,8 @@ describe("configuration", () => {
         HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
         DATABASE_URL: "postgres://family_os:family_os@localhost:5432/family_os",
         MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
-        SUPABASE_ANON_KEY: "anon-key"
+        SUPABASE_ANON_KEY: "anon-key",
+        MCP_ALLOWED_OAUTH_CLIENT_IDS: "chatgpt-prod"
       })
     ).toThrow("SUPABASE_URL must be configured in production.");
 
@@ -81,9 +83,21 @@ describe("configuration", () => {
         HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
         DATABASE_URL: "postgres://family_os:family_os@localhost:5432/family_os",
         MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
-        SUPABASE_URL: "https://project.supabase.co"
+        SUPABASE_URL: "https://project.supabase.co",
+        MCP_ALLOWED_OAUTH_CLIENT_IDS: "chatgpt-prod"
       })
     ).toThrow("SUPABASE_ANON_KEY must be configured in production");
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
+        DATABASE_URL: "postgres://family_os:family_os@localhost:5432/family_os",
+        MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
+        SUPABASE_URL: "https://project.supabase.co",
+        SUPABASE_ANON_KEY: "anon-key"
+      })
+    ).toThrow("MCP_ALLOWED_OAUTH_CLIENT_IDS must be configured in production");
   });
 
   it("normalizes MCP public path and accepts legacy MCP_PUBLIC_BASE_URL as origin", () => {
@@ -101,5 +115,36 @@ describe("configuration", () => {
     });
     expect(fromLegacy.MCP_PUBLIC_ORIGIN).toBe("https://familyos.deepanshujain.me");
     expect(fromLegacy.MCP_PUBLIC_PATH).toBe("/api/mcp");
+  });
+
+  it("rejects MCP_PUBLIC_ORIGIN values that include a path, query, or fragment", () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "test",
+        MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me/api"
+      })
+    ).toThrow(/origin only/);
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "test",
+        MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me?x=1"
+      })
+    ).toThrow(/query/);
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "test",
+        MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me#frag"
+      })
+    ).toThrow(/fragment/);
+  });
+
+  it("parses MCP OAuth client allowlist", () => {
+    const config = loadConfig({
+      NODE_ENV: "test",
+      MCP_ALLOWED_OAUTH_CLIENT_IDS: " client-a , client-b,client-a "
+    });
+    expect(config.MCP_ALLOWED_OAUTH_CLIENT_IDS).toEqual(["client-a", "client-b"]);
   });
 });

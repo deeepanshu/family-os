@@ -194,6 +194,31 @@ describe("HealthMcpReadService", () => {
     expect(JSON.stringify(mcpAudit?.metadata ?? {})).not.toContain("2000");
   });
 
+  it("denies clients not on the MCP OAuth allowlist even with an active grant", async () => {
+    const repo = new InMemoryFamilyRepository();
+    const { profileId } = await seedUserWithSteps(repo, userId);
+    const repositories = repositoriesFromFamilyRepository(repo);
+    await repositories.mcpConnections.createConnection({
+      userId,
+      oauthClientId,
+      capabilities: ["health_read"],
+      consentVersion: "2026-07-18"
+    });
+
+    const service = new HealthMcpReadService({
+      ...repositories,
+      allowedOAuthClientIds: ["only-other-client"],
+      now: fixedNow
+    });
+
+    await expect(
+      service.getHealthData(
+        { userId, oauthClientId },
+        { personId: profileId, healthMetric: "steps", rangeDays: 7 }
+      )
+    ).rejects.toMatchObject({ status: 403, code: "oauth_client_not_allowed" });
+  });
+
   it("denies a different-family profile even when the UUID is supplied by the model", async () => {
     const repo = new InMemoryFamilyRepository();
     const { profileId: ownProfileId } = await seedUserWithSteps(repo, userId);

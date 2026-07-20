@@ -48,15 +48,22 @@ export type HealthMcpReadServiceDeps = {
   mcpConnections: McpConnectionStore;
   auditLogs: AuditLogStore;
   rateLimiter?: McpRateLimiter;
+  /**
+   * When non-empty, only these OAuth client IDs may use MCP health tools
+   * (defense in depth alongside consent-time allowlisting).
+   */
+  allowedOAuthClientIds?: readonly string[];
   now?: () => Date;
 };
 
 export class HealthMcpReadService {
   private readonly rateLimiter: McpRateLimiter;
+  private readonly allowedOAuthClientIds: readonly string[];
   private readonly now: () => Date;
 
   constructor(private readonly deps: HealthMcpReadServiceDeps) {
     this.rateLimiter = deps.rateLimiter ?? new McpRateLimiter(60_000, 60);
+    this.allowedOAuthClientIds = deps.allowedOAuthClientIds ?? [];
     this.now = deps.now ?? (() => new Date());
   }
 
@@ -264,6 +271,16 @@ export class HealthMcpReadService {
 
   private async requireActiveConnection(caller: McpCallerContext): Promise<McpConnectionGrant> {
     this.rateLimiter.check(caller.userId, caller.oauthClientId);
+    if (
+      this.allowedOAuthClientIds.length > 0 &&
+      !this.allowedOAuthClientIds.includes(caller.oauthClientId)
+    ) {
+      throw new HttpError(
+        403,
+        "oauth_client_not_allowed",
+        "This OAuth client is not allowlisted for Family OS MCP health access."
+      );
+    }
     const connection = await this.deps.mcpConnections.getActiveConnection(caller.userId, caller.oauthClientId);
     if (!connection) {
       throw new HttpError(

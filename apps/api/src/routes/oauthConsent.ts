@@ -2,7 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
 import { extractBearerToken, requireAuth, type AppVariables } from "../auth";
-import type { AppConfig } from "../config";
+import { isMcpOAuthClientAllowed, type AppConfig } from "../config";
 import { HttpError } from "../errors";
 import { renderOAuthConsentPage } from "../oauth/consentPageHtml";
 import {
@@ -30,6 +30,7 @@ export type OAuthConsentRouteDeps = {
  * - POST /consent/decision        Create Family OS grant (approve) then approve/deny in Supabase
  *
  * The OAuth client ID is always taken from Supabase authorization details, never from the browser body.
+ * Only clients on MCP_ALLOWED_OAUTH_CLIENT_IDS may receive a Family OS health grant (required in production).
  */
 export function createOAuthConsentRoutes(deps: OAuthConsentRouteDeps) {
   const routes = new Hono<{ Variables: AppVariables }>();
@@ -58,6 +59,11 @@ export function createOAuthConsentRoutes(deps: OAuthConsentRouteDeps) {
           client: null
         }
       });
+    }
+
+    const oauthClientId = details.client.client_id?.trim();
+    if (oauthClientId) {
+      assertMcpOAuthClientAllowed(deps.config, oauthClientId);
     }
 
     return c.json({
@@ -101,24 +107,49 @@ export function createOAuthConsentRoutes(deps: OAuthConsentRouteDeps) {
       );
     }
 
-    await deps.mcpConnections.createConnection({
+    assertMcpOAuthClientAllowed(deps.config, oauthClientId);
+
+    // Create the Family OS grant before Supabase approval so the client has access
+    // as soon as it exchanges the code. If Supabase approval fails, revoke immediately
+    // so a still-valid prior token for a previously revoked client is not re-enabled.
+    const connection = await deps.mcpConnections.createConnection({
       userId: user.id,
       oauthClientId,
       capabilities: ["health_read"],
       consentVersion: deps.config.MCP_CONSENT_VERSION
     });
 
-    const result = await oauth().approveAuthorization(accessToken, body.authorizationId);
-    return c.json({
-      data: {
-        redirectUrl: result.redirect_url,
-        decision: "approve" as const,
-        oauthClientId
+    try {
+      const result = await oauth().approveAuthorization(accessToken, body.authorizationId);
+      return c.json({
+        data: {
+          redirectUrl: result.redirect_url,
+          decision: "approve" as const,
+          oauthClientId
+        }
+      });
+    } catch (error) {
+      try {
+        await deps.mcpConnections.revokeConnection(user.id, connection.id);
+      } catch {
+        // Best-effort rollback; surface the original approval failure.
       }
-    });
+      throw error;
+    }
   });
 
   return routes;
+}
+
+function assertMcpOAuthClientAllowed(config: AppConfig, oauthClientId: string): void {
+  if (isMcpOAuthClientAllowed(config, oauthClientId)) {
+    return;
+  }
+  throw new HttpError(
+    403,
+    "oauth_client_not_allowed",
+    "This OAuth client is not allowlisted for Family OS MCP health access."
+  );
 }
 
 function requireAccessToken(authorizationHeader: string | undefined): string {

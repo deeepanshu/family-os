@@ -222,11 +222,15 @@ metadata at
 `https://familyos.deepanshujain.me/.well-known/oauth-protected-resource/api/mcp`.
 
 Public URL config is origin + path (`MCP_PUBLIC_ORIGIN` + `MCP_PUBLIC_PATH`),
-not a base that incorrectly nests `.well-known` under `/api`. OAuth consent
-creates the Family OS connection grant after
-`getAuthorizationDetails` supplies the verified OAuth `client_id`. Deploy
-`supabase/hooks/custom-access-token-mcp-audience.sql` so OAuth tokens use
-`aud` equal to the MCP resource URL.
+not a base that incorrectly nests `.well-known` under `/api`.
+`MCP_PUBLIC_ORIGIN` must be scheme + host only (no path/query/fragment).
+OAuth consent creates the Family OS connection grant only for clients listed in
+`MCP_ALLOWED_OAUTH_CLIENT_IDS` (required in production), using the verified
+OAuth `client_id` from `getAuthorizationDetails`. If Supabase
+`approveAuthorization` fails after the grant is written, the grant is revoked.
+Deploy `supabase/hooks/custom-access-token-mcp-audience.sql` so OAuth tokens use
+`aud` equal to the MCP resource URL (audience rewrite is not the allowlist;
+grants + allowlist still gate health access).
 
 The MCP transport directly calls `HealthMcpReadService` after validating the
 user's bearer token. It does not forward the bearer token to another internal
@@ -328,7 +332,8 @@ be reported by the MCP client as an unverified claim.
 
 ### 8.2 Operational controls
 
-- Per-user and per-client rate limits.
+- Per-user and per-client rate limits (process-local until a shared gateway /
+  Redis / Postgres limiter is deployed; single API instance only before then).
 - Request and upstream timeout limits.
 - Maximum concurrent tool calls per user.
 - Redacted structured logs and metrics.

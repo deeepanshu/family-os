@@ -313,6 +313,7 @@ describe("health API bootstrap", () => {
         SUPABASE_URL: "https://project.supabase.co",
         MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
         SUPABASE_ANON_KEY: "test-anon-key",
+        MCP_ALLOWED_OAUTH_CLIENT_IDS: "chatgpt-prod",
         HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com"
       },
       familyRepository: new InMemoryFamilyRepository()

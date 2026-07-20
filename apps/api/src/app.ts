@@ -1,6 +1,5 @@
 import { HEALTH_API_PREFIX, type AuthSessionResponse, type HealthcheckResponse } from "@family-os/shared";
 import { Hono } from "hono";
-import type { AppConfig } from "./config";
 import { loadConfig } from "./config";
 import { HttpError, jsonError } from "./errors";
 import { requireAuth, type AppVariables } from "./auth";
@@ -25,7 +24,8 @@ import { createMcpRoutes, createMcpWellKnownRoutes } from "./mcp/routes";
 import { mcpPublicPath } from "./mcp/publicUrl";
 
 export type AppOptions = {
-  config?: Partial<AppConfig>;
+  /** Env-like values parsed by `loadConfig` (strings, not pre-parsed arrays). */
+  config?: Record<string, unknown>;
   familyRepository?: FamilyRepository;
   repositories?: AppRepositories;
 };
