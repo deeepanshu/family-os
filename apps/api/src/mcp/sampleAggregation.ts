@@ -120,15 +120,33 @@ export function allocateValueAcrossLocalHours(
   return amounts;
 }
 
-function nextLocalHourBoundaryMs(fromMs: number, timezone: string): number {
+/**
+ * UTC instant of the next local-hour boundary after `fromMs`.
+ *
+ * Uses binary search over the local hour bucket so samples with non-zero
+ * seconds/milliseconds (e.g. 08:30:30) land on the true wall-clock hour
+ * (09:00:00), and DST spring-forward / fall-back transitions stay correct.
+ */
+export function nextLocalHourBoundaryMs(fromMs: number, timezone: string): number {
   const current = localHourBucket(new Date(fromMs), timezone);
-  for (let minute = 1; minute <= 120; minute += 1) {
-    const candidate = fromMs + minute * 60_000;
-    if (localHourBucket(new Date(candidate), timezone) !== current) {
-      return candidate;
+  // Search up to 3 hours ahead to cover fall-back (25h day) and clock skew.
+  let lo = fromMs + 1;
+  let hi = fromMs + 3 * 3_600_000;
+
+  if (localHourBucket(new Date(hi), timezone) === current) {
+    // Degenerate timezone / clock: fall back to nominal hour.
+    return fromMs + 3_600_000;
+  }
+
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (localHourBucket(new Date(mid), timezone) === current) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
     }
   }
-  return fromMs + 3_600_000;
+  return lo;
 }
 
 function roundTo(value: number, digits: number): number {

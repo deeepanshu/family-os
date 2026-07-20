@@ -47,29 +47,59 @@ describe("configuration", () => {
         NODE_ENV: "production",
         HEALTH_API_REPOSITORY: "memory",
         HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
-        MCP_PUBLIC_BASE_URL: "https://mcp.familyos.app",
-        SUPABASE_URL: "https://project.supabase.co"
+        MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
+        SUPABASE_URL: "https://project.supabase.co",
+        SUPABASE_ANON_KEY: "anon-key"
       })
     ).toThrow("HEALTH_API_REPOSITORY=memory is not allowed in production.");
   });
 
-  it("requires MCP public base URL and Supabase URL in production", () => {
+  it("requires MCP public origin, Supabase URL, and anon key in production", () => {
     expect(() =>
       loadConfig({
         NODE_ENV: "production",
         HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
         DATABASE_URL: "postgres://family_os:family_os@localhost:5432/family_os",
-        SUPABASE_URL: "https://project.supabase.co"
+        SUPABASE_URL: "https://project.supabase.co",
+        SUPABASE_ANON_KEY: "anon-key"
       })
-    ).toThrow("MCP_PUBLIC_BASE_URL must be configured in production.");
+    ).toThrow("MCP_PUBLIC_ORIGIN must be configured in production.");
 
     expect(() =>
       loadConfig({
         NODE_ENV: "production",
         HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
         DATABASE_URL: "postgres://family_os:family_os@localhost:5432/family_os",
-        MCP_PUBLIC_BASE_URL: "https://mcp.familyos.app"
+        MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
+        SUPABASE_ANON_KEY: "anon-key"
       })
     ).toThrow("SUPABASE_URL must be configured in production.");
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
+        DATABASE_URL: "postgres://family_os:family_os@localhost:5432/family_os",
+        MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
+        SUPABASE_URL: "https://project.supabase.co"
+      })
+    ).toThrow("SUPABASE_ANON_KEY must be configured in production");
+  });
+
+  it("normalizes MCP public path and accepts legacy MCP_PUBLIC_BASE_URL as origin", () => {
+    const fromOrigin = loadConfig({
+      NODE_ENV: "test",
+      MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me/",
+      MCP_PUBLIC_PATH: "api/mcp/"
+    });
+    expect(fromOrigin.MCP_PUBLIC_ORIGIN).toBe("https://familyos.deepanshujain.me");
+    expect(fromOrigin.MCP_PUBLIC_PATH).toBe("/api/mcp");
+
+    const fromLegacy = loadConfig({
+      NODE_ENV: "test",
+      MCP_PUBLIC_BASE_URL: "https://familyos.deepanshujain.me"
+    });
+    expect(fromLegacy.MCP_PUBLIC_ORIGIN).toBe("https://familyos.deepanshujain.me");
+    expect(fromLegacy.MCP_PUBLIC_PATH).toBe("/api/mcp");
   });
 });

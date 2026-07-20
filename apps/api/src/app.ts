@@ -17,10 +17,12 @@ import { createAuditLogRoutes } from "./routes/auditLogs";
 import { createBootstrapRoutes } from "./routes/bootstrap";
 import { createMeRoutes } from "./routes/me";
 import { createMcpConnectionRoutes } from "./routes/mcpConnections";
+import { createOAuthConsentRoutes } from "./routes/oauthConsent";
 import { corsMiddleware, requestLoggingMiddleware, writeRateLimitMiddleware } from "./middleware/hardening";
 import { createDependencies, repositoriesFromFamilyRepository } from "./dependencies";
 import type { AppRepositories } from "./repositories/contracts";
 import { createMcpRoutes, createMcpWellKnownRoutes } from "./mcp/routes";
+import { mcpPublicPath } from "./mcp/publicUrl";
 
 export type AppOptions = {
   config?: Partial<AppConfig>;
@@ -74,8 +76,10 @@ export function createApp(options: AppOptions = {}) {
   health.route("/audit-logs", createAuditLogRoutes(repositories.auditLogs));
   health.route("/mcp/connections", createMcpConnectionRoutes(repositories.mcpConnections));
 
+  // Public MCP resource path (default /api/mcp) and RFC 9728 metadata under the origin.
   app.route("/", createMcpWellKnownRoutes(config));
-  app.route("/mcp", createMcpRoutes({ config, repositories }));
+  app.route(mcpPublicPath(config), createMcpRoutes({ config, repositories }));
+  app.route("/api/oauth", createOAuthConsentRoutes({ config, mcpConnections: repositories.mcpConnections }));
   app.route(HEALTH_API_PREFIX, health);
 
   app.notFound((c) =>

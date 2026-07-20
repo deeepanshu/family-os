@@ -8,7 +8,11 @@ import { HttpError, jsonError } from "../errors";
 import type { AppRepositories } from "../repositories/contracts";
 import { HealthMcpReadService } from "./HealthMcpReadService";
 import { createFamilyOsMcpServer } from "./createMcpServer";
-import { mcpProtectedResourceMetadataUrl, mcpResourceUrl } from "./publicUrl";
+import {
+  mcpProtectedResourceMetadataUrl,
+  mcpPublicPath,
+  mcpResourceUrl
+} from "./publicUrl";
 
 export type McpRouteDeps = {
   config: AppConfig;
@@ -16,14 +20,22 @@ export type McpRouteDeps = {
   service?: HealthMcpReadService;
 };
 
+/**
+ * Serves RFC 9728 Protected Resource Metadata.
+ * Primary path: /.well-known/oauth-protected-resource{MCP_PUBLIC_PATH}
+ * e.g. /.well-known/oauth-protected-resource/api/mcp
+ * Also serves the root metadata document for clients that probe the origin root.
+ */
 export function createMcpWellKnownRoutes(config: AppConfig) {
   const routes = new Hono<{ Variables: AppVariables }>();
+  const path = mcpPublicPath(config);
 
-  routes.get("/.well-known/oauth-protected-resource", (c) => {
+  routes.get(`/.well-known/oauth-protected-resource${path}`, (c) => {
     return c.json(buildProtectedResourceMetadata(config));
   });
 
-  routes.get("/.well-known/oauth-protected-resource/mcp", (c) => {
+  // Root fallback (RFC 9728 / MCP clients that try origin-level discovery first).
+  routes.get("/.well-known/oauth-protected-resource", (c) => {
     return c.json(buildProtectedResourceMetadata(config));
   });
 

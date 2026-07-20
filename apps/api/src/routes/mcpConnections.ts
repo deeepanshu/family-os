@@ -1,15 +1,15 @@
-import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
-import { z } from "zod";
 import { requireAuth, type AppVariables } from "../auth";
 import type { McpConnectionStore } from "../repositories/contracts";
 
-const createBody = z.object({
-  oauthClientId: z.string().trim().min(1).max(200),
-  consentVersion: z.string().trim().min(1).max(64),
-  expiresAt: z.string().datetime({ offset: true }).optional()
-});
-
+/**
+ * User-facing MCP connection management.
+ *
+ * Connection grants are created by the OAuth consent handler
+ * (`POST /api/oauth/consent/decision`) after it derives the OAuth client ID from
+ * the verified Supabase authorization request. Clients must not supply
+ * oauthClientId in a browser body for grant creation.
+ */
 export function createMcpConnectionRoutes(repository: McpConnectionStore) {
   const routes = new Hono<{ Variables: AppVariables }>();
   routes.use("*", requireAuth());
@@ -17,18 +17,6 @@ export function createMcpConnectionRoutes(repository: McpConnectionStore) {
   routes.get("/", async (c) => {
     const data = await repository.listConnections(c.get("user").id);
     return c.json({ data });
-  });
-
-  routes.post("/", zValidator("json", createBody), async (c) => {
-    const body = c.req.valid("json");
-    const data = await repository.createConnection({
-      userId: c.get("user").id,
-      oauthClientId: body.oauthClientId,
-      capabilities: ["health_read"],
-      consentVersion: body.consentVersion,
-      expiresAt: body.expiresAt
-    });
-    return c.json({ data }, 201);
   });
 
   routes.delete("/:connectionId", async (c) => {

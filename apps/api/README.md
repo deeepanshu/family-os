@@ -193,3 +193,41 @@ Runtime hardening knobs:
 - `HEALTH_API_RATE_LIMIT_WINDOW_MS` defaults to `60000`.
 - `HEALTH_API_RATE_LIMIT_MAX_WRITES` defaults to `120` writes per window per bearer token, falling back to IP when no bearer token is present.
 - `HEALTH_API_RATE_LIMIT_MAX_BUCKETS` defaults to `10000` in-memory buckets per API process. The Phase 1 limiter is process-local; multi-process deployments need a shared limiter.
+- MCP tool rate limits are also process-local (`McpRateLimiter`). Move to gateway/Redis/Postgres before horizontal scale.
+
+## MCP and OAuth public surface
+
+Production public origin is modeled as origin + path (not a base that has `/mcp` appended):
+
+| Surface | URL |
+| --- | --- |
+| MCP resource | `{MCP_PUBLIC_ORIGIN}{MCP_PUBLIC_PATH}` default `https://familyos.deepanshujain.me/api/mcp` |
+| Protected resource metadata | `{origin}/.well-known/oauth-protected-resource{MCP_PUBLIC_PATH}` |
+| OAuth consent UI | `{origin}/api/oauth/consent?authorization_id=…` |
+| Connection list/revoke | `/health/v1/mcp/connections` |
+
+Environment:
+
+```text
+MCP_PUBLIC_ORIGIN=https://familyos.deepanshujain.me
+MCP_PUBLIC_PATH=/api/mcp
+SUPABASE_URL=https://<project>.supabase.co
+SUPABASE_ANON_KEY=...
+```
+
+Supabase Auth OAuth Server settings:
+
+- Authorization path: `/api/oauth/consent` (combined with Site URL = `MCP_PUBLIC_ORIGIN`)
+- Site URL must be the same public origin that hosts the API
+
+Consent flow creates the Family OS `mcp_connection_grants` row using the OAuth
+`client_id` from Supabase `getAuthorizationDetails`, never from a browser body.
+`POST /health/v1/mcp/connections` is not used for grant creation.
+
+### JWT audience for MCP tokens
+
+MCP validates `aud` against the MCP resource URL. Supabase OAuth tokens default
+to `aud: "authenticated"`. Deploy the Custom Access Token hook in
+`supabase/hooks/custom-access-token-mcp-audience.sql` so OAuth-issued tokens
+(with `client_id`) receive `aud: https://familyos.deepanshujain.me/api/mcp`.
+Session tokens for the Health API remain `aud: authenticated`.

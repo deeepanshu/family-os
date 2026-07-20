@@ -5,6 +5,14 @@ type Bucket = {
   resetAt: number;
 };
 
+/**
+ * Process-local MCP tool rate limiter.
+ *
+ * WARNING: Counters live in an in-memory Map. Each API process applies its own
+ * full limit, so horizontal scale multiplies effective throughput. Before
+ * running more than one API instance, move this to a shared store (gateway
+ * rate limit, Redis, or Postgres). Single-process Raspberry Pi deploys are fine.
+ */
 export class McpRateLimiter {
   private readonly buckets = new Map<string, Bucket>();
 

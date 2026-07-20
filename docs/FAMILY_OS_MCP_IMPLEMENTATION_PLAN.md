@@ -29,7 +29,7 @@ ChatGPT Web or another OAuth-capable MCP client
     |
     | OAuth 2.1 access token (per Family OS user)
     v
-Family OS MCP server: https://mcp.familyos.app/mcp
+Family OS MCP server: https://familyos.deepanshujain.me/api/mcp
 hosted by the Family OS API runtime
     |
     | direct application-service call; no user-token forwarding
@@ -213,8 +213,20 @@ OAuth grant/refresh path where the provider supports it.
 Expose a single remote MCP endpoint from the API runtime:
 
 ```text
-/mcp
+https://familyos.deepanshujain.me/api/mcp
 ```
+
+The same public deployment also serves the OAuth consent page at
+`https://familyos.deepanshujain.me/api/oauth/consent` and protected-resource
+metadata at
+`https://familyos.deepanshujain.me/.well-known/oauth-protected-resource/api/mcp`.
+
+Public URL config is origin + path (`MCP_PUBLIC_ORIGIN` + `MCP_PUBLIC_PATH`),
+not a base that incorrectly nests `.well-known` under `/api`. OAuth consent
+creates the Family OS connection grant after
+`getAuthorizationDetails` supplies the verified OAuth `client_id`. Deploy
+`supabase/hooks/custom-access-token-mcp-audience.sql` so OAuth tokens use
+`aud` equal to the MCP resource URL.
 
 The MCP transport directly calls `HealthMcpReadService` after validating the
 user's bearer token. It does not forward the bearer token to another internal

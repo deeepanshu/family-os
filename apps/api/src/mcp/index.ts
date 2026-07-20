@@ -9,4 +9,10 @@ export {
   aggregateDailySteps,
   aggregateHourlySteps
 } from "./sampleAggregation";
-export { mcpResourceUrl, mcpPublicBaseUrl } from "./publicUrl";
+export {
+  mcpResourceUrl,
+  mcpPublicBaseUrl,
+  mcpPublicOrigin,
+  mcpPublicPath,
+  mcpProtectedResourceMetadataUrl
+} from "./publicUrl";
