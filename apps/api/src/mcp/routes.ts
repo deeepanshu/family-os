@@ -8,6 +8,7 @@ import { HttpError, jsonError } from "../errors";
 import type { AppRepositories } from "../repositories/contracts";
 import { HealthMcpReadService } from "./HealthMcpReadService";
 import { createFamilyOsMcpServer } from "./createMcpServer";
+import { mcpProtectedResourceMetadataUrl, mcpResourceUrl } from "./publicUrl";
 
 export type McpRouteDeps = {
   config: AppConfig;
@@ -82,19 +83,18 @@ export function createMcpRoutes(deps: McpRouteDeps) {
 
     let verified;
     try {
-      verified = await verifyBearerToken(token, deps.config);
+      verified = await verifyBearerToken(token, deps.config, {
+        audience: mcpResourceUrl(deps.config),
+        requireOAuthClientId: true
+      });
     } catch (error) {
       if (error instanceof HttpError && error.status === 401) {
-        return unauthorizedMcp(c, deps.config);
+        return unauthorizedMcp(c, deps.config, error.message);
       }
       if (error instanceof HttpError) {
         return jsonError(c, error);
       }
       return unauthorizedMcp(c, deps.config);
-    }
-
-    if (!verified.oauthClientId) {
-      return unauthorizedMcp(c, deps.config, "Token is missing OAuth client identity.");
     }
 
     const correlationId = c.req.header("x-request-id") ?? randomUUID();
@@ -106,7 +106,7 @@ export function createMcpRoutes(deps: McpRouteDeps) {
       service,
       caller: {
         userId: verified.userId,
-        oauthClientId: verified.oauthClientId,
+        oauthClientId: verified.oauthClientId!,
         correlationId
       },
       config: deps.config
@@ -125,11 +125,10 @@ export function createMcpRoutes(deps: McpRouteDeps) {
 }
 
 function buildProtectedResourceMetadata(config: AppConfig) {
-  const baseUrl = (config.MCP_PUBLIC_BASE_URL ?? `http://127.0.0.1:${config.PORT}`).replace(/\/$/, "");
   const authorizationServers = config.SUPABASE_URL ? [`${config.SUPABASE_URL.replace(/\/$/, "")}/auth/v1`] : [];
 
   return {
-    resource: `${baseUrl}/mcp`,
+    resource: mcpResourceUrl(config),
     authorization_servers: authorizationServers,
     bearer_methods_supported: ["header"],
     scopes_supported: ["openid", "offline_access"],
@@ -142,8 +141,7 @@ function unauthorizedMcp(
   config: AppConfig,
   message = "Authorization bearer token is required."
 ) {
-  const baseUrl = (config.MCP_PUBLIC_BASE_URL ?? `http://127.0.0.1:${config.PORT}`).replace(/\/$/, "");
-  const resourceMetadata = `${baseUrl}/.well-known/oauth-protected-resource`;
+  const resourceMetadata = mcpProtectedResourceMetadataUrl(config);
   c.header(
     "WWW-Authenticate",
     `Bearer realm="family-os-mcp", resource_metadata="${resourceMetadata}", error="invalid_token"`

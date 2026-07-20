@@ -46,8 +46,30 @@ describe("configuration", () => {
       loadConfig({
         NODE_ENV: "production",
         HEALTH_API_REPOSITORY: "memory",
-        HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com"
+        HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
+        MCP_PUBLIC_BASE_URL: "https://mcp.familyos.app",
+        SUPABASE_URL: "https://project.supabase.co"
       })
     ).toThrow("HEALTH_API_REPOSITORY=memory is not allowed in production.");
+  });
+
+  it("requires MCP public base URL and Supabase URL in production", () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
+        DATABASE_URL: "postgres://family_os:family_os@localhost:5432/family_os",
+        SUPABASE_URL: "https://project.supabase.co"
+      })
+    ).toThrow("MCP_PUBLIC_BASE_URL must be configured in production.");
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
+        DATABASE_URL: "postgres://family_os:family_os@localhost:5432/family_os",
+        MCP_PUBLIC_BASE_URL: "https://mcp.familyos.app"
+      })
+    ).toThrow("SUPABASE_URL must be configured in production.");
   });
 });

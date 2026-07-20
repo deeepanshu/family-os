@@ -931,9 +931,19 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       )
       .filter((sample) => {
         const startMs = Date.parse(sample.startDate);
-        return startMs >= rangeStartMs && startMs <= rangeEndMs;
+        const endMs = sample.endDate ? Date.parse(sample.endDate) : startMs;
+        return endMs >= rangeStartMs && startMs <= rangeEndMs;
       })
       .map((sample) => ({ ...sample }));
+  }
+
+  async getLastHealthKitSyncFinishedAt(actorUserId: string, personId: string): Promise<string | undefined> {
+    const current = this.requireActiveMember(actorUserId);
+    this.assertProfileInFamily(personId, current.family.id);
+    const latest = [...this.healthKitSyncRuns.values()]
+      .filter((run) => run.personId === personId)
+      .sort((a, b) => Date.parse(b.finishedAt) - Date.parse(a.finishedAt))[0];
+    return latest?.finishedAt;
   }
 
   async createConnection(input: CreateMcpConnectionInput): Promise<McpConnectionGrant> {

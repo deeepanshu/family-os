@@ -20,6 +20,11 @@ export type VerifiedAuth = {
   oauthClientId?: string;
 };
 
+export type VerifyBearerOptions = {
+  audience: string | string[];
+  requireOAuthClientId?: boolean;
+};
+
 const bearerPrefix = "Bearer ";
 const hmacAlgorithms = new Set(["HS256", "HS384", "HS512"]);
 const jwksByIssuer = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
@@ -37,7 +42,7 @@ export function requireAuth() {
       throw new HttpError(401, "missing_authorization", "Authorization bearer token is required.");
     }
 
-    const verified = await verifyBearerToken(token, config);
+    const verified = await verifyBearerToken(token, config, { audience: "authenticated" });
     c.set("user", {
       id: verified.userId,
       email: verified.email,
@@ -47,7 +52,11 @@ export function requireAuth() {
   });
 }
 
-export async function verifyBearerToken(token: string, config: AppConfig): Promise<VerifiedAuth> {
+export async function verifyBearerToken(
+  token: string,
+  config: AppConfig,
+  options: VerifyBearerOptions
+): Promise<VerifiedAuth> {
   if (
     config.NODE_ENV !== "production" &&
     config.HEALTH_API_ENABLE_DEV_AUTH &&
@@ -74,21 +83,26 @@ export async function verifyBearerToken(token: string, config: AppConfig): Promi
   }
 
   try {
-    const verifyOptions = { issuer, audience: "authenticated" };
+    const verifyOptions = { issuer, audience: options.audience };
     const { payload } = hmacAlgorithms.has(alg ?? "")
       ? await jwtVerify(token, new TextEncoder().encode(config.SUPABASE_JWT_SECRET), verifyOptions)
       : await jwtVerify(token, jwksForIssuer(issuer!), verifyOptions);
     if (!payload.sub) {
       throw new HttpError(401, "invalid_token", "Token subject is required.");
     }
-    if (payload.role !== "authenticated") {
+    if (payload.role !== undefined && payload.role !== "authenticated") {
       throw new HttpError(401, "invalid_token", "Token role must be authenticated.");
+    }
+
+    const oauthClientId = extractOAuthClientId(payload);
+    if (options.requireOAuthClientId && !oauthClientId) {
+      throw new HttpError(401, "invalid_token", "Token is missing OAuth client identity.");
     }
 
     return {
       userId: payload.sub,
       email: typeof payload.email === "string" ? payload.email : undefined,
-      oauthClientId: extractOAuthClientId(payload)
+      oauthClientId
     };
   } catch (error) {
     if (error instanceof HttpError) {

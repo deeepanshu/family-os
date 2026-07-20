@@ -37,6 +37,12 @@ export function loadConfig(env: Record<string, unknown> = process.env): AppConfi
   if (config.NODE_ENV === "production" && !config.HEALTH_API_CORS_ORIGIN) {
     throw new Error("HEALTH_API_CORS_ORIGIN must be configured in production.");
   }
+  if (config.NODE_ENV === "production" && !config.MCP_PUBLIC_BASE_URL) {
+    throw new Error("MCP_PUBLIC_BASE_URL must be configured in production.");
+  }
+  if (config.NODE_ENV === "production" && !config.SUPABASE_URL) {
+    throw new Error("SUPABASE_URL must be configured in production.");
+  }
   const repository = config.HEALTH_API_REPOSITORY ?? (config.NODE_ENV === "test" ? "memory" : "postgres");
   if (config.NODE_ENV === "production" && repository === "memory") {
     throw new Error("HEALTH_API_REPOSITORY=memory is not allowed in production.");

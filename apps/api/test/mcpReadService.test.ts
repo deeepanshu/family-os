@@ -101,6 +101,14 @@ async function seedUserWithSteps(repo: InMemoryFamilyRepository, subject: string
           unit: "min"
         },
         {
+          metricType: "steps",
+          sourceSampleKey: "steps-span",
+          startDate: "2026-07-17T08:30:00.000Z",
+          endDate: "2026-07-17T09:30:00.000Z",
+          value: 1000,
+          unit: "count"
+        },
+        {
           metricType: "blood_pressure",
           sourceSampleKey: "bp-1",
           startDate: "2026-07-16T09:30:00.000Z",
@@ -272,7 +280,7 @@ describe("HealthMcpReadService", () => {
     expect(JSON.stringify(listed)).not.toContain("dateOfBirth");
   });
 
-  it("returns sleep as daily duration hours and blood pressure as a reading table", async () => {
+  it("returns sleep as daily duration hours attributed to the end day, and blood pressure as a reading table", async () => {
     const repo = new InMemoryFamilyRepository();
     const { profileId } = await seedUserWithSteps(repo, userId);
     const repositories = repositoriesFromFamilyRepository(repo);
@@ -291,7 +299,7 @@ describe("HealthMcpReadService", () => {
     expect(sleep.viewType).toBe("daily_duration_series");
     if (sleep.viewType === "daily_duration_series") {
       expect(sleep.unit).toBe("hours");
-      expect(sleep.points.some((p) => p.value === 8)).toBe(true);
+      expect(sleep.points.find((p) => p.bucket === "2026-07-16")?.value).toBe(8);
     }
 
     const bp = await service.getHealthData(
@@ -306,7 +314,7 @@ describe("HealthMcpReadService", () => {
     }
   });
 
-  it("aggregates hourly steps within a 7-day window", async () => {
+  it("aggregates hourly steps within a 7-day window and splits spanning samples", async () => {
     const repo = new InMemoryFamilyRepository();
     const { profileId } = await seedUserWithSteps(repo, userId);
     const repositories = repositoriesFromFamilyRepository(repo);
@@ -332,6 +340,8 @@ describe("HealthMcpReadService", () => {
     if (hourly.viewType === "hourly_series") {
       expect(hourly.points.find((p) => p.bucket === "2026-07-15T08:00")?.value).toBe(1200);
       expect(hourly.points.find((p) => p.bucket === "2026-07-15T14:00")?.value).toBe(800);
+      expect(hourly.points.find((p) => p.bucket === "2026-07-17T08:00")?.value).toBeCloseTo(500, 5);
+      expect(hourly.points.find((p) => p.bucket === "2026-07-17T09:00")?.value).toBeCloseTo(500, 5);
     }
   });
 });

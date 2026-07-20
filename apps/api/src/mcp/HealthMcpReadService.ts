@@ -15,16 +15,21 @@ import type {
   HealthKitStore,
   McpConnectionStore,
   ProfileStore,
-  ReadingStore
+  ReadingStore,
+  RecordAuditInput
 } from "../repositories/contracts";
-import type { RecordAuditInput } from "../repositories/contracts";
 import { resolveMetricQuery } from "./metricRegistry";
 import { McpRateLimiter } from "./rateLimit";
+import {
+  aggregateDailySleepHours,
+  aggregateDailySteps,
+  aggregateHourlySteps,
+  expandDateRangeForTimezoneEdges
+} from "./sampleAggregation";
 import {
   isDateInInclusiveRange,
   localDateRangeEndingToday,
   localDateString,
-  localHourBucket,
   localTimeOfDay,
   resolveTimezone
 } from "./timezone";
@@ -89,7 +94,7 @@ export class HealthMcpReadService {
       await this.deps.profiles.getProfile(caller.userId, input.personId);
 
       const { rangeStart, rangeEnd } = localDateRangeEndingToday(query.rangeDays, timezone, this.now());
-      const lastSyncedAt = await this.resolveLastSyncedAt(caller.userId, input.personId);
+      const lastSyncedAt = await this.deps.healthKit.getLastHealthKitSyncFinishedAt(caller.userId, input.personId);
 
       if (query.metric === "steps" && query.granularity === "hourly") {
         const points = await this.loadHourlySteps(caller.userId, input.personId, rangeStart, rangeEnd, timezone);
@@ -112,7 +117,7 @@ export class HealthMcpReadService {
       }
 
       if (query.metric === "steps") {
-        const points = await this.loadDailySteps(caller.userId, input.personId, rangeStart, rangeEnd);
+        const points = await this.loadDailySteps(caller.userId, input.personId, rangeStart, rangeEnd, timezone);
         return {
           personId: input.personId,
           healthMetric: "steps",
@@ -132,7 +137,7 @@ export class HealthMcpReadService {
       }
 
       if (query.metric === "sleep") {
-        const points = await this.loadDailySleepHours(caller.userId, input.personId, rangeStart, rangeEnd);
+        const points = await this.loadDailySleepHours(caller.userId, input.personId, rangeStart, rangeEnd, timezone);
         return {
           personId: input.personId,
           healthMetric: "sleep",
@@ -184,29 +189,22 @@ export class HealthMcpReadService {
     userId: string,
     personId: string,
     rangeStart: string,
-    rangeEnd: string
+    rangeEnd: string,
+    timezone: string
   ): Promise<McpSeriesPoint[]> {
-    const summaries = await this.deps.healthKit.listHealthMetricDailySummaries(userId, personId, "steps", 365);
-    return summaries
-      .filter((row) => isDateInInclusiveRange(row.date, rangeStart, rangeEnd))
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .map((row) => ({ bucket: row.date, value: row.value }));
+    const samples = await this.loadSamples(userId, personId, "steps", rangeStart, rangeEnd);
+    return aggregateDailySteps(samples, rangeStart, rangeEnd, timezone);
   }
 
   private async loadDailySleepHours(
     userId: string,
     personId: string,
     rangeStart: string,
-    rangeEnd: string
+    rangeEnd: string,
+    timezone: string
   ): Promise<McpSeriesPoint[]> {
-    const summaries = await this.deps.healthKit.listHealthMetricDailySummaries(userId, personId, "sleep", 365);
-    return summaries
-      .filter((row) => isDateInInclusiveRange(row.date, rangeStart, rangeEnd))
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .map((row) => ({
-        bucket: row.date,
-        value: roundTo(row.value / 60, 2)
-      }));
+    const samples = await this.loadSamples(userId, personId, "sleep", rangeStart, rangeEnd);
+    return aggregateDailySleepHours(samples, rangeStart, rangeEnd, timezone);
   }
 
   private async loadHourlySteps(
@@ -216,26 +214,19 @@ export class HealthMcpReadService {
     rangeEnd: string,
     timezone: string
   ): Promise<McpSeriesPoint[]> {
-    const samples = await this.deps.healthKit.listHealthKitSamplesForMetric(
-      userId,
-      personId,
-      "steps",
-      rangeStart,
-      rangeEnd
-    );
-    const totals = new Map<string, number>();
-    for (const sample of samples) {
-      const instant = new Date(sample.startDate);
-      const localDate = localDateString(instant, timezone);
-      if (!isDateInInclusiveRange(localDate, rangeStart, rangeEnd)) {
-        continue;
-      }
-      const bucket = localHourBucket(instant, timezone);
-      totals.set(bucket, (totals.get(bucket) ?? 0) + (sample.value ?? 0));
-    }
-    return [...totals.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([bucket, value]) => ({ bucket, value }));
+    const samples = await this.loadSamples(userId, personId, "steps", rangeStart, rangeEnd);
+    return aggregateHourlySteps(samples, rangeStart, rangeEnd, timezone);
+  }
+
+  private async loadSamples(
+    userId: string,
+    personId: string,
+    metricType: "steps" | "sleep",
+    rangeStart: string,
+    rangeEnd: string
+  ) {
+    const { fetchStart, fetchEnd } = expandDateRangeForTimezoneEdges(rangeStart, rangeEnd);
+    return this.deps.healthKit.listHealthKitSamplesForMetric(userId, personId, metricType, fetchStart, fetchEnd);
   }
 
   private async loadBloodPressureTable(
@@ -269,14 +260,6 @@ export class HealthMcpReadService {
         };
       })
     };
-  }
-
-  private async resolveLastSyncedAt(userId: string, personId: string): Promise<string | undefined> {
-    const status = await this.deps.healthKit.getHealthKitSyncStatus(userId);
-    if (status.linkedProfileId === personId && status.lastSync?.finishedAt) {
-      return status.lastSync.finishedAt;
-    }
-    return undefined;
   }
 
   private async requireActiveConnection(caller: McpCallerContext): Promise<McpConnectionGrant> {
@@ -367,11 +350,6 @@ export class HealthMcpReadService {
     };
     await this.deps.auditLogs.recordAudit(audit);
   }
-}
-
-function roundTo(value: number, digits: number): number {
-  const factor = 10 ** digits;
-  return Math.round(value * factor) / factor;
 }
 
 function countDistinctDaysFromBuckets(days: string[]): number {

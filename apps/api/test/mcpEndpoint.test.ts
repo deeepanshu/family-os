@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { HEALTH_API_PREFIX } from "@family-os/shared";
 import { createApp } from "../src/app";
 import { InMemoryFamilyRepository } from "../src/repositories/families";
-import { repositoriesFromFamilyRepository } from "../src/dependencies";
 
 const jwtSecret = "test-supabase-jwt-secret-with-enough-length";
 const supabaseUrl = "https://project.supabase.co";
@@ -11,6 +10,7 @@ const userId = "00000000-0000-4000-8000-000000003001";
 const otherUserId = "00000000-0000-4000-8000-000000003002";
 const oauthClientId = "chatgpt-staging";
 const mcpBase = "https://mcp.test.familyos.app";
+const mcpResource = `${mcpBase}/mcp`;
 
 function app(repo = new InMemoryFamilyRepository()) {
   return {
@@ -30,24 +30,28 @@ function app(repo = new InMemoryFamilyRepository()) {
   };
 }
 
-async function jwtFor(subject: string, clientId = oauthClientId) {
+async function jwtFor(subject: string, options?: { clientId?: string; audience?: string }) {
   return new SignJWT({
     role: "authenticated",
     email: `${subject}@example.com`,
-    client_id: clientId
+    client_id: options?.clientId ?? oauthClientId
   })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(subject)
     .setIssuer(`${supabaseUrl}/auth/v1`)
-    .setAudience("authenticated")
+    .setAudience(options?.audience ?? mcpResource)
     .setIssuedAt()
     .setExpirationTime("1h")
     .sign(new TextEncoder().encode(jwtSecret));
 }
 
+async function healthJwt(subject: string) {
+  return jwtFor(subject, { audience: "authenticated" });
+}
+
 async function seedWithSteps(repo: InMemoryFamilyRepository, subject: string) {
   const { api } = app(repo);
-  const token = await jwtFor(subject);
+  const token = await healthJwt(subject);
   await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}` }
@@ -91,6 +95,16 @@ async function seedWithSteps(repo: InMemoryFamilyRepository, subject: string) {
   return { token, profileId };
 }
 
+async function grantConnection(api: ReturnType<typeof createApp>, healthToken: string) {
+  const response = await api.request(`${HEALTH_API_PREFIX}/mcp/connections`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${healthToken}`, "content-type": "application/json" },
+    body: JSON.stringify({ oauthClientId, consentVersion: "2026-07-18" })
+  });
+  expect(response.status).toBe(201);
+  return response.json();
+}
+
 async function mcpRpc(api: ReturnType<typeof createApp>, token: string, body: unknown) {
   return api.request("/mcp", {
     method: "POST",
@@ -127,7 +141,7 @@ describe("MCP endpoint", () => {
     const response = await api.request("/.well-known/oauth-protected-resource");
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.resource).toBe(`${mcpBase}/mcp`);
+    expect(body.resource).toBe(mcpResource);
     expect(body.authorization_servers).toEqual([`${supabaseUrl}/auth/v1`]);
     expect(body.bearer_methods_supported).toEqual(["header"]);
   });
@@ -153,18 +167,14 @@ describe("MCP endpoint", () => {
     expect(www).toContain(`${mcpBase}/.well-known/oauth-protected-resource`);
   });
 
-  it("discovers only the two approved read-only tools", async () => {
+  it("rejects Supabase session tokens that are not audience-bound to the MCP resource", async () => {
     const repo = new InMemoryFamilyRepository();
-    const { token } = await seedWithSteps(repo, userId);
+    const { token: healthToken } = await seedWithSteps(repo, userId);
     const { api } = app(repo);
-    await repositoriesFromFamilyRepository(repo).mcpConnections.createConnection({
-      userId,
-      oauthClientId,
-      capabilities: ["health_read"],
-      consentVersion: "2026-07-18"
-    });
+    await grantConnection(api, healthToken);
 
-    const init = await mcpRpc(api, token, {
+    const sessionToken = await healthJwt(userId);
+    const response = await mcpRpc(api, sessionToken, {
       jsonrpc: "2.0",
       id: 1,
       method: "initialize",
@@ -174,9 +184,17 @@ describe("MCP endpoint", () => {
         clientInfo: { name: "family-os-test", version: "0.0.1" }
       }
     });
-    expect(init.status).toBe(200);
+    expect(response.status).toBe(401);
+  });
 
-    const listed = await mcpRpc(api, token, {
+  it("creates connection grants through the authenticated API and discovers tools", async () => {
+    const repo = new InMemoryFamilyRepository();
+    const { token: healthToken } = await seedWithSteps(repo, userId);
+    const { api } = app(repo);
+    await grantConnection(api, healthToken);
+    const mcpToken = await jwtFor(userId);
+
+    const listed = await mcpRpc(api, mcpToken, {
       jsonrpc: "2.0",
       id: 2,
       method: "tools/list",
@@ -190,16 +208,12 @@ describe("MCP endpoint", () => {
 
   it("calls get_health_data for an authorized profile through the MCP endpoint", async () => {
     const repo = new InMemoryFamilyRepository();
-    const { token, profileId } = await seedWithSteps(repo, userId);
+    const { token: healthToken, profileId } = await seedWithSteps(repo, userId);
     const { api } = app(repo);
-    await repositoriesFromFamilyRepository(repo).mcpConnections.createConnection({
-      userId,
-      oauthClientId,
-      capabilities: ["health_read"],
-      consentVersion: "2026-07-18"
-    });
+    await grantConnection(api, healthToken);
+    const mcpToken = await jwtFor(userId);
 
-    const response = await mcpRpc(api, token, {
+    const response = await mcpRpc(api, mcpToken, {
       jsonrpc: "2.0",
       id: 3,
       method: "tools/call",
@@ -223,21 +237,18 @@ describe("MCP endpoint", () => {
     expect(payload.viewType).toBe("daily_series");
     expect(payload.healthMetric).toBe("steps");
     expect(payload.points.find((p: { bucket: string; value: number }) => p.bucket === "2026-07-15")?.value).toBe(2500);
+    expect(payload.lastSyncedAt).toBeTruthy();
   });
 
   it("returns a safe tool error for another family's profile", async () => {
     const repo = new InMemoryFamilyRepository();
-    const { token } = await seedWithSteps(repo, userId);
+    const { token: healthToken } = await seedWithSteps(repo, userId);
     const { profileId: otherProfileId } = await seedWithSteps(repo, otherUserId);
     const { api } = app(repo);
-    await repositoriesFromFamilyRepository(repo).mcpConnections.createConnection({
-      userId,
-      oauthClientId,
-      capabilities: ["health_read"],
-      consentVersion: "2026-07-18"
-    });
+    await grantConnection(api, healthToken);
+    const mcpToken = await jwtFor(userId);
 
-    const response = await mcpRpc(api, token, {
+    const response = await mcpRpc(api, mcpToken, {
       jsonrpc: "2.0",
       id: 4,
       method: "tools/call",
@@ -260,16 +271,12 @@ describe("MCP endpoint", () => {
 
   it("rejects invalid tool parameters before returning data", async () => {
     const repo = new InMemoryFamilyRepository();
-    const { token, profileId } = await seedWithSteps(repo, userId);
+    const { token: healthToken, profileId } = await seedWithSteps(repo, userId);
     const { api } = app(repo);
-    await repositoriesFromFamilyRepository(repo).mcpConnections.createConnection({
-      userId,
-      oauthClientId,
-      capabilities: ["health_read"],
-      consentVersion: "2026-07-18"
-    });
+    await grantConnection(api, healthToken);
+    const mcpToken = await jwtFor(userId);
 
-    const response = await mcpRpc(api, token, {
+    const response = await mcpRpc(api, mcpToken, {
       jsonrpc: "2.0",
       id: 5,
       method: "tools/call",
@@ -285,5 +292,32 @@ describe("MCP endpoint", () => {
     expect(response.status).toBe(200);
     const body = await parseJsonRpc(response);
     expect(body.error || body.result?.isError).toBeTruthy();
+  });
+
+  it("blocks tool calls after connection revocation via the API", async () => {
+    const repo = new InMemoryFamilyRepository();
+    const { token: healthToken, profileId } = await seedWithSteps(repo, userId);
+    const { api } = app(repo);
+    const created = await grantConnection(api, healthToken);
+    const connectionId = created.data.id as string;
+
+    await api.request(`${HEALTH_API_PREFIX}/mcp/connections/${connectionId}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${healthToken}` }
+    });
+
+    const mcpToken = await jwtFor(userId);
+    const response = await mcpRpc(api, mcpToken, {
+      jsonrpc: "2.0",
+      id: 6,
+      method: "tools/call",
+      params: {
+        name: "family_os.get_health_data",
+        arguments: { personId: profileId, healthMetric: "steps", rangeDays: 7 }
+      }
+    });
+    const body = await parseJsonRpc(response);
+    expect(body.result?.isError).toBe(true);
+    expect(body.result?.content?.[0]?.text).toMatch(/connection/i);
   });
 });

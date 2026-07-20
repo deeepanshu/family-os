@@ -310,6 +310,8 @@ describe("health API bootstrap", () => {
         HEALTH_API_ENABLE_DEV_AUTH: true,
         HEALTH_API_DEV_AUTH_USER_ID: testUserId,
         SUPABASE_JWT_SECRET: jwtSecret,
+        SUPABASE_URL: "https://project.supabase.co",
+        MCP_PUBLIC_BASE_URL: "https://mcp.familyos.app",
         HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com"
       },
       familyRepository: new InMemoryFamilyRepository()

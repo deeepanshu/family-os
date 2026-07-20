@@ -283,8 +283,8 @@ export class PostgresHealthKitStore {
         and person_id = ${personId}
         and metric_type = ${metricType}
         and deleted_at is null
-        and start_date >= ${`${rangeStartDate}T00:00:00.000Z`}::timestamptz
         and start_date <= ${`${rangeEndDate}T23:59:59.999Z`}::timestamptz
+        and coalesce(end_date, start_date) >= ${`${rangeStartDate}T00:00:00.000Z`}::timestamptz
       order by start_date asc
     `;
     return rows.map((row: Row) => ({
@@ -304,6 +304,20 @@ export class PostgresHealthKitStore {
       pulse: row.pulse ?? undefined,
       glucoseContext: row.glucose_context ?? undefined
     }));
+  }
+
+  async getLastHealthKitSyncFinishedAt(actorUserId: string, personId: string): Promise<string | undefined> {
+    const current = await this.context.requireActiveMember(actorUserId);
+    await this.context.requireProfileInFamily(personId, current.family.id);
+    const [row] = await this.context.sql`
+      select finished_at
+      from healthkit_sync_runs
+      where family_id = ${current.family.id}
+        and person_id = ${personId}
+      order by finished_at desc
+      limit 1
+    `;
+    return row ? toIso(row.finished_at) : undefined;
   }
 
   private async requireLinkedSelfProfileId(actorUserId: string, familyId: string): Promise<string> {

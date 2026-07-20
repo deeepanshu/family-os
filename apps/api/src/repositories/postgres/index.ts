@@ -169,6 +169,10 @@ export class PostgresFamilyRepository implements FamilyRepository {
     return this.healthKitStore.getHealthKitSyncStatus(actorUserId);
   }
 
+  getLastHealthKitSyncFinishedAt(actorUserId: string, personId: string): Promise<string | undefined> {
+    return this.healthKitStore.getLastHealthKitSyncFinishedAt(actorUserId, personId);
+  }
+
   linkHealthKitProfile(actorUserId: string, personId: string): Promise<HealthKitSyncStatus> {
     return this.healthKitStore.linkHealthKitProfile(actorUserId, personId);
   }

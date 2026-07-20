@@ -90,6 +90,7 @@ export type HealthKitSampleRecord = HealthKitSampleInput & {
 
 export interface HealthKitStore {
   getHealthKitSyncStatus(actorUserId: string): Promise<HealthKitSyncStatus>;
+  getLastHealthKitSyncFinishedAt(actorUserId: string, personId: string): Promise<string | undefined>;
   linkHealthKitProfile(actorUserId: string, personId: string): Promise<HealthKitSyncStatus>;
   updateHealthKitSyncSettings(actorUserId: string, enabledMetrics: HealthKitMetricType[]): Promise<HealthKitSyncStatus>;
   importHealthKitSamples(actorUserId: string, samples: HealthKitSampleInput[]): Promise<HealthKitImportResult>;

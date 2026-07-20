@@ -16,6 +16,7 @@ import { createDeviceRoutes } from "./routes/devices";
 import { createAuditLogRoutes } from "./routes/auditLogs";
 import { createBootstrapRoutes } from "./routes/bootstrap";
 import { createMeRoutes } from "./routes/me";
+import { createMcpConnectionRoutes } from "./routes/mcpConnections";
 import { corsMiddleware, requestLoggingMiddleware, writeRateLimitMiddleware } from "./middleware/hardening";
 import { createDependencies, repositoriesFromFamilyRepository } from "./dependencies";
 import type { AppRepositories } from "./repositories/contracts";
@@ -71,6 +72,7 @@ export function createApp(options: AppOptions = {}) {
   health.route("/reminders", createReminderRoutes(repositories.reminders));
   health.route("/devices", createDeviceRoutes(repositories.devices));
   health.route("/audit-logs", createAuditLogRoutes(repositories.auditLogs));
+  health.route("/mcp/connections", createMcpConnectionRoutes(repositories.mcpConnections));
 
   app.route("/", createMcpWellKnownRoutes(config));
   app.route("/mcp", createMcpRoutes({ config, repositories }));
