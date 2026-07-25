@@ -110,7 +110,7 @@ export function mapBloodGlucose(row: Row): BloodGlucoseReading {
     familyId: row.family_id,
     personId: row.person_id,
     recordedByUserId: row.recorded_by_user_id,
-    value: Number(row.value),
+    value: Number(row.value_mg_dl),
     unit: "mg/dL",
     context: undefined,
     measuredAt: toIso(row.measured_at),

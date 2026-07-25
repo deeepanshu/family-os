@@ -23,8 +23,16 @@ enum CrashReporting {
     /// Call once at app launch, before other startup work that may crash.
     @MainActor
     static func configure() {
-        guard Bundle.main.url(forResource: "GoogleService-Info", withExtension: "plist") != nil else {
+        guard let configURL = Bundle.main.url(forResource: "GoogleService-Info", withExtension: "plist") else {
             logger.notice("GoogleService-Info.plist missing; Crashlytics disabled")
+            isEnabled = false
+            return
+        }
+
+        let configuration = NSDictionary(contentsOf: configURL)
+        guard let googleAppID = configuration?["GOOGLE_APP_ID"] as? String,
+              !googleAppID.contains("REPLACE_ME") else {
+            logger.notice("Firebase placeholder configuration detected; Crashlytics disabled")
             isEnabled = false
             return
         }

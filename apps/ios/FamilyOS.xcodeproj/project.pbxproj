@@ -1961,6 +1961,10 @@ if [ ! -f "$GSP" ]; then
   echo "note: GoogleService-Info.plist not in bundle; skipping Crashlytics dSYM upload"
   exit 0
 fi
+if /usr/libexec/PlistBuddy -c "Print :GOOGLE_APP_ID" "$GSP" 2>/dev/null | grep -q "REPLACE_ME"; then
+  echo "note: Firebase placeholder configuration; skipping Crashlytics dSYM upload"
+  exit 0
+fi
 "${BUILD_DIR%/Build/*}/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/run"
 </string>
 		</dict>

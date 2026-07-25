@@ -151,6 +151,9 @@ jobs:
           echo "udid=$device" >> "$GITHUB_OUTPUT"
           echo "Using simulator UDID: $device"
 
+      - name: Provide Firebase placeholder for CI
+        run: cp apps/ios/FamilyOS/Resources/GoogleService-Info.plist.example apps/ios/FamilyOS/Resources/GoogleService-Info.plist
+
       - name: Build iOS app
         run: |
           xcodebuild \
