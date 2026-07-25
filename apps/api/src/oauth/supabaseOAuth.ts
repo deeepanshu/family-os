@@ -154,7 +154,9 @@ function normalizeAuthorizationDetails(
     throw new HttpError(400, "oauth_authorization_error", "Authorization details did not include client information.");
   }
   const client = clientRaw as Record<string, unknown>;
-  const clientId = typeof client.client_id === "string" ? client.client_id : "";
+  // Supabase OAuth 2.1 currently returns { id, name }, while earlier
+  // responses used OAuth registration names ({ client_id, client_name }).
+  const clientId = firstString(client.id, client.client_id);
   if (!clientId && typeof data.redirect_url !== "string") {
     throw new HttpError(400, "oauth_authorization_error", "Authorization details did not include OAuth client_id.");
   }
@@ -164,7 +166,7 @@ function normalizeAuthorizationDetails(
       typeof data.authorization_id === "string" ? data.authorization_id : authorizationId,
     client: {
       client_id: clientId,
-      client_name: typeof client.client_name === "string" ? client.client_name : undefined,
+      client_name: firstOptionalString(client.name, client.client_name),
       client_uri: typeof client.client_uri === "string" ? client.client_uri : undefined,
       logo_uri: typeof client.logo_uri === "string" ? client.logo_uri : undefined,
       redirect_uris: Array.isArray(client.redirect_uris)
@@ -175,4 +177,12 @@ function normalizeAuthorizationDetails(
     scope: typeof data.scope === "string" ? data.scope : undefined,
     redirect_url: typeof data.redirect_url === "string" ? data.redirect_url : undefined
   };
+}
+
+function firstString(...values: unknown[]): string {
+  return firstOptionalString(...values) ?? "";
+}
+
+function firstOptionalString(...values: unknown[]): string | undefined {
+  return values.find((value): value is string => typeof value === "string" && value.length > 0);
 }
