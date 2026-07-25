@@ -137,7 +137,7 @@ enum GlucoseContext: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-enum HealthKitSyncMetric: String, Codable, CaseIterable, Identifiable {
+enum HealthKitSyncMetric: String, Codable, CaseIterable, Identifiable, Sendable {
     case steps
     case sleep
     case bloodPressure = "blood_pressure"

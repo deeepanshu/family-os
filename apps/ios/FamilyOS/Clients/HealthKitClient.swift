@@ -50,7 +50,7 @@ struct HealthKitClient {
         }
     }
 
-    func observe(type: HKSampleType, handler: @escaping () -> Void) -> HKObserverQuery {
+    func observe(type: HKSampleType, handler: @escaping @Sendable () -> Void) -> HKObserverQuery {
         let query = HKObserverQuery(sampleType: type, predicate: nil) { _, completionHandler, _ in
             handler()
             completionHandler()
