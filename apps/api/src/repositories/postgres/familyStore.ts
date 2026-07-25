@@ -279,39 +279,19 @@ export class PostgresFamilyStore {
       throw new HttpError(409, "unsafe_workspace_switch", "Workspace has reminders.");
     }
 
-    const [bpCount] = await tx`
-      select count(*) as count
-      from blood_pressure_readings
-      where family_id = ${familyId}
-        and deleted_at is null
+    const [healthDataCount] = await tx`
+      select sum(record_count)::integer as count
+      from (
+        select count(*) as record_count from health_step_hours where family_id = ${familyId}
+        union all select count(*) from health_sleep_days where family_id = ${familyId}
+        union all select count(*) from health_daily_metrics where family_id = ${familyId}
+        union all select count(*) from health_blood_pressure_readings where family_id = ${familyId}
+        union all select count(*) from health_blood_glucose_readings where family_id = ${familyId}
+        union all select count(*) from health_workouts where family_id = ${familyId}
+      ) health_data
     `;
-    if (bpCount && Number(bpCount.count) > 0) {
-      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has blood pressure readings.");
-    }
-
-    const [stepCount] = await tx`
-      select count(*) as count from health_step_hours where family_id = ${familyId}
-    `;
-    if (stepCount && Number(stepCount.count) > 0) {
-      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has HealthKit step data.");
-    }
-
-    const [sleepCount] = await tx`
-      select count(*) as count from health_sleep_days where family_id = ${familyId}
-    `;
-    if (sleepCount && Number(sleepCount.count) > 0) {
-      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has HealthKit sleep data.");
-    }
-
-    const [glucoseCount] = await tx`
-      select count(*) as count
-      from blood_glucose_readings
-      where family_id = ${familyId}
-        and deleted_at is null
-        and source = 'manual'
-    `;
-    if (glucoseCount && Number(glucoseCount.count) > 0) {
-      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has manual blood sugar readings.");
+    if (healthDataCount && Number(healthDataCount.count) > 0) {
+      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has HealthKit data.");
     }
   }
 
@@ -390,4 +370,3 @@ export class PostgresFamilyStore {
     await this.updateProfile(actorUserId, profileId, { status: "inactive" });
   }
 }
-

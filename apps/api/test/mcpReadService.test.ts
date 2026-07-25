@@ -60,7 +60,7 @@ async function seedUserWithSteps(repo: InMemoryFamilyRepository, subject: string
     body: JSON.stringify({
       personId: profileId,
       consentVersion: "2026-07-18",
-      enabledMetrics: ["steps", "sleep", "blood_pressure"],
+      enabledGroups: ["activity", "sleep", "vitals"],
       healthTimezone: "UTC",
       installationId
     })
@@ -73,7 +73,7 @@ async function seedUserWithSteps(repo: InMemoryFamilyRepository, subject: string
       body: JSON.stringify({
         installationId,
         personId: profileId,
-        metric: "steps",
+        group: "activity",
         timezoneVersion: 1
       })
     })
@@ -111,7 +111,7 @@ async function seedUserWithSteps(repo: InMemoryFamilyRepository, subject: string
       body: JSON.stringify({
         installationId,
         personId: profileId,
-        metric: "sleep",
+        group: "sleep",
         timezoneVersion: 1
       })
     })
@@ -126,7 +126,7 @@ async function seedUserWithSteps(repo: InMemoryFamilyRepository, subject: string
       timezoneVersion: 1,
       repairId: sleepRepair.data.repairId,
       chunkIndex: 0,
-      operations: [{ kind: "sleep_day_upsert", sleepDay: "2026-07-16", durationMinutes: 480 }]
+      operations: [{ kind: "sleep_day_upsert", sleepDay: "2026-07-16", totalMinutes: 480, coreMinutes: 240, deepMinutes: 90, remMinutes: 90, unspecifiedAsleepMinutes: 60, awakeMinutes: 0, inBedMinutes: 480 }]
     })
   });
   await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs/${sleepRepair.data.repairId}/complete`, {
@@ -142,7 +142,7 @@ async function seedUserWithSteps(repo: InMemoryFamilyRepository, subject: string
       body: JSON.stringify({
         installationId,
         personId: profileId,
-        metric: "blood_pressure",
+        group: "vitals",
         timezoneVersion: 1
       })
     })
@@ -355,7 +355,7 @@ describe("HealthMcpReadService", () => {
     const listed = await service.listAuthorizedProfiles({ userId, oauthClientId });
     expect(listed.profiles.length).toBeGreaterThanOrEqual(1);
     expect(listed.profiles[0]?.label).toBeTruthy();
-    expect(listed.profiles[0]?.availableMetrics).toEqual(["steps", "sleep", "blood_pressure"]);
+    expect(listed.profiles[0]?.availableMetrics).toEqual(expect.arrayContaining(["steps", "sleep", "blood_pressure", "blood_glucose", "workout", "heart_rate"]));
     expect(JSON.stringify(listed)).not.toContain("familyId");
     expect(JSON.stringify(listed)).not.toContain("dateOfBirth");
   });
@@ -394,6 +394,55 @@ describe("HealthMcpReadService", () => {
     }
   });
 
+  it("returns daily aggregate statistics, glucose readings, and workouts from canonical HealthKit storage", async () => {
+    const repo = new InMemoryFamilyRepository();
+    const { api, token, profileId } = await seedUserWithSteps(repo, userId);
+    const repositories = repositoriesFromFamilyRepository(repo);
+    await repositories.mcpConnections.createConnection({ userId, oauthClientId, capabilities: ["health_read"], consentVersion: "2026-07-18" });
+    await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        personId: profileId,
+        consentVersion: "2026-07-18",
+        enabledGroups: ["activity", "sleep", "vitals", "workouts"],
+        healthTimezone: "UTC",
+        installationId: "53064303-35cf-4db0-a5d3-8af7d8f747e1"
+      })
+    });
+    const sync = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        syncId: "c92ae50c-2c2a-4f0d-b9d3-1b1a5ec6d818",
+        installationId: "53064303-35cf-4db0-a5d3-8af7d8f747e1",
+        personId: profileId,
+        timezoneVersion: 1,
+        operations: [
+          { kind: "daily_metric_upsert", healthMetric: "heart_rate", localDay: "2026-07-17", averageValue: 70, minimumValue: 50, maximumValue: 120, latestValue: 72, sampleCount: 120 },
+          { kind: "blood_glucose_upsert", sourceSampleKey: "da6694a6-3f56-4a33-a9d8-3ba481670d57", measuredAtUtc: "2026-07-17T08:00:00.000Z", valueMgDl: 104 },
+          { kind: "workout_upsert", sourceSampleKey: "e9758548-5fab-4e47-a4ac-9a05693bea71", workoutType: "running", startedAtUtc: "2026-07-17T10:00:00.000Z", endedAtUtc: "2026-07-17T10:30:00.000Z", durationSeconds: 1800, activeEnergyKcal: 250, distanceMeters: 5000, averageHeartRateBpm: 145, maximumHeartRateBpm: 170 }
+        ]
+      })
+    });
+    expect(sync.status).toBe(200);
+
+    const service = new HealthMcpReadService({ ...repositories, now: fixedNow });
+    const heartRate = await service.getHealthData({ userId, oauthClientId }, { personId: profileId, healthMetric: "heart_rate", rangeDays: 30, timezone: "UTC" });
+    expect(heartRate).toMatchObject({ viewType: "daily_series", unit: "bpm" });
+    if (heartRate.viewType === "daily_series") {
+      expect(heartRate.points).toEqual(expect.arrayContaining([expect.objectContaining({ bucket: "2026-07-17", value: 70, averageValue: 70, maximumValue: 120 })]));
+    }
+
+    const glucose = await service.getHealthData({ userId, oauthClientId }, { personId: profileId, healthMetric: "blood_glucose", rangeDays: 30, timezone: "UTC" });
+    expect(glucose).toMatchObject({ healthMetric: "blood_glucose", viewType: "daily_reading_table" });
+    if (glucose.healthMetric === "blood_glucose") expect(glucose.readings[0]).toMatchObject({ valueMgDl: 104 });
+
+    const workouts = await service.getHealthData({ userId, oauthClientId }, { personId: profileId, healthMetric: "workout", rangeDays: 30, timezone: "UTC" });
+    expect(workouts).toMatchObject({ healthMetric: "workout", viewType: "workout_table" });
+    if (workouts.healthMetric === "workout") expect(workouts.workouts[0]).toMatchObject({ workoutType: "running", durationMinutes: 30 });
+  });
+
   it("withholds sleep points after timezone change until repair completes", async () => {
     const repo = new InMemoryFamilyRepository();
     const api = createApp({
@@ -426,7 +475,7 @@ describe("HealthMcpReadService", () => {
       body: JSON.stringify({
         personId: profileId,
         consentVersion: "2026-07-18",
-        enabledMetrics: ["sleep"],
+        enabledGroups: ["sleep"],
         healthTimezone: "UTC",
         installationId
       })
@@ -439,7 +488,7 @@ describe("HealthMcpReadService", () => {
         installationId,
         personId: profileId,
         timezoneVersion: 1,
-        operations: [{ kind: "sleep_day_upsert", sleepDay: "2026-07-16", durationMinutes: 480 }]
+        operations: [{ kind: "sleep_day_upsert", sleepDay: "2026-07-16", totalMinutes: 480, coreMinutes: 240, deepMinutes: 90, remMinutes: 90, unspecifiedAsleepMinutes: 60, awakeMinutes: 0, inBedMinutes: 480 }]
       })
     });
 
@@ -449,7 +498,7 @@ describe("HealthMcpReadService", () => {
       body: JSON.stringify({
         personId: profileId,
         consentVersion: "2026-07-18",
-        enabledMetrics: ["sleep"],
+        enabledGroups: ["sleep"],
         healthTimezone: "Asia/Bangkok",
         installationId
       })
@@ -507,7 +556,7 @@ describe("HealthMcpReadService", () => {
       body: JSON.stringify({
         personId: profileId,
         consentVersion: "2026-07-18",
-        enabledMetrics: ["steps"],
+        enabledGroups: ["activity"],
         healthTimezone: "UTC",
         installationId
       })
@@ -519,7 +568,7 @@ describe("HealthMcpReadService", () => {
         body: JSON.stringify({
           installationId,
           personId: profileId,
-          metric: "steps",
+          group: "activity",
           timezoneVersion: 1
         })
       })

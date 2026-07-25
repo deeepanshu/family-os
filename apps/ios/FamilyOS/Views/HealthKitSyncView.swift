@@ -4,11 +4,11 @@ struct HealthKitSyncView: View {
     @ObservedObject var viewModel: HealthBootstrapViewModel
 
     var body: some View {
-        Section("HealthKit Sync") {
+        Section("HealthKit Settings") {
             Toggle(isOn: $viewModel.healthKit.consentGranted) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Upload HealthKit data")
-                    Text("Steps, sleep, and blood pressure you enable are uploaded to your Family OS account for health history and MCP access you authorize. Turn off to withdraw consent.")
+                    Text("Selected activity, sleep, vitals, body, mobility, workout, mindfulness, environmental, and nutrition data is uploaded to Family OS for health history and MCP access you authorize. Turn off to withdraw consent.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -43,7 +43,9 @@ struct HealthKitSyncView: View {
                 }
             }
             .disabled(viewModel.selfProfile == nil)
+        }
 
+        Section("HealthKit Sync") {
             Button(viewModel.healthKit.isSyncing ? "Syncing..." : "Sync HealthKit Now") {
                 Task { await viewModel.syncHealthKitNow() }
             }

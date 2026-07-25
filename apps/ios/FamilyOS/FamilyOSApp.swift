@@ -33,6 +33,7 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, @preconcur
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        CrashReporting.configure()
         UNUserNotificationCenter.current().delegate = self
         HealthKitBackgroundSyncCoordinator.shared.registerBackgroundTasks()
         // Observers are registered only after validated local consent/configuration is restored.

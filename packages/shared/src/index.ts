@@ -1,5 +1,9 @@
+import { HEALTHKIT_METRIC_KEYS, type HealthKitConsentGroup, type HealthKitMetricKey } from "./healthkitRegistry";
+
 /** Canonical public prefix for the Family OS health API. */
 export const HEALTH_API_PREFIX = "/health/api/v1" as const;
+
+export * from "./healthkitRegistry";
 
 export type ApiEnvelope<T> = {
   data: T;
@@ -114,12 +118,10 @@ export type BloodPressureReading = {
   measuredAt: string;
   context?: string;
   notes?: string;
-  source: "manual" | "healthkit";
+  source: "healthkit";
   createdAt: string;
   updatedAt: string;
 };
-
-export type GlucoseContext = "fasting" | "before_meal" | "after_meal" | "bedtime" | "random";
 
 export type BloodGlucoseReading = {
   id: string;
@@ -128,16 +130,17 @@ export type BloodGlucoseReading = {
   recordedByUserId: string;
   value: number;
   unit: "mg/dL";
-  context: GlucoseContext;
+  /** HealthKit does not attach a meal context to glucose samples. */
+  context?: undefined;
   measuredAt: string;
   notes?: string;
-  source: "manual" | "healthkit";
+  source: "healthkit";
   createdAt: string;
   updatedAt: string;
 };
 
-/** Supported HealthKit background-sync metrics (v1). */
-export type HealthKitMetric = "steps" | "sleep" | "blood_pressure";
+/** A sync/repair unit. Individual metrics are expanded from this consent group. */
+export type HealthKitMetric = HealthKitConsentGroup;
 
 export type HealthMetricSyncStatusCode =
   | "never_synced"
@@ -148,7 +151,7 @@ export type HealthMetricSyncStatusCode =
   | "disabled";
 
 export type HealthKitMetricSyncState = {
-  metric: HealthKitMetric;
+  group: HealthKitConsentGroup;
   enabled: boolean;
   lastSuccessfulAt?: string;
   lastAttemptAt?: string;
@@ -164,15 +167,15 @@ export type HealthKitSettings = {
   consentedAt?: string;
   healthTimezone: string;
   healthTimezoneVersion: number;
-  enabledMetrics: HealthKitMetric[];
+  enabledGroups: HealthKitConsentGroup[];
   activeInstallationId?: string;
-  metrics: HealthKitMetricSyncState[];
+  groups: HealthKitMetricSyncState[];
 };
 
 export type PutHealthKitSettingsInput = {
   personId: string;
   consentVersion?: string;
-  enabledMetrics: HealthKitMetric[];
+  enabledGroups: HealthKitConsentGroup[];
   healthTimezone: string;
   installationId: string;
   replaceActiveInstallation?: boolean;
@@ -184,10 +187,61 @@ export type HealthKitStepsHourUpsert = {
   count: number;
 };
 
+export type HealthKitStepsHourDelete = {
+  kind: "steps_hour_delete";
+  hourStartUtc: string;
+};
+
 export type HealthKitSleepDayUpsert = {
   kind: "sleep_day_upsert";
   sleepDay: string;
-  durationMinutes: number;
+  totalMinutes: number;
+  coreMinutes: number;
+  deepMinutes: number;
+  remMinutes: number;
+  unspecifiedAsleepMinutes: number;
+  awakeMinutes: number;
+  inBedMinutes: number;
+  wristTemperatureCelsius?: number;
+  breathingDisturbanceCount?: number;
+};
+
+export type HealthKitSleepDayDelete = {
+  kind: "sleep_day_delete";
+  sleepDay: string;
+};
+
+export type HealthKitDailyMetricUpsert = {
+  kind: "daily_metric_upsert";
+  healthMetric: HealthKitMetricKey;
+  localDay: string;
+  sumValue?: number;
+  averageValue?: number;
+  minimumValue?: number;
+  maximumValue?: number;
+  latestValue?: number;
+  sampleCount: number;
+};
+
+export type HealthKitDailyMetricDelete = {
+  kind: "daily_metric_delete";
+  healthMetric: HealthKitMetricKey;
+  localDay: string;
+};
+
+/** A calendar-day aggregate for a registry metric stored in health_daily_metrics. */
+export type HealthDailyMetricRecord = {
+  personId: string;
+  healthMetric: HealthKitMetricKey;
+  localDay: string;
+  timezoneVersion: number;
+  unit: string;
+  sumValue?: number;
+  averageValue?: number;
+  minimumValue?: number;
+  maximumValue?: number;
+  latestValue?: number;
+  sampleCount: number;
 };
 
 export type HealthKitBloodPressureUpsert = {
@@ -204,11 +258,62 @@ export type HealthKitBloodPressureDelete = {
   sourceSampleKey: string;
 };
 
+export type HealthKitBloodGlucoseUpsert = {
+  kind: "blood_glucose_upsert";
+  sourceSampleKey: string;
+  measuredAtUtc: string;
+  valueMgDl: number;
+};
+
+export type HealthKitBloodGlucoseDelete = {
+  kind: "blood_glucose_delete";
+  sourceSampleKey: string;
+};
+
+export type HealthKitWorkoutUpsert = {
+  kind: "workout_upsert";
+  sourceSampleKey: string;
+  workoutType: string;
+  startedAtUtc: string;
+  endedAtUtc: string;
+  durationSeconds: number;
+  activeEnergyKcal?: number;
+  distanceMeters?: number;
+  averageHeartRateBpm?: number;
+  maximumHeartRateBpm?: number;
+};
+
+export type HealthKitWorkoutDelete = {
+  kind: "workout_delete";
+  sourceSampleKey: string;
+};
+
+export type HealthWorkoutRecord = {
+  id: string;
+  personId: string;
+  workoutType: string;
+  startedAtUtc: string;
+  endedAtUtc: string;
+  durationSeconds: number;
+  activeEnergyKcal?: number;
+  distanceMeters?: number;
+  averageHeartRateBpm?: number;
+  maximumHeartRateBpm?: number;
+};
+
 export type HealthKitSyncOperation =
   | HealthKitStepsHourUpsert
+  | HealthKitStepsHourDelete
   | HealthKitSleepDayUpsert
+  | HealthKitSleepDayDelete
+  | HealthKitDailyMetricUpsert
+  | HealthKitDailyMetricDelete
   | HealthKitBloodPressureUpsert
-  | HealthKitBloodPressureDelete;
+  | HealthKitBloodPressureDelete
+  | HealthKitBloodGlucoseUpsert
+  | HealthKitBloodGlucoseDelete
+  | HealthKitWorkoutUpsert
+  | HealthKitWorkoutDelete;
 
 export type HealthKitSyncInput = {
   syncId: string;
@@ -225,7 +330,7 @@ export type HealthKitSyncResult = {
   syncId: string;
   accepted: true;
   operationCount: number;
-  metricsAffected: HealthKitMetric[];
+  groupsAffected: HealthKitConsentGroup[];
   repairId?: string;
   chunkIndex?: number;
 };
@@ -233,14 +338,14 @@ export type HealthKitSyncResult = {
 export type CreateHealthKitRepairInput = {
   installationId: string;
   personId: string;
-  metric: HealthKitMetric;
+  group: HealthKitConsentGroup;
   timezoneVersion: number;
 };
 
 export type HealthKitRepair = {
   repairId: string;
   personId: string;
-  metric: HealthKitMetric;
+  group: HealthKitConsentGroup;
   installationId: string;
   timezoneVersion: number;
   /** Inclusive UTC instant bounds for steps/BP. */
@@ -258,7 +363,7 @@ export type CompleteHealthKitRepairInput = {
 
 export type HealthKitRepairCompleteResult = {
   repairId: string;
-  metric: HealthKitMetric;
+  group: HealthKitConsentGroup;
   completed: true;
   expectedChunkCount: number;
   completedChunkCount: number;
@@ -274,11 +379,20 @@ export type HealthSleepDayRecord = {
   personId: string;
   sleepDay: string;
   timezoneVersion: number;
-  durationMinutes: number;
+  totalMinutes: number;
+  coreMinutes: number;
+  deepMinutes: number;
+  remMinutes: number;
+  unspecifiedAsleepMinutes: number;
+  awakeMinutes: number;
+  inBedMinutes: number;
+  wristTemperatureCelsius?: number;
+  breathingDisturbanceCount?: number;
 };
 
 export type HealthMetricFreshness = {
-  metric: HealthKitMetric;
+  healthMetric: HealthKitMetricKey;
+  group: HealthKitConsentGroup;
   healthTimezone: string;
   healthTimezoneVersion: number;
   lastSuccessfulAt?: string;
@@ -351,13 +465,15 @@ export type AuditLog = {
   createdAt: string;
 };
 
-export type McpHealthMetric = "steps" | "sleep" | "blood_pressure";
+/** MCP accepts every metric explicitly present in the shared HealthKit registry. */
+export type McpHealthMetric = HealthKitMetricKey;
 
 export type McpHealthViewType =
   | "hourly_series"
   | "daily_series"
   | "daily_duration_series"
-  | "daily_reading_table";
+  | "daily_reading_table"
+  | "workout_table";
 
 export type McpStepsGranularity = "hourly" | "daily";
 
@@ -409,12 +525,59 @@ export type McpSeriesPoint = {
   value: number;
 };
 
+export type McpDailyMetricPoint = {
+  bucket: string;
+  /** Primary value: sum for totals, latest for latest-value metrics, average for statistics. */
+  value: number;
+  sumValue?: number;
+  averageValue?: number;
+  minimumValue?: number;
+  maximumValue?: number;
+  latestValue?: number;
+  sampleCount: number;
+};
+
+export type McpSleepPoint = {
+  bucket: string;
+  /** Total sleep duration in hours, retained for simple trend consumers. */
+  value: number;
+  totalHours: number;
+  coreHours: number;
+  deepHours: number;
+  remHours: number;
+  unspecifiedAsleepHours: number;
+  awakeHours: number;
+  inBedHours: number;
+  wristTemperatureCelsius?: number;
+  breathingDisturbanceCount?: number;
+};
+
 export type McpBloodPressureReadingRow = {
   localDate: string;
   localTime: string;
   systolic: number;
   diastolic: number;
   pulse?: number;
+};
+
+export type McpBloodGlucoseReadingRow = {
+  localDate: string;
+  localTime: string;
+  valueMgDl: number;
+  /** Present only to preserve discriminated-union property access for existing clients. */
+  systolic?: never;
+  diastolic?: never;
+};
+
+export type McpWorkoutRow = {
+  localDate: string;
+  localTime: string;
+  workoutType: string;
+  durationMinutes: number;
+  activeEnergyKcal?: number;
+  distanceMeters?: number;
+  averageHeartRateBpm?: number;
+  maximumHeartRateBpm?: number;
 };
 
 export type McpHealthDataBase = {
@@ -441,6 +604,12 @@ export type McpHourlySeriesResult = McpHealthDataBase & {
 
 export type McpDailySeriesResult = McpHealthDataBase & {
   viewType: "daily_series";
+  healthMetric: Exclude<McpHealthMetric, "steps" | "sleep" | "blood_pressure" | "blood_glucose" | "workout">;
+  points: McpDailyMetricPoint[];
+};
+
+export type McpStepsDailySeriesResult = McpHealthDataBase & {
+  viewType: "daily_series";
   healthMetric: "steps";
   points: McpSeriesPoint[];
 };
@@ -448,7 +617,7 @@ export type McpDailySeriesResult = McpHealthDataBase & {
 export type McpDailyDurationSeriesResult = McpHealthDataBase & {
   viewType: "daily_duration_series";
   healthMetric: "sleep";
-  points: McpSeriesPoint[];
+  points: McpSleepPoint[];
 };
 
 export type McpDailyReadingTableResult = McpHealthDataBase & {
@@ -458,13 +627,30 @@ export type McpDailyReadingTableResult = McpHealthDataBase & {
   truncated: boolean;
 };
 
+export type McpBloodGlucoseTableResult = McpHealthDataBase & {
+  viewType: "daily_reading_table";
+  healthMetric: "blood_glucose";
+  readings: McpBloodGlucoseReadingRow[];
+  truncated: boolean;
+};
+
+export type McpWorkoutTableResult = McpHealthDataBase & {
+  viewType: "workout_table";
+  healthMetric: "workout";
+  workouts: McpWorkoutRow[];
+  truncated: boolean;
+};
+
 export type McpGetHealthDataResult =
   | McpHourlySeriesResult
+  | McpStepsDailySeriesResult
   | McpDailySeriesResult
   | McpDailyDurationSeriesResult
-  | McpDailyReadingTableResult;
+  | McpDailyReadingTableResult
+  | McpBloodGlucoseTableResult
+  | McpWorkoutTableResult;
 
 export const MCP_HEALTH_DISCLAIMER =
   "Informational only. Not medical advice. Coverage and freshness metadata describe the stored Family OS data and may be incomplete or delayed." as const;
 
-export const MCP_RELEASE1_METRICS: readonly McpHealthMetric[] = ["steps", "sleep", "blood_pressure"] as const;
+export const MCP_HEALTH_METRICS: readonly McpHealthMetric[] = HEALTHKIT_METRIC_KEYS;

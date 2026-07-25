@@ -34,6 +34,12 @@ extension HealthBootstrapViewModel {
             statusMessage = "Select at least one HealthKit metric, or turn off consent."
             return
         }
+        let metricSummary = healthKit.enabledMetrics.map(\.rawValue).sorted().joined(separator: ",")
+        CrashReporting.setCustomValues([
+            "healthkit_stage": "settings_save_requested",
+            "healthkit_metrics": metricSummary
+        ])
+        CrashReporting.log("healthkit.settings_save_requested metrics=\(metricSummary)")
         await request {
             let installationId = try await syncStateStore.installationId()
             let consentVersion = healthKit.consentGranted ? HealthKitConsent.version : nil
@@ -45,16 +51,18 @@ extension HealthBootstrapViewModel {
                 accessToken: auth.accessToken,
                 personId: personId,
                 consentVersion: consentVersion,
-                enabledMetrics: enabled,
+                enabledGroups: enabled,
                 healthTimezone: healthKit.selectedTimezone,
                 installationId: installationId,
                 replaceActiveInstallation: replaceInstallation
             )
             healthKit.apply(status: status)
+            CrashReporting.setCustomValues(["healthkit_stage": "settings_saved"])
+            CrashReporting.log("healthkit.settings_saved")
             try await persistLocalConfiguration(from: status)
             if status.consentActive {
-                try await healthKitClient.requestAuthorization()
-                try await healthKitClient.enableBackgroundDelivery()
+                try await healthKitClient.requestAuthorization(for: Set(status.enabledMetrics))
+                try await healthKitClient.enableBackgroundDelivery(for: Set(status.enabledMetrics))
                 HealthKitBackgroundSyncCoordinator.shared.configureObservers(for: status.enabledMetrics)
             } else if let userId = auth.signedInUserId {
                 await syncStateStore.clearAll(userId: userId, personId: personId)
@@ -109,7 +117,7 @@ extension HealthBootstrapViewModel {
                 timezone: status.healthTimezone,
                 timezoneVersion: status.healthTimezoneVersion,
                 installationId: installationId,
-                enabledMetrics: status.enabledMetrics
+                enabledGroups: status.enabledGroups
             )
 
             try await persistLocalConfiguration(from: status, userId: userId, installationId: installationId)
@@ -169,7 +177,7 @@ extension HealthBootstrapViewModel {
                 personId: status.personId,
                 healthTimezone: status.healthTimezone,
                 healthTimezoneVersion: status.healthTimezoneVersion,
-                enabledMetrics: status.enabledMetrics,
+                enabledMetrics: status.enabledGroups,
                 consentVersion: status.consentVersion,
                 installationId: resolvedInstallation,
                 updatedAt: Date()

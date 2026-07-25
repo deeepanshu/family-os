@@ -1,35 +1,48 @@
 import type {
+  HealthKitConsentGroup,
   HealthKitMetric,
   HealthKitSyncOperation,
   HealthKitSyncResult,
   HealthMetricSyncStatusCode
 } from "@family-os/shared";
+import { HEALTHKIT_CONSENT_GROUPS, HEALTHKIT_METRIC_REGISTRY } from "@family-os/shared";
 import { HttpError } from "../errors";
 
-export const HEALTHKIT_METRICS: readonly HealthKitMetric[] = ["steps", "sleep", "blood_pressure"] as const;
+export const HEALTHKIT_METRICS: readonly HealthKitMetric[] = HEALTHKIT_CONSENT_GROUPS;
 export const REPAIR_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 export const REPAIR_TTL_MS = 24 * 60 * 60 * 1000;
 
-export function metricForOperation(op: HealthKitSyncOperation): HealthKitMetric {
+export function groupForOperation(op: HealthKitSyncOperation): HealthKitConsentGroup {
   switch (op.kind) {
     case "steps_hour_upsert":
-      return "steps";
+    case "steps_hour_delete":
+      return "activity";
     case "sleep_day_upsert":
+    case "sleep_day_delete":
       return "sleep";
+    case "daily_metric_upsert":
+    case "daily_metric_delete": {
+      return HEALTHKIT_METRIC_REGISTRY[op.healthMetric].group;
+    }
     case "blood_pressure_upsert":
     case "blood_pressure_delete":
-      return "blood_pressure";
+    case "blood_glucose_upsert":
+    case "blood_glucose_delete":
+      return "vitals";
+    case "workout_upsert":
+    case "workout_delete":
+      return "workouts";
   }
 }
 
-export function metricsAffected(operations: HealthKitSyncOperation[]): HealthKitMetric[] {
-  return [...new Set(operations.map(metricForOperation))];
+export function groupsAffected(operations: HealthKitSyncOperation[]): HealthKitConsentGroup[] {
+  return [...new Set(operations.map(groupForOperation))];
 }
 
 export function buildSyncResult(input: {
   syncId: string;
   operationCount: number;
-  metricsAffected: HealthKitMetric[];
+  groupsAffected: HealthKitConsentGroup[];
   repairId?: string;
   chunkIndex?: number;
 }): HealthKitSyncResult {
@@ -37,7 +50,7 @@ export function buildSyncResult(input: {
     syncId: input.syncId,
     accepted: true,
     operationCount: input.operationCount,
-    metricsAffected: input.metricsAffected,
+    groupsAffected: input.groupsAffected,
     repairId: input.repairId,
     chunkIndex: input.chunkIndex
   };
@@ -88,9 +101,9 @@ export function toUtcIso(date: Date): string {
  * Steps are stored as UTC hour buckets. Start their repair window at the next
  * whole UTC hour so every permitted bucket is fully inside the 90-day window.
  */
-export function repairRangeStart(metric: HealthKitMetric, now: Date): Date {
+export function repairRangeStart(group: HealthKitConsentGroup, now: Date): Date {
   const start = new Date(now.getTime() - REPAIR_WINDOW_MS);
-  if (metric !== "steps") {
+  if (group !== "activity") {
     return start;
   }
 
@@ -133,7 +146,7 @@ export function profileLocalSleepDayRange(rangeEndDay: string, windowDays = 90):
 }
 
 export type HealthKitRepairRange = {
-  /** Inclusive UTC instant window for steps/BP. */
+  /** Inclusive UTC instant window for all instant-backed record types. */
   rangeStartIso: string;
   rangeEndIso: string;
   /** Inclusive profile-local sleep days (health timezone calendar). */
@@ -153,27 +166,37 @@ export function assertOperationInRepairRange(op: HealthKitSyncOperation, range: 
   }
 
   switch (op.kind) {
-    case "steps_hour_upsert": {
+    case "steps_hour_upsert":
+    case "steps_hour_delete": {
       const t = Date.parse(op.hourStartUtc);
       if (Number.isNaN(t) || t < rangeStartMs || t > rangeEndMs) {
         throw new HttpError(400, "healthkit_operation_invalid", "steps hour is outside the repair range.");
       }
       return;
     }
-    case "sleep_day_upsert": {
-      if (op.sleepDay < range.rangeStartDay || op.sleepDay > range.rangeEndDay) {
-        throw new HttpError(400, "healthkit_operation_invalid", "sleep day is outside the repair range.");
+    case "sleep_day_upsert":
+    case "sleep_day_delete":
+    case "daily_metric_upsert":
+    case "daily_metric_delete": {
+      const localDay = op.kind === "daily_metric_upsert" || op.kind === "daily_metric_delete" ? op.localDay : op.sleepDay;
+      if (localDay < range.rangeStartDay || localDay > range.rangeEndDay) {
+        throw new HttpError(400, "healthkit_operation_invalid", "daily record is outside the repair range.");
       }
       return;
     }
-    case "blood_pressure_upsert": {
-      const t = Date.parse(op.measuredAtUtc);
+    case "blood_pressure_upsert":
+    case "blood_glucose_upsert":
+    case "workout_upsert": {
+      const instant = op.kind === "workout_upsert" ? op.startedAtUtc : op.measuredAtUtc;
+      const t = Date.parse(instant);
       if (Number.isNaN(t) || t < rangeStartMs || t > rangeEndMs) {
-        throw new HttpError(400, "healthkit_operation_invalid", "blood pressure measurement is outside the repair range.");
+        throw new HttpError(400, "healthkit_operation_invalid", "record is outside the repair range.");
       }
       return;
     }
     case "blood_pressure_delete":
+    case "blood_glucose_delete":
+    case "workout_delete":
       // Delete is keyed by correlation UUID; range is enforced against stored rows at apply time when available.
       return;
     default: {

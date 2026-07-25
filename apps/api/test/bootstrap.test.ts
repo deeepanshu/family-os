@@ -352,7 +352,7 @@ describe("solo-first bootstrap", () => {
       body: JSON.stringify({
         personId: secondSelfProfile.data.id,
         consentVersion: "1",
-        enabledMetrics: ["blood_pressure"],
+        enabledGroups: ["vitals"],
         healthTimezone: "UTC",
         installationId
       })
@@ -448,7 +448,7 @@ describe("solo-first bootstrap", () => {
       body: JSON.stringify({
         personId: "00000000-0000-4000-8000-000000000099",
         consentVersion: "1",
-        enabledMetrics: ["steps"],
+        enabledGroups: ["activity"],
         healthTimezone: "UTC",
         installationId: "53064303-35cf-4db0-a5d3-8af7d8f747e1"
       })
@@ -479,7 +479,7 @@ describe("solo-first bootstrap", () => {
       body: JSON.stringify({
         personId: profile.data.id,
         consentVersion: "1",
-        enabledMetrics: ["steps"],
+        enabledGroups: ["activity"],
         healthTimezone: "UTC",
         installationId
       })

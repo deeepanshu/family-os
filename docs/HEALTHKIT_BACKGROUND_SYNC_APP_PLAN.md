@@ -19,7 +19,7 @@ It does not read, transform, or re-upload prior Family OS HealthKit data.
 | Group | Read scope | On-device output |
 | --- | --- | --- |
 | Activity | steps, distance, flights, active energy, exercise/stand time, VO2 max | hourly steps and daily aggregates |
-| Sleep | sleep analysis, wrist temperature, breathing disturbances | daily total and stage breakdown |
+| Sleep | sleep analysis, wrist temperature, breathing disturbances | daily total, stage breakdown, and sleep-day vitals |
 | Vitals | heart rate variants, HRV, respiratory rate, oxygen saturation, temperature, glucose, BP | daily aggregates plus clinical readings |
 | Body | weight, BMI, body fat, lean mass, waist | daily latest values |
 | Mobility | walking metrics, steadiness, falls | daily aggregate/latest values |

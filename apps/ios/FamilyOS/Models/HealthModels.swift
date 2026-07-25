@@ -1,4 +1,5 @@
 import Foundation
+import HealthKit
 
 struct APIEnvelope<T: Decodable>: Decodable {
     let data: T
@@ -91,68 +92,208 @@ struct BloodPressureReading: Decodable, Identifiable {
     let source: HealthDataSource
 }
 
-struct BloodGlucoseReading: Decodable, Identifiable {
-    let id: String
-    let value: Double
-    let context: GlucoseContext
-    let source: HealthDataSource
-}
-
 enum HealthDataSource: String, Codable {
-    case manual
     case healthkit
 
     var displayName: String {
-        switch self {
-        case .manual:
-            return "Manual"
-        case .healthkit:
-            return "HealthKit"
-        }
-    }
-}
-
-enum GlucoseContext: String, Codable, CaseIterable, Identifiable {
-    case fasting
-    case beforeMeal = "before_meal"
-    case afterMeal = "after_meal"
-    case bedtime
-    case random
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .fasting:
-            return "Fasting"
-        case .beforeMeal:
-            return "Before meal"
-        case .afterMeal:
-            return "After meal"
-        case .bedtime:
-            return "Bedtime"
-        case .random:
-            return "Random"
-        }
+        "HealthKit"
     }
 }
 
 enum HealthKitSyncMetric: String, Codable, CaseIterable, Identifiable, Sendable {
-    case steps
+    case activity
     case sleep
-    case bloodPressure = "blood_pressure"
+    case vitals
+    case body
+    case mobility
+    case workouts
+    case mindfulnessEnvironment = "mindfulness_environment"
+    case nutrition
+
+    // Temporary aliases keep the existing three-source sync implementation
+    // working while each group is expanded into its complete HealthKit map.
+    static let steps = HealthKitSyncMetric.activity
+    static let bloodPressure = HealthKitSyncMetric.vitals
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
-        case .steps:
-            return "Steps"
+        case .activity:
+            return "Activity"
         case .sleep:
             return "Sleep"
-        case .bloodPressure:
-            return "Blood pressure"
+        case .vitals:
+            return "Vitals"
+        case .body:
+            return "Body"
+        case .mobility:
+            return "Mobility"
+        case .workouts:
+            return "Workouts"
+        case .mindfulnessEnvironment:
+            return "Mindfulness and Environment"
+        case .nutrition:
+            return "Nutrition"
         }
+    }
+}
+
+enum HealthKitMetricStorage: Sendable {
+    case hourly
+    case dailyNumeric
+    case sleepDay
+    case bloodPressure
+    case bloodGlucose
+    case workout
+}
+
+enum HealthKitDailyAggregation: Sendable {
+    case sum
+    case statistics
+    case latest
+}
+
+/// The iOS counterpart of the API's canonical HealthKit registry. These are
+/// individual HealthKit sample types; consent and repair remain group scoped.
+enum HealthKitDataMetric: String, CaseIterable, Sendable {
+    case steps, walkingRunningDistance = "walking_running_distance", flightsClimbed = "flights_climbed", activeEnergyBurned = "active_energy_burned", exerciseTime = "exercise_time", standTime = "stand_time", vo2Max = "vo2_max"
+    case sleep, sleepingWristTemperature = "sleeping_wrist_temperature", sleepBreathingDisturbanceEvents = "sleep_breathing_disturbance_events"
+    case heartRate = "heart_rate", restingHeartRate = "resting_heart_rate", walkingHeartRateAverage = "walking_heart_rate_average", heartRateVariabilitySDNN = "heart_rate_variability_sdnn", respiratoryRate = "respiratory_rate", oxygenSaturation = "oxygen_saturation", bodyTemperature = "body_temperature", basalBodyTemperature = "basal_body_temperature", bloodPressure = "blood_pressure", bloodGlucose = "blood_glucose"
+    case bodyMass = "body_mass", bodyMassIndex = "body_mass_index", bodyFatPercentage = "body_fat_percentage", leanBodyMass = "lean_body_mass", waistCircumference = "waist_circumference"
+    case walkingSpeed = "walking_speed", walkingStepLength = "walking_step_length", walkingAsymmetryPercentage = "walking_asymmetry_percentage", walkingDoubleSupportPercentage = "walking_double_support_percentage", walkingSteadiness = "walking_steadiness", numberOfTimesFallen = "number_of_times_fallen"
+    case workout
+    case mindfulMinutes = "mindful_minutes", uvExposure = "uv_exposure", environmentalAudioExposure = "environmental_audio_exposure", headphoneAudioExposure = "headphone_audio_exposure"
+    case dietaryWater = "dietary_water", dietaryCaffeine = "dietary_caffeine", numberOfAlcoholicBeverages = "number_of_alcoholic_beverages", bloodAlcoholContent = "blood_alcohol_content", dietaryEnergy = "dietary_energy", dietaryProtein = "dietary_protein", dietaryCarbohydrates = "dietary_carbohydrates", dietaryFiber = "dietary_fiber", dietarySugar = "dietary_sugar", dietaryFatTotal = "dietary_fat_total", dietaryFatSaturated = "dietary_fat_saturated", dietaryFatMonounsaturated = "dietary_fat_monounsaturated", dietaryFatPolyunsaturated = "dietary_fat_polyunsaturated", dietaryCholesterol = "dietary_cholesterol", dietarySodium = "dietary_sodium", dietaryPotassium = "dietary_potassium", dietaryCalcium = "dietary_calcium", dietaryChloride = "dietary_chloride", dietaryChromium = "dietary_chromium", dietaryCopper = "dietary_copper", dietaryIodine = "dietary_iodine", dietaryIron = "dietary_iron", dietaryMagnesium = "dietary_magnesium", dietaryManganese = "dietary_manganese", dietaryMolybdenum = "dietary_molybdenum", dietaryPhosphorus = "dietary_phosphorus", dietarySelenium = "dietary_selenium", dietaryZinc = "dietary_zinc", dietaryVitaminA = "dietary_vitamin_a", dietaryVitaminB6 = "dietary_vitamin_b6", dietaryVitaminB12 = "dietary_vitamin_b12", dietaryVitaminC = "dietary_vitamin_c", dietaryVitaminD = "dietary_vitamin_d", dietaryVitaminE = "dietary_vitamin_e", dietaryVitaminK = "dietary_vitamin_k", dietaryThiamin = "dietary_thiamin", dietaryRiboflavin = "dietary_riboflavin", dietaryNiacin = "dietary_niacin", dietaryPantothenicAcid = "dietary_pantothenic_acid", dietaryFolate = "dietary_folate", dietaryBiotin = "dietary_biotin"
+
+    var group: HealthKitSyncMetric {
+        switch self {
+        case .steps, .walkingRunningDistance, .flightsClimbed, .activeEnergyBurned, .exerciseTime, .standTime, .vo2Max: .activity
+        case .sleep, .sleepingWristTemperature, .sleepBreathingDisturbanceEvents: .sleep
+        case .heartRate, .restingHeartRate, .walkingHeartRateAverage, .heartRateVariabilitySDNN, .respiratoryRate, .oxygenSaturation, .bodyTemperature, .basalBodyTemperature, .bloodPressure, .bloodGlucose: .vitals
+        case .bodyMass, .bodyMassIndex, .bodyFatPercentage, .leanBodyMass, .waistCircumference: .body
+        case .walkingSpeed, .walkingStepLength, .walkingAsymmetryPercentage, .walkingDoubleSupportPercentage, .walkingSteadiness, .numberOfTimesFallen: .mobility
+        case .workout: .workouts
+        case .mindfulMinutes, .uvExposure, .environmentalAudioExposure, .headphoneAudioExposure: .mindfulnessEnvironment
+        default: .nutrition
+        }
+    }
+
+    var storage: HealthKitMetricStorage {
+        switch self {
+        case .steps: .hourly
+        case .sleep: .sleepDay
+        case .sleepingWristTemperature, .sleepBreathingDisturbanceEvents: .sleepDay
+        case .bloodPressure: .bloodPressure
+        case .bloodGlucose: .bloodGlucose
+        case .workout: .workout
+        default: .dailyNumeric
+        }
+    }
+
+    var aggregation: HealthKitDailyAggregation {
+        switch self {
+        case .walkingRunningDistance, .flightsClimbed, .activeEnergyBurned, .exerciseTime, .standTime, .numberOfTimesFallen, .mindfulMinutes, .uvExposure,
+             .dietaryWater, .dietaryCaffeine, .numberOfAlcoholicBeverages, .dietaryEnergy, .dietaryProtein, .dietaryCarbohydrates, .dietaryFiber, .dietarySugar,
+             .dietaryFatTotal, .dietaryFatSaturated, .dietaryFatMonounsaturated, .dietaryFatPolyunsaturated, .dietaryCholesterol, .dietarySodium, .dietaryPotassium,
+             .dietaryCalcium, .dietaryChloride, .dietaryChromium, .dietaryCopper, .dietaryIodine, .dietaryIron, .dietaryMagnesium, .dietaryManganese,
+             .dietaryMolybdenum, .dietaryPhosphorus, .dietarySelenium, .dietaryZinc, .dietaryVitaminA, .dietaryVitaminB6, .dietaryVitaminB12, .dietaryVitaminC,
+             .dietaryVitaminD, .dietaryVitaminE, .dietaryVitaminK, .dietaryThiamin, .dietaryRiboflavin, .dietaryNiacin, .dietaryPantothenicAcid, .dietaryFolate, .dietaryBiotin:
+            .sum
+        case .vo2Max, .basalBodyTemperature, .bodyMass, .bodyMassIndex, .bodyFatPercentage, .leanBodyMass, .waistCircumference, .walkingSteadiness, .bloodAlcoholContent:
+            .latest
+        default:
+            .statistics
+        }
+    }
+
+    var quantityIdentifier: String? {
+        switch self {
+        case .sleep, .bloodPressure, .workout, .mindfulMinutes: nil
+        case .steps: "StepCount"
+        case .walkingRunningDistance: "DistanceWalkingRunning"
+        case .flightsClimbed: "FlightsClimbed"
+        case .activeEnergyBurned: "ActiveEnergyBurned"
+        case .exerciseTime: "AppleExerciseTime"
+        case .standTime: "AppleStandTime"
+        case .vo2Max: "VO2Max"
+        case .sleepingWristTemperature: "AppleSleepingWristTemperature"
+        case .sleepBreathingDisturbanceEvents: "AppleSleepingBreathingDisturbances"
+        case .heartRate: "HeartRate"
+        case .restingHeartRate: "RestingHeartRate"
+        case .walkingHeartRateAverage: "WalkingHeartRateAverage"
+        case .heartRateVariabilitySDNN: "HeartRateVariabilitySDNN"
+        case .respiratoryRate: "RespiratoryRate"
+        case .oxygenSaturation: "OxygenSaturation"
+        case .bodyTemperature: "BodyTemperature"
+        case .basalBodyTemperature: "BasalBodyTemperature"
+        case .bloodGlucose: "BloodGlucose"
+        case .bodyMass: "BodyMass"
+        case .bodyMassIndex: "BodyMassIndex"
+        case .bodyFatPercentage: "BodyFatPercentage"
+        case .leanBodyMass: "LeanBodyMass"
+        case .waistCircumference: "WaistCircumference"
+        case .walkingSpeed: "WalkingSpeed"
+        case .walkingStepLength: "WalkingStepLength"
+        case .walkingAsymmetryPercentage: "WalkingAsymmetryPercentage"
+        case .walkingDoubleSupportPercentage: "WalkingDoubleSupportPercentage"
+        case .walkingSteadiness: "AppleWalkingSteadiness"
+        case .numberOfTimesFallen: "NumberOfTimesFallen"
+        case .uvExposure: "UVExposure"
+        case .environmentalAudioExposure: "EnvironmentalAudioExposure"
+        case .headphoneAudioExposure: "HeadphoneAudioExposure"
+        case .dietaryWater: "DietaryWater"
+        case .dietaryCaffeine: "DietaryCaffeine"
+        case .numberOfAlcoholicBeverages: "NumberOfAlcoholicBeverages"
+        case .bloodAlcoholContent: "BloodAlcoholContent"
+        case .dietaryEnergy: "DietaryEnergyConsumed"
+        default: "Dietary" + rawValue.dropFirst("dietary_".count).split(separator: "_").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined()
+        }
+    }
+
+    var sampleType: HKSampleType? {
+        switch self {
+        case .sleep:
+            return HKCategoryType.categoryType(forIdentifier: .sleepAnalysis)
+        case .bloodPressure:
+            return HKCorrelationType.correlationType(forIdentifier: .bloodPressure)
+        case .workout:
+            return HKWorkoutType.workoutType()
+        case .mindfulMinutes:
+            return HKCategoryType.categoryType(forIdentifier: .mindfulSession)
+        default:
+            guard let quantityIdentifier else { return nil }
+            return HKQuantityType.quantityType(forIdentifier: HKQuantityTypeIdentifier(rawValue: "HKQuantityTypeIdentifier" + quantityIdentifier))
+        }
+    }
+
+    var unit: HKUnit? {
+        switch self {
+        case .steps, .flightsClimbed, .numberOfTimesFallen, .numberOfAlcoholicBeverages, .uvExposure, .sleepBreathingDisturbanceEvents: .count()
+        case .walkingRunningDistance, .waistCircumference, .walkingStepLength: .meter()
+        case .walkingSpeed: HKUnit.meter().unitDivided(by: .second())
+        case .activeEnergyBurned, .dietaryEnergy: .kilocalorie()
+        case .exerciseTime, .standTime: .minute()
+        case .vo2Max: HKUnit(from: "mL/kg/min")
+        case .sleepingWristTemperature, .bodyTemperature, .basalBodyTemperature: .degreeCelsius()
+        case .heartRate, .restingHeartRate, .walkingHeartRateAverage: HKUnit.count().unitDivided(by: .minute())
+        case .heartRateVariabilitySDNN: .secondUnit(with: .milli)
+        case .respiratoryRate: HKUnit.count().unitDivided(by: .minute())
+        case .oxygenSaturation, .bodyFatPercentage, .walkingAsymmetryPercentage, .walkingDoubleSupportPercentage, .walkingSteadiness, .bloodAlcoholContent: .percent()
+        case .bloodGlucose: HKUnit(from: "mg/dL")
+        case .bodyMass, .leanBodyMass: .gramUnit(with: .kilo)
+        case .bodyMassIndex: .count()
+        case .environmentalAudioExposure, .headphoneAudioExposure: HKUnit(from: "dBASPL")
+        case .dietaryWater: .literUnit(with: .milli)
+        case .dietaryCaffeine, .dietaryCholesterol, .dietarySodium, .dietaryPotassium, .dietaryCalcium, .dietaryChloride, .dietaryCopper, .dietaryIron, .dietaryMagnesium, .dietaryManganese, .dietaryPhosphorus, .dietaryZinc, .dietaryVitaminB6, .dietaryVitaminC, .dietaryThiamin, .dietaryRiboflavin, .dietaryNiacin, .dietaryPantothenicAcid: .gramUnit(with: .milli)
+        case .dietaryChromium, .dietaryIodine, .dietaryMolybdenum, .dietarySelenium, .dietaryVitaminA, .dietaryVitaminB12, .dietaryVitaminD, .dietaryVitaminE, .dietaryVitaminK, .dietaryFolate, .dietaryBiotin: .gramUnit(with: .micro)
+        case .dietaryProtein, .dietaryCarbohydrates, .dietaryFiber, .dietarySugar, .dietaryFatTotal, .dietaryFatSaturated, .dietaryFatMonounsaturated, .dietaryFatPolyunsaturated: .gram()
+        case .sleep, .bloodPressure, .workout, .mindfulMinutes: nil
+        }
+    }
+
+    static func metrics(for group: HealthKitSyncMetric) -> [HealthKitDataMetric] {
+        allCases.filter { $0.group == group }
     }
 }
 
@@ -184,9 +325,9 @@ enum HealthKitMetricSyncStatus: String, Codable {
 }
 
 struct HealthKitMetricState: Decodable, Identifiable {
-    var id: String { metric.rawValue }
+    var id: String { group.rawValue }
 
-    let metric: HealthKitSyncMetric
+    let group: HealthKitSyncMetric
     let enabled: Bool
     let status: HealthKitMetricSyncStatus
     let lastSuccessfulAt: String?
@@ -194,6 +335,8 @@ struct HealthKitMetricState: Decodable, Identifiable {
     let lastErrorCode: String?
     let coverageStartAt: String?
     let coverageEndAt: String?
+
+    var metric: HealthKitSyncMetric { group }
 }
 
 /// Matches frozen API `HealthKitSettings` from GET/PUT `/healthkit/settings`.
@@ -203,20 +346,23 @@ struct HealthKitSyncStatus: Decodable {
     let consentedAt: String?
     let healthTimezone: String
     let healthTimezoneVersion: Int
-    let enabledMetrics: [HealthKitSyncMetric]
+    let enabledGroups: [HealthKitSyncMetric]
     let activeInstallationId: String?
-    let metrics: [HealthKitMetricState]
+    let groups: [HealthKitMetricState]
 
     var consentActive: Bool {
-        consentVersion != nil && consentedAt != nil && !enabledMetrics.isEmpty
+        consentVersion != nil && consentedAt != nil && !enabledGroups.isEmpty
     }
+
+    var enabledMetrics: [HealthKitSyncMetric] { enabledGroups }
+    var metrics: [HealthKitMetricState] { groups }
 }
 
 struct HealthKitSyncResult: Decodable {
     let syncId: String
     let accepted: Bool
     let operationCount: Int
-    let metricsAffected: [HealthKitSyncMetric]
+    let groupsAffected: [HealthKitSyncMetric]
     let repairId: String?
     let chunkIndex: Int?
 }
@@ -224,7 +370,7 @@ struct HealthKitSyncResult: Decodable {
 struct HealthKitRepair: Decodable {
     let repairId: String
     let personId: String
-    let metric: HealthKitSyncMetric
+    let group: HealthKitSyncMetric
     let installationId: String
     let timezoneVersion: Int
     let rangeStart: String
@@ -232,33 +378,68 @@ struct HealthKitRepair: Decodable {
     let rangeStartDay: String
     let rangeEndDay: String
     let expiresAt: String
+
+    var metric: HealthKitSyncMetric { group }
 }
 
 struct HealthKitRepairCompleteResult: Decodable {
     let repairId: String
-    let metric: HealthKitSyncMetric
+    let group: HealthKitSyncMetric
     let completed: Bool
     let expectedChunkCount: Int
     let completedChunkCount: Int
+
+    var metric: HealthKitSyncMetric { group }
 }
 
 enum HealthKitSyncOperation: Encodable {
     case stepsHourUpsert(hourStartUtc: String, count: Int)
-    case sleepDayUpsert(sleepDay: String, durationMinutes: Int)
+    case sleepDayUpsert(sleepDay: String, totalMinutes: Int, coreMinutes: Int, deepMinutes: Int, remMinutes: Int, unspecifiedAsleepMinutes: Int, awakeMinutes: Int, inBedMinutes: Int, wristTemperatureCelsius: Double? = nil, breathingDisturbanceCount: Int? = nil)
+    case dailyMetricUpsert(healthMetric: HealthKitDataMetric, localDay: String, sumValue: Double?, averageValue: Double?, minimumValue: Double?, maximumValue: Double?, latestValue: Double?, sampleCount: Int)
+    case dailyMetricDelete(healthMetric: HealthKitDataMetric, localDay: String)
     case bloodPressureUpsert(sourceSampleKey: String, measuredAtUtc: String, systolic: Int, diastolic: Int, pulse: Int?)
     case bloodPressureDelete(sourceSampleKey: String)
+    case bloodGlucoseUpsert(sourceSampleKey: String, measuredAtUtc: String, valueMgDl: Double)
+    case bloodGlucoseDelete(sourceSampleKey: String)
+    case workoutUpsert(sourceSampleKey: String, workoutType: String, startedAtUtc: String, endedAtUtc: String, durationSeconds: Int, activeEnergyKcal: Double?, distanceMeters: Double?, averageHeartRateBpm: Double?, maximumHeartRateBpm: Double?)
+    case workoutDelete(sourceSampleKey: String)
 
     private enum CodingKeys: String, CodingKey {
         case kind
         case hourStartUtc
         case count
         case sleepDay
-        case durationMinutes
+        case totalMinutes
+        case coreMinutes
+        case deepMinutes
+        case remMinutes
+        case unspecifiedAsleepMinutes
+        case awakeMinutes
+        case inBedMinutes
+        case wristTemperatureCelsius
+        case breathingDisturbanceCount
+        case healthMetric
+        case localDay
+        case sumValue
+        case averageValue
+        case minimumValue
+        case maximumValue
+        case latestValue
+        case sampleCount
         case sourceSampleKey
         case measuredAtUtc
         case systolic
         case diastolic
         case pulse
+        case valueMgDl
+        case workoutType
+        case startedAtUtc
+        case endedAtUtc
+        case durationSeconds
+        case activeEnergyKcal
+        case distanceMeters
+        case averageHeartRateBpm
+        case maximumHeartRateBpm
     }
 
     func encode(to encoder: Encoder) throws {
@@ -268,10 +449,32 @@ enum HealthKitSyncOperation: Encodable {
             try container.encode("steps_hour_upsert", forKey: .kind)
             try container.encode(hourStartUtc, forKey: .hourStartUtc)
             try container.encode(count, forKey: .count)
-        case let .sleepDayUpsert(sleepDay, durationMinutes):
+        case let .sleepDayUpsert(sleepDay, totalMinutes, coreMinutes, deepMinutes, remMinutes, unspecifiedAsleepMinutes, awakeMinutes, inBedMinutes, wristTemperatureCelsius, breathingDisturbanceCount):
             try container.encode("sleep_day_upsert", forKey: .kind)
             try container.encode(sleepDay, forKey: .sleepDay)
-            try container.encode(durationMinutes, forKey: .durationMinutes)
+            try container.encode(totalMinutes, forKey: .totalMinutes)
+            try container.encode(coreMinutes, forKey: .coreMinutes)
+            try container.encode(deepMinutes, forKey: .deepMinutes)
+            try container.encode(remMinutes, forKey: .remMinutes)
+            try container.encode(unspecifiedAsleepMinutes, forKey: .unspecifiedAsleepMinutes)
+            try container.encode(awakeMinutes, forKey: .awakeMinutes)
+            try container.encode(inBedMinutes, forKey: .inBedMinutes)
+            try container.encodeIfPresent(wristTemperatureCelsius, forKey: .wristTemperatureCelsius)
+            try container.encodeIfPresent(breathingDisturbanceCount, forKey: .breathingDisturbanceCount)
+        case let .dailyMetricUpsert(healthMetric, localDay, sumValue, averageValue, minimumValue, maximumValue, latestValue, sampleCount):
+            try container.encode("daily_metric_upsert", forKey: .kind)
+            try container.encode(healthMetric.rawValue, forKey: .healthMetric)
+            try container.encode(localDay, forKey: .localDay)
+            try container.encodeIfPresent(sumValue, forKey: .sumValue)
+            try container.encodeIfPresent(averageValue, forKey: .averageValue)
+            try container.encodeIfPresent(minimumValue, forKey: .minimumValue)
+            try container.encodeIfPresent(maximumValue, forKey: .maximumValue)
+            try container.encodeIfPresent(latestValue, forKey: .latestValue)
+            try container.encode(sampleCount, forKey: .sampleCount)
+        case let .dailyMetricDelete(healthMetric, localDay):
+            try container.encode("daily_metric_delete", forKey: .kind)
+            try container.encode(healthMetric.rawValue, forKey: .healthMetric)
+            try container.encode(localDay, forKey: .localDay)
         case let .bloodPressureUpsert(sourceSampleKey, measuredAtUtc, systolic, diastolic, pulse):
             try container.encode("blood_pressure_upsert", forKey: .kind)
             try container.encode(sourceSampleKey, forKey: .sourceSampleKey)
@@ -282,6 +485,28 @@ enum HealthKitSyncOperation: Encodable {
         case let .bloodPressureDelete(sourceSampleKey):
             try container.encode("blood_pressure_delete", forKey: .kind)
             try container.encode(sourceSampleKey, forKey: .sourceSampleKey)
+        case let .bloodGlucoseUpsert(sourceSampleKey, measuredAtUtc, valueMgDl):
+            try container.encode("blood_glucose_upsert", forKey: .kind)
+            try container.encode(sourceSampleKey, forKey: .sourceSampleKey)
+            try container.encode(measuredAtUtc, forKey: .measuredAtUtc)
+            try container.encode(valueMgDl, forKey: .valueMgDl)
+        case let .bloodGlucoseDelete(sourceSampleKey):
+            try container.encode("blood_glucose_delete", forKey: .kind)
+            try container.encode(sourceSampleKey, forKey: .sourceSampleKey)
+        case let .workoutUpsert(sourceSampleKey, workoutType, startedAtUtc, endedAtUtc, durationSeconds, activeEnergyKcal, distanceMeters, averageHeartRateBpm, maximumHeartRateBpm):
+            try container.encode("workout_upsert", forKey: .kind)
+            try container.encode(sourceSampleKey, forKey: .sourceSampleKey)
+            try container.encode(workoutType, forKey: .workoutType)
+            try container.encode(startedAtUtc, forKey: .startedAtUtc)
+            try container.encode(endedAtUtc, forKey: .endedAtUtc)
+            try container.encode(durationSeconds, forKey: .durationSeconds)
+            try container.encodeIfPresent(activeEnergyKcal, forKey: .activeEnergyKcal)
+            try container.encodeIfPresent(distanceMeters, forKey: .distanceMeters)
+            try container.encodeIfPresent(averageHeartRateBpm, forKey: .averageHeartRateBpm)
+            try container.encodeIfPresent(maximumHeartRateBpm, forKey: .maximumHeartRateBpm)
+        case let .workoutDelete(sourceSampleKey):
+            try container.encode("workout_delete", forKey: .kind)
+            try container.encode(sourceSampleKey, forKey: .sourceSampleKey)
         }
     }
 
@@ -291,8 +516,16 @@ enum HealthKitSyncOperation: Encodable {
             return .steps
         case .sleepDayUpsert:
             return .sleep
+        case let .dailyMetricUpsert(healthMetric, _, _, _, _, _, _, _):
+            return healthMetric.group
+        case let .dailyMetricDelete(healthMetric, _):
+            return healthMetric.group
         case .bloodPressureUpsert, .bloodPressureDelete:
             return .bloodPressure
+        case .bloodGlucoseUpsert, .bloodGlucoseDelete:
+            return .vitals
+        case .workoutUpsert, .workoutDelete:
+            return .workouts
         }
     }
 
@@ -301,12 +534,24 @@ enum HealthKitSyncOperation: Encodable {
         switch self {
         case let .stepsHourUpsert(hourStartUtc, _):
             return "steps:\(hourStartUtc)"
-        case let .sleepDayUpsert(sleepDay, _):
+        case let .sleepDayUpsert(sleepDay, _, _, _, _, _, _, _, _, _):
             return "sleep:\(sleepDay)"
+        case let .dailyMetricUpsert(healthMetric, localDay, _, _, _, _, _, _):
+            return "daily:\(healthMetric.rawValue):\(localDay)"
+        case let .dailyMetricDelete(healthMetric, localDay):
+            return "daily_delete:\(healthMetric.rawValue):\(localDay)"
         case let .bloodPressureUpsert(sourceSampleKey, _, _, _, _):
             return "bp_up:\(sourceSampleKey)"
         case let .bloodPressureDelete(sourceSampleKey):
             return "bp_del:\(sourceSampleKey)"
+        case let .bloodGlucoseUpsert(sourceSampleKey, _, _):
+            return "glucose_up:\(sourceSampleKey)"
+        case let .bloodGlucoseDelete(sourceSampleKey):
+            return "glucose_del:\(sourceSampleKey)"
+        case let .workoutUpsert(sourceSampleKey, _, _, _, _, _, _, _, _):
+            return "workout_up:\(sourceSampleKey)"
+        case let .workoutDelete(sourceSampleKey):
+            return "workout_del:\(sourceSampleKey)"
         }
     }
 }

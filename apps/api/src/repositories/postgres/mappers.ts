@@ -98,7 +98,7 @@ export function mapBloodPressure(row: Row): BloodPressureReading {
     measuredAt: toIso(row.measured_at),
     context: row.context ?? undefined,
     notes: row.notes ?? undefined,
-    source: row.source ?? "manual",
+    source: "healthkit",
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at)
   };
@@ -112,10 +112,10 @@ export function mapBloodGlucose(row: Row): BloodGlucoseReading {
     recordedByUserId: row.recorded_by_user_id,
     value: Number(row.value),
     unit: "mg/dL",
-    context: row.context,
+    context: undefined,
     measuredAt: toIso(row.measured_at),
-    notes: row.notes ?? undefined,
-    source: row.source ?? "manual",
+    notes: undefined,
+    source: "healthkit",
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at)
   };

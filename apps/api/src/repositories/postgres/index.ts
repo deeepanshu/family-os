@@ -1,7 +1,6 @@
 import postgres from "postgres";
 import type {
   AuditLog,
-  BloodGlucoseReading,
   BloodPressureReading,
   BootstrapResponse,
   CompleteHealthKitRepairInput,
@@ -11,15 +10,19 @@ import type {
   FamilyMember,
   FamilyMembership,
   HealthKitMetric,
+  HealthKitMetricKey,
   HealthKitRepair,
   HealthKitRepairCompleteResult,
   HealthKitSettings,
   HealthKitSyncInput,
   HealthKitSyncResult,
+  HealthDailyMetricRecord,
   HealthMetricFreshness,
   HealthProfile,
   HealthSleepDayRecord,
   HealthStepHourRecord,
+  HealthWorkoutRecord,
+  BloodGlucoseReading,
   NotificationDelivery,
   NotificationDevice,
   PublicInviteResponse,
@@ -28,14 +31,12 @@ import type {
   ReminderRecipient
 } from "@family-os/shared";
 import type {
-  CreateBloodGlucoseInput,
   CreateFamilyInput,
   CreateInviteInput,
   CreateProfileInput,
   CreateReminderInput,
   FamilyRepository,
   RegisterDeviceInput,
-  UpdateBloodGlucoseInput,
   UpdateProfileInput,
   UpdateReminderInput
 } from "../families";
@@ -138,26 +139,6 @@ export class PostgresFamilyRepository implements FamilyRepository {
     return this.readingStore.getBloodPressure(actorUserId, readingId);
   }
 
-  createBloodGlucose(input: CreateBloodGlucoseInput): Promise<BloodGlucoseReading> {
-    return this.readingStore.createBloodGlucose(input);
-  }
-
-  listBloodGlucose(actorUserId: string, personId?: string, limit?: number): Promise<BloodGlucoseReading[]> {
-    return this.readingStore.listBloodGlucose(actorUserId, personId, limit);
-  }
-
-  getBloodGlucose(actorUserId: string, readingId: string): Promise<BloodGlucoseReading> {
-    return this.readingStore.getBloodGlucose(actorUserId, readingId);
-  }
-
-  updateBloodGlucose(actorUserId: string, readingId: string, input: UpdateBloodGlucoseInput): Promise<BloodGlucoseReading> {
-    return this.readingStore.updateBloodGlucose(actorUserId, readingId, input);
-  }
-
-  deleteBloodGlucose(actorUserId: string, readingId: string): Promise<void> {
-    return this.readingStore.deleteBloodGlucose(actorUserId, readingId);
-  }
-
   getHealthKitSettings(actorUserId: string, personId?: string): Promise<HealthKitSettings> {
     return this.healthKitStore.getHealthKitSettings(actorUserId, personId);
   }
@@ -182,8 +163,8 @@ export class PostgresFamilyRepository implements FamilyRepository {
     return this.healthKitStore.completeHealthKitRepair(actorUserId, repairId, input);
   }
 
-  getHealthMetricFreshness(actorUserId: string, personId: string, metric: HealthKitMetric): Promise<HealthMetricFreshness> {
-    return this.healthKitStore.getHealthMetricFreshness(actorUserId, personId, metric);
+  getHealthMetricFreshness(actorUserId: string, personId: string, healthMetric: HealthKitMetricKey): Promise<HealthMetricFreshness> {
+    return this.healthKitStore.getHealthMetricFreshness(actorUserId, personId, healthMetric);
   }
 
   listStepHours(
@@ -204,6 +185,16 @@ export class PostgresFamilyRepository implements FamilyRepository {
     return this.healthKitStore.listSleepDays(actorUserId, personId, rangeStartDay, rangeEndDay);
   }
 
+  listDailyMetrics(
+    actorUserId: string,
+    personId: string,
+    healthMetric: HealthKitMetricKey,
+    rangeStartDay: string,
+    rangeEndDay: string
+  ): Promise<HealthDailyMetricRecord[]> {
+    return this.healthKitStore.listDailyMetrics(actorUserId, personId, healthMetric, rangeStartDay, rangeEndDay);
+  }
+
   listHealthKitBloodPressure(
     actorUserId: string,
     personId: string,
@@ -212,6 +203,26 @@ export class PostgresFamilyRepository implements FamilyRepository {
     limit: number
   ): Promise<BloodPressureReading[]> {
     return this.healthKitStore.listHealthKitBloodPressure(actorUserId, personId, rangeStartUtc, rangeEndUtc, limit);
+  }
+
+  listHealthKitBloodGlucose(
+    actorUserId: string,
+    personId: string,
+    rangeStartUtc: string,
+    rangeEndUtc: string,
+    limit: number
+  ): Promise<BloodGlucoseReading[]> {
+    return this.healthKitStore.listHealthKitBloodGlucose(actorUserId, personId, rangeStartUtc, rangeEndUtc, limit);
+  }
+
+  listHealthKitWorkouts(
+    actorUserId: string,
+    personId: string,
+    rangeStartUtc: string,
+    rangeEndUtc: string,
+    limit: number
+  ): Promise<HealthWorkoutRecord[]> {
+    return this.healthKitStore.listHealthKitWorkouts(actorUserId, personId, rangeStartUtc, rangeEndUtc, limit);
   }
 
   createConnection(input: CreateMcpConnectionInput): Promise<McpConnectionGrant> {

@@ -1,5 +1,16 @@
-import type { McpHealthMetric, McpHealthViewType, McpStepsGranularity } from "@family-os/shared";
+import {
+  HEALTHKIT_METRIC_REGISTRY,
+  isHealthKitMetricKey,
+  type HealthKitMetricKey,
+  type McpHealthMetric,
+  type McpHealthViewType,
+  type McpStepsGranularity
+} from "@family-os/shared";
 import { HttpError } from "../errors";
+
+const HOURLY_MAX_DAYS = 7;
+const DEFAULT_MAX_DAYS = 90;
+const TABLE_MAX_READINGS = 200;
 
 export type MetricRegistryEntry = {
   metric: McpHealthMetric;
@@ -11,38 +22,33 @@ export type MetricRegistryEntry = {
   maxRangeDaysByGranularity?: Partial<Record<McpStepsGranularity, number>>;
 };
 
-const STEPS_HOURLY_MAX_DAYS = 7;
-const STEPS_DAILY_MAX_DAYS = 90;
-const SLEEP_MAX_DAYS = 90;
-const BLOOD_PRESSURE_MAX_DAYS = 90;
-const BLOOD_PRESSURE_MAX_READINGS = 200;
-
-export const MCP_METRIC_REGISTRY: Record<McpHealthMetric, MetricRegistryEntry> = {
-  steps: {
-    metric: "steps",
-    unit: "count",
-    maxRangeDays: STEPS_DAILY_MAX_DAYS,
-    defaultViewType: "daily_series",
-    allowedGranularities: ["hourly", "daily"],
-    maxRangeDaysByGranularity: {
-      hourly: STEPS_HOURLY_MAX_DAYS,
-      daily: STEPS_DAILY_MAX_DAYS
-    }
-  },
-  sleep: {
-    metric: "sleep",
-    unit: "hours",
-    maxRangeDays: SLEEP_MAX_DAYS,
-    defaultViewType: "daily_duration_series"
-  },
-  blood_pressure: {
-    metric: "blood_pressure",
-    unit: "mmHg",
-    maxRangeDays: BLOOD_PRESSURE_MAX_DAYS,
-    maxReadings: BLOOD_PRESSURE_MAX_READINGS,
-    defaultViewType: "daily_reading_table"
+function entryFor(metric: HealthKitMetricKey): MetricRegistryEntry {
+  const definition = HEALTHKIT_METRIC_REGISTRY[metric];
+  if (metric === "steps") {
+    return {
+      metric,
+      unit: definition.unit,
+      maxRangeDays: DEFAULT_MAX_DAYS,
+      defaultViewType: "daily_series",
+      allowedGranularities: ["hourly", "daily"],
+      maxRangeDaysByGranularity: { hourly: HOURLY_MAX_DAYS, daily: DEFAULT_MAX_DAYS }
+    };
   }
-};
+  if (definition.storage === "sleep_day") {
+    return { metric, unit: "hours", maxRangeDays: DEFAULT_MAX_DAYS, defaultViewType: "daily_duration_series" };
+  }
+  if (definition.storage === "blood_pressure" || definition.storage === "blood_glucose") {
+    return { metric, unit: definition.unit, maxRangeDays: DEFAULT_MAX_DAYS, maxReadings: TABLE_MAX_READINGS, defaultViewType: "daily_reading_table" };
+  }
+  if (definition.storage === "workout") {
+    return { metric, unit: definition.unit, maxRangeDays: DEFAULT_MAX_DAYS, maxReadings: TABLE_MAX_READINGS, defaultViewType: "workout_table" };
+  }
+  return { metric, unit: definition.unit, maxRangeDays: DEFAULT_MAX_DAYS, defaultViewType: "daily_series" };
+}
+
+export const MCP_METRIC_REGISTRY: Record<McpHealthMetric, MetricRegistryEntry> = Object.fromEntries(
+  Object.keys(HEALTHKIT_METRIC_REGISTRY).map((metric) => [metric, entryFor(metric as HealthKitMetricKey)])
+) as Record<McpHealthMetric, MetricRegistryEntry>;
 
 export type ResolvedMetricQuery = {
   metric: McpHealthMetric;
@@ -61,63 +67,33 @@ export function resolveMetricQuery(input: {
   if (!isMcpHealthMetric(input.healthMetric)) {
     throw new HttpError(400, "unsupported_metric", "healthMetric is not an allowed Family OS MCP metric.");
   }
-
   if (!Number.isInteger(input.rangeDays) || input.rangeDays < 1) {
     throw new HttpError(400, "invalid_range_days", "rangeDays must be a positive integer.");
   }
-
   const entry = MCP_METRIC_REGISTRY[input.healthMetric];
-
   if (input.healthMetric === "steps") {
     const granularity = resolveStepsGranularity(input.granularity);
     const maxDays = entry.maxRangeDaysByGranularity![granularity]!;
     if (input.rangeDays > maxDays) {
-      throw new HttpError(
-        400,
-        "range_days_exceeded",
-        `steps ${granularity} data supports at most ${maxDays} days.`
-      );
+      throw new HttpError(400, "range_days_exceeded", `steps ${granularity} data supports at most ${maxDays} days.`);
     }
-    return {
-      metric: "steps",
-      unit: entry.unit,
-      rangeDays: input.rangeDays,
-      viewType: granularity === "hourly" ? "hourly_series" : "daily_series",
-      granularity
-    };
+    return { metric: input.healthMetric, unit: entry.unit, rangeDays: input.rangeDays, viewType: granularity === "hourly" ? "hourly_series" : "daily_series", granularity };
   }
-
   if (input.granularity !== undefined) {
     throw new HttpError(400, "granularity_not_supported", `${input.healthMetric} does not accept granularity.`);
   }
-
   if (input.rangeDays > entry.maxRangeDays) {
-    throw new HttpError(
-      400,
-      "range_days_exceeded",
-      `${input.healthMetric} supports at most ${entry.maxRangeDays} days.`
-    );
+    throw new HttpError(400, "range_days_exceeded", `${input.healthMetric} supports at most ${entry.maxRangeDays} days.`);
   }
-
-  return {
-    metric: input.healthMetric,
-    unit: entry.unit,
-    rangeDays: input.rangeDays,
-    viewType: entry.defaultViewType,
-    maxReadings: entry.maxReadings
-  };
+  return { metric: input.healthMetric, unit: entry.unit, rangeDays: input.rangeDays, viewType: entry.defaultViewType, maxReadings: entry.maxReadings };
 }
 
 function resolveStepsGranularity(value: string | undefined): McpStepsGranularity {
-  if (value === undefined || value === "daily") {
-    return "daily";
-  }
-  if (value === "hourly") {
-    return "hourly";
-  }
+  if (value === undefined || value === "daily") return "daily";
+  if (value === "hourly") return "hourly";
   throw new HttpError(400, "invalid_granularity", "steps granularity must be hourly or daily.");
 }
 
 export function isMcpHealthMetric(value: string): value is McpHealthMetric {
-  return value === "steps" || value === "sleep" || value === "blood_pressure";
+  return isHealthKitMetricKey(value);
 }

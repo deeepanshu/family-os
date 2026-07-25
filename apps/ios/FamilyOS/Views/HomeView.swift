@@ -2,7 +2,6 @@ import SwiftUI
 
 struct HomeView: View {
     @ObservedObject var viewModel: HealthBootstrapViewModel
-    @State private var activeLog: LogKind?
 
     var body: some View {
         NavigationStack {
@@ -15,18 +14,7 @@ struct HomeView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    VStack(spacing: 14) {
-                        PrimaryActionButton(
-                            title: "Record Blood Sugar",
-                            subtitle: "Blood sugar reading",
-                            systemImage: "drop.fill",
-                            tint: .blue
-                        ) {
-                            activeLog = .bloodSugar
-                        }
-                    }
-
-                    Text("Blood pressure is imported from Apple Health when HealthKit sync is enabled.")
+                    Text("Health readings are imported from Apple Health when HealthKit sync is enabled.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 
@@ -41,19 +29,16 @@ struct HomeView: View {
                 await viewModel.loadCurrentFamily()
                 await viewModel.loadProfiles()
             }
-            .sheet(item: $activeLog) { kind in
-                LogReadingSheet(kind: kind, viewModel: viewModel)
-            }
         }
     }
 
     private var homeSubtitle: String {
         if let profile = viewModel.selectedProfile {
-            return "Logging for \(profile.displayName)"
+            return "Viewing \(profile.displayName)"
         }
         if viewModel.profiles.profiles.isEmpty {
-            return "Create a profile before recording readings."
+            return "Create a profile before syncing HealthKit."
         }
-        return "Choose a profile before recording readings."
+        return "Choose a profile before viewing readings."
     }
 }

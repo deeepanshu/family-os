@@ -35,6 +35,57 @@ xcodebuild \
   build
 ```
 
+## Crashlytics (Firebase)
+
+Production crash and non-fatal reporting uses **Firebase Crashlytics**.
+
+### One-time Firebase Console setup
+
+1. Create a Firebase project (or reuse one) at [console.firebase.google.com](https://console.firebase.google.com).
+2. Add an **iOS app** with bundle ID `com.deepanshujain.familyos`.
+3. Download `GoogleService-Info.plist` and place it at:
+
+   ```text
+   apps/ios/FamilyOS/Resources/GoogleService-Info.plist
+   ```
+
+4. In Xcode, ensure the file is in the **FamilyOS** target **Copy Bundle Resources**
+   (drag into `FamilyOS/Resources` if it is not already listed).
+5. Enable **Crashlytics** for the project in the Firebase console
+   (Build → Crashlytics → Get started).
+6. Optional: enable Google Analytics in the same Firebase project for breadcrumb logs.
+
+An example template lives at `FamilyOS/Resources/GoogleService-Info.plist.example`.
+The app **builds and runs without** the real plist; Crashlytics stays disabled until the file is present.
+
+`GoogleService-Info.plist` is client-safe (similar to the Supabase anon key). Commit the
+real file so Xcode Cloud / TestFlight archives can upload dSYMs and report crashes.
+
+### What the app does
+
+- Initializes Firebase at launch via `CrashReporting.configure()`.
+- **DEBUG** builds: Crashlytics collection is off (no local/simulator noise).
+- **Release** builds: collection on; custom key `app_environment`; user id set to the
+  Supabase user UUID only (never email, tokens, or health values).
+- Xcode has a **Upload Crashlytics dSYMs** run-script phase (last build phase) for
+  readable stack traces. The script no-ops if `GoogleService-Info.plist` is missing.
+- SPM products: `FirebaseCore`, `FirebaseCrashlytics` from
+  `https://github.com/firebase/firebase-ios-sdk.git`.
+
+### Verify with a test crash (Release / device, no debugger)
+
+1. Ship a temporary button that calls `fatalError("Crashlytics test")` (or use a one-off build).
+2. Install and launch **without** the Xcode debugger attached.
+3. Trigger the crash, relaunch the app so the report uploads.
+4. Confirm the event in Firebase → Crashlytics (can take a few minutes).
+
+Do not leave a test-crash control in production UI.
+
+### Privacy
+
+Do not send blood pressure/glucose values, free-text notes, or auth tokens through
+`CrashReporting.record` / `log`. Prefer error domain/code and short, non-PHI context.
+
 ## Environments
 
 Debug builds use the `local` environment:

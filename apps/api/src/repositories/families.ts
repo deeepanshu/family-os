@@ -9,16 +9,19 @@ import type {
   CreateHealthKitRepairInput,
   FamilyMember,
   HealthKitMetric,
+  HealthKitMetricKey,
   HealthKitRepair,
   HealthKitRepairCompleteResult,
   HealthKitSettings,
   HealthKitSyncInput,
   HealthKitSyncOperation,
   HealthKitSyncResult,
+  HealthDailyMetricRecord,
   HealthMetricFreshness,
   HealthMetricSyncStatusCode,
   HealthSleepDayRecord,
   HealthStepHourRecord,
+  HealthWorkoutRecord,
   McpCapability,
   McpConnectionGrant,
   PutHealthKitSettingsInput,
@@ -35,10 +38,10 @@ import type {
   FamilyMembership,
   FamilyRole,
   HealthProfile,
-  GlucoseContext,
   PersonStatus,
   PublicInviteResponse
 } from "@family-os/shared";
+import { HEALTHKIT_METRIC_REGISTRY } from "@family-os/shared";
 import { HttpError } from "../errors";
 import type {
   AuditLogStore,
@@ -60,7 +63,7 @@ import {
   assertSelfProfileMatch,
   buildSyncResult,
   HEALTHKIT_METRICS,
-  metricsAffected,
+  groupsAffected,
   profileLocalSleepDayRange,
   repairRangeStart,
   REPAIR_TTL_MS,
@@ -92,42 +95,6 @@ export type UpdateProfileInput = Partial<{
   relationshipLabel: string;
   dateOfBirth: string;
   status: PersonStatus;
-}>;
-
-export type CreateBloodPressureInput = {
-  actorUserId: string;
-  personId: string;
-  systolic: number;
-  diastolic: number;
-  pulse?: number;
-  measuredAt: string;
-  context?: string;
-  notes?: string;
-};
-
-export type UpdateBloodPressureInput = Partial<{
-  systolic: number;
-  diastolic: number;
-  pulse: number;
-  measuredAt: string;
-  context: string;
-  notes: string;
-}>;
-
-export type CreateBloodGlucoseInput = {
-  actorUserId: string;
-  personId: string;
-  value: number;
-  context: GlucoseContext;
-  measuredAt: string;
-  notes?: string;
-};
-
-export type UpdateBloodGlucoseInput = Partial<{
-  value: number;
-  context: GlucoseContext;
-  measuredAt: string;
-  notes: string;
 }>;
 
 export type CreateReminderInput = {
@@ -185,7 +152,6 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     string,
     BloodPressureReading & { deletedAt?: string; sourceSampleKey?: string }
   >();
-  private readonly bloodGlucoseReadings = new Map<string, BloodGlucoseReading & { deletedAt?: string }>();
   private readonly healthKitProfileSettings = new Map<
     string,
     {
@@ -204,7 +170,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     {
       personId: string;
       familyId: string;
-      metric: HealthKitMetric;
+      group: HealthKitMetric;
       lastSuccessfulAt?: string;
       lastAttemptAt?: string;
       lastErrorCode?: string;
@@ -219,6 +185,21 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   >();
   private readonly healthStepHours = new Map<string, HealthStepHourRecord & { familyId: string }>();
   private readonly healthSleepDays = new Map<string, HealthSleepDayRecord & { familyId: string }>();
+  private readonly healthDailyMetrics = new Map<string, {
+    familyId: string;
+    personId: string;
+    healthMetric: string;
+    localDay: string;
+    timezoneVersion: number;
+    sumValue?: number;
+    averageValue?: number;
+    minimumValue?: number;
+    maximumValue?: number;
+    latestValue?: number;
+    sampleCount: number;
+  }>();
+  private readonly healthBloodGlucoseReadings = new Map<string, { personId: string; sourceSampleKey: string; measuredAtUtc: string; valueMgDl: number }>();
+  private readonly healthWorkouts = new Map<string, { personId: string; sourceSampleKey: string; workoutType: string; startedAtUtc: string; endedAtUtc: string; durationSeconds: number; activeEnergyKcal?: number; distanceMeters?: number; averageHeartRateBpm?: number; maximumHeartRateBpm?: number }>();
   private readonly healthKitSyncReceipts = new Map<string, HealthKitSyncResult>();
   private readonly healthKitRepairs = new Map<
     string,
@@ -508,12 +489,6 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       throw new HttpError(409, "unsafe_workspace_switch", "Workspace has HealthKit sleep data.");
     }
 
-    const hasBloodGlucose = [...this.bloodGlucoseReadings.values()].some(
-      (reading) => reading.familyId === familyId && !reading.deletedAt && reading.source === "manual"
-    );
-    if (hasBloodGlucose) {
-      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has manual blood sugar readings.");
-    }
   }
 
   private findInvite(token: string) {
@@ -627,102 +602,6 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     return stripDeleted(reading);
   }
 
-  async createBloodGlucose(input: CreateBloodGlucoseInput): Promise<BloodGlucoseReading> {
-    const current = this.requireActiveMember(input.actorUserId);
-    const profile = this.profiles.get(input.personId);
-    if (!profile || profile.familyId !== current.family.id || profile.status !== "active") {
-      throw new HttpError(404, "profile_not_found", "Health profile was not found.");
-    }
-    const now = new Date().toISOString();
-    const reading: BloodGlucoseReading = {
-      id: crypto.randomUUID(),
-      familyId: current.family.id,
-      personId: input.personId,
-      recordedByUserId: input.actorUserId,
-      value: input.value,
-      unit: "mg/dL",
-      context: input.context,
-      measuredAt: input.measuredAt,
-      notes: input.notes,
-      source: "manual",
-      createdAt: now,
-      updatedAt: now
-    };
-    this.bloodGlucoseReadings.set(reading.id, reading);
-    this.audit({
-      familyId: current.family.id,
-      actorUserId: input.actorUserId,
-      action: "blood_glucose.created",
-      resourceType: "blood_glucose_reading",
-      resourceId: reading.id,
-      metadata: { personId: input.personId }
-    });
-    return reading;
-  }
-
-  async listBloodGlucose(actorUserId: string, personId?: string, limit = 50): Promise<BloodGlucoseReading[]> {
-    const current = this.requireActiveMember(actorUserId);
-    return [...this.bloodGlucoseReadings.values()]
-      .filter((reading) => reading.familyId === current.family.id && !reading.deletedAt)
-      .filter((reading) => !personId || reading.personId === personId)
-      .sort((a, b) => Date.parse(b.measuredAt) - Date.parse(a.measuredAt))
-      .slice(0, limit)
-      .map(stripDeleted);
-  }
-
-  async getBloodGlucose(actorUserId: string, readingId: string): Promise<BloodGlucoseReading> {
-    const current = this.requireActiveMember(actorUserId);
-    const reading = this.bloodGlucoseReadings.get(readingId);
-    if (!reading || reading.familyId !== current.family.id || reading.deletedAt) {
-      throw new HttpError(404, "glucose_reading_not_found", "Blood sugar reading was not found.");
-    }
-    return stripDeleted(reading);
-  }
-
-  async updateBloodGlucose(
-    actorUserId: string,
-    readingId: string,
-    input: UpdateBloodGlucoseInput
-  ): Promise<BloodGlucoseReading> {
-    const current = this.requireActiveMember(actorUserId);
-    const reading = this.bloodGlucoseReadings.get(readingId);
-    if (!reading || reading.familyId !== current.family.id || reading.deletedAt) {
-      throw new HttpError(404, "glucose_reading_not_found", "Blood sugar reading was not found.");
-    }
-    if (reading.recordedByUserId !== actorUserId && current.membership.role !== "manager") {
-      throw new HttpError(403, "reading_owner_or_manager_required", "Only the recorder or a manager can change this reading.");
-    }
-    const updated = { ...reading, ...defined(input), updatedAt: new Date().toISOString() };
-    this.bloodGlucoseReadings.set(readingId, updated);
-    this.audit({
-      familyId: current.family.id,
-      actorUserId,
-      action: "blood_glucose.updated",
-      resourceType: "blood_glucose_reading",
-      resourceId: readingId
-    });
-    return stripDeleted(updated);
-  }
-
-  async deleteBloodGlucose(actorUserId: string, readingId: string): Promise<void> {
-    const current = this.requireActiveMember(actorUserId);
-    const reading = this.bloodGlucoseReadings.get(readingId);
-    if (!reading || reading.familyId !== current.family.id || reading.deletedAt) {
-      throw new HttpError(404, "glucose_reading_not_found", "Blood sugar reading was not found.");
-    }
-    if (reading.recordedByUserId !== actorUserId && current.membership.role !== "manager") {
-      throw new HttpError(403, "reading_owner_or_manager_required", "Only the recorder or a manager can delete this reading.");
-    }
-    this.bloodGlucoseReadings.set(readingId, { ...reading, deletedAt: new Date().toISOString() });
-    this.audit({
-      familyId: current.family.id,
-      actorUserId,
-      action: "blood_glucose.deleted",
-      resourceType: "blood_glucose_reading",
-      resourceId: readingId
-    });
-  }
-
   async getHealthKitSettings(actorUserId: string, personId?: string): Promise<HealthKitSettings> {
     const current = this.requireActiveMember(actorUserId);
     const selfProfile = await this.getSelfProfile(actorUserId);
@@ -739,7 +618,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     const selfProfile = await this.getSelfProfile(actorUserId);
     assertSelfProfileMatch({ selfProfileId: selfProfile?.id, requestedPersonId: input.personId });
 
-    const uniqueMetrics = [...new Set(input.enabledMetrics)].filter((m): m is HealthKitMetric =>
+    const uniqueGroups = [...new Set(input.enabledGroups)].filter((m): m is HealthKitMetric =>
       (HEALTHKIT_METRICS as readonly string[]).includes(m)
     );
     const nowIso = new Date().toISOString();
@@ -750,7 +629,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       timezoneVersion = existing.healthTimezoneVersion + 1;
       timezoneChanged = true;
     }
-    const consentActive = uniqueMetrics.length > 0;
+    const consentActive = uniqueGroups.length > 0;
     if (consentActive && !input.consentVersion) {
       throw new HttpError(400, "healthkit_consent_required", "consentVersion is required when enabling metrics.");
     }
@@ -788,7 +667,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     });
 
     for (const metric of HEALTHKIT_METRICS) {
-      const enabled = uniqueMetrics.includes(metric);
+      const enabled = uniqueGroups.includes(metric);
       this.healthKitMetricEnabled.set(`${input.personId}:${metric}`, enabled);
       const stateKey = `${input.personId}:${metric}`;
       const prev = this.healthMetricSyncState.get(stateKey);
@@ -799,7 +678,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       this.healthMetricSyncState.set(stateKey, {
         personId: input.personId,
         familyId: current.family.id,
-        metric,
+        group: metric,
         lastSuccessfulAt: prev?.lastSuccessfulAt,
         lastAttemptAt: prev?.lastAttemptAt,
         lastErrorCode: prev?.lastErrorCode,
@@ -816,7 +695,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       resourceType: "health_profile",
       resourceId: input.personId,
       metadata: {
-        enabledMetrics: uniqueMetrics,
+        enabledGroups: uniqueGroups,
         healthTimezone: input.healthTimezone,
         installationReplaced: Boolean(input.replaceActiveInstallation)
       }
@@ -834,7 +713,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     if (existingReceipt) return existingReceipt;
 
     const nowIso = new Date().toISOString();
-    const affected = metricsAffected(input.operations);
+    const affected = groupsAffected(input.operations);
 
     try {
       const settings = this.healthKitProfileSettings.get(input.personId);
@@ -871,7 +750,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
         if (repair.timezoneVersion !== input.timezoneVersion) {
           throw new HttpError(409, "healthkit_timezone_version_invalid", "Timezone version is stale.");
         }
-        if (affected.length !== 1 || affected[0] !== repair.metric) {
+        if (affected.length !== 1 || affected[0] !== repair.group) {
           throw new HttpError(400, "healthkit_repair_invalid", "Repair chunks may only include the repair metric.");
         }
         for (const op of input.operations) {
@@ -899,7 +778,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
         this.touchInMemoryMetricState({
           familyId: current.family.id,
           personId: input.personId,
-          metric,
+          group: metric,
           nowIso,
           success: true,
           repairing: Boolean(repair),
@@ -911,7 +790,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       const result = buildSyncResult({
         syncId: input.syncId,
         operationCount: input.operations.length,
-        metricsAffected: affected,
+        groupsAffected: affected,
         repairId: input.repairId,
         chunkIndex: input.chunkIndex
       });
@@ -942,11 +821,11 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       return result;
     } catch (error) {
       if (error instanceof HttpError && error.status !== 500) {
-        for (const metric of affected) {
+      for (const metric of affected) {
           this.touchInMemoryMetricState({
             familyId: current.family.id,
             personId: input.personId,
-            metric,
+            group: metric,
             nowIso,
             success: false,
             errorCode: error.code
@@ -973,14 +852,14 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     if (settings.healthTimezoneVersion !== input.timezoneVersion) {
       throw new HttpError(409, "healthkit_timezone_version_invalid", "Timezone version is stale.");
     }
-    if (!this.healthKitMetricEnabled.get(`${input.personId}:${input.metric}`)) {
-      throw new HttpError(403, "healthkit_metric_disabled", `Metric ${input.metric} is not enabled.`);
+    if (!this.healthKitMetricEnabled.get(`${input.personId}:${input.group}`)) {
+      throw new HttpError(403, "healthkit_metric_disabled", `Metric ${input.group} is not enabled.`);
     }
 
     const now = new Date();
     const nowIso = toUtcIso(now);
     for (const repair of this.healthKitRepairs.values()) {
-      if (repair.personId === input.personId && repair.metric === input.metric && !repair.completedAt && Date.parse(repair.expiresAt) > now.getTime()) {
+      if (repair.personId === input.personId && repair.group === input.group && !repair.completedAt && Date.parse(repair.expiresAt) > now.getTime()) {
         this.healthKitRepairs.set(repair.repairId, { ...repair, expiresAt: nowIso });
       }
     }
@@ -991,10 +870,10 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       repairId: crypto.randomUUID(),
       personId: input.personId,
       familyId: current.family.id,
-      metric: input.metric,
+      group: input.group,
       installationId: input.installationId,
       timezoneVersion: input.timezoneVersion,
-      rangeStart: toUtcIso(repairRangeStart(input.metric, now)),
+      rangeStart: toUtcIso(repairRangeStart(input.group, now)),
       rangeEnd: nowIso,
       rangeStartDay,
       rangeEndDay,
@@ -1004,7 +883,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     this.touchInMemoryMetricState({
       familyId: current.family.id,
       personId: input.personId,
-      metric: input.metric,
+      group: input.group,
       nowIso,
       success: false,
       repairing: true
@@ -1015,12 +894,12 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       action: "healthkit.repair_created",
       resourceType: "healthkit_repair",
       resourceId: repair.repairId,
-      metadata: { metric: input.metric, status: "created" }
+      metadata: { group: input.group, status: "created" }
     });
     return {
       repairId: repair.repairId,
       personId: repair.personId,
-      metric: repair.metric,
+      group: repair.group,
       installationId: repair.installationId,
       timezoneVersion: repair.timezoneVersion,
       rangeStart: repair.rangeStart,
@@ -1048,7 +927,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     if (repair.completedAt) {
       return {
         repairId,
-        metric: repair.metric,
+        group: repair.group,
         completed: true,
         expectedChunkCount: repair.expectedChunkCount ?? input.expectedChunkCount,
         completedChunkCount: repair.expectedChunkCount ?? input.expectedChunkCount
@@ -1064,8 +943,8 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     if (settings.healthTimezoneVersion !== repair.timezoneVersion) {
       throw new HttpError(409, "healthkit_timezone_version_invalid", "Timezone version is stale.");
     }
-    if (!this.healthKitMetricEnabled.get(`${selfProfile.id}:${repair.metric}`)) {
-      throw new HttpError(403, "healthkit_metric_disabled", `Metric ${repair.metric} is not enabled.`);
+    if (!this.healthKitMetricEnabled.get(`${selfProfile.id}:${repair.group}`)) {
+      throw new HttpError(403, "healthkit_metric_disabled", `Metric ${repair.group} is not enabled.`);
     }
     const active = this.activeInstallation(selfProfile.id);
     if (!active || active.installationId !== repair.installationId) {
@@ -1083,7 +962,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     }
 
     const nowIso = new Date().toISOString();
-    if (repair.metric === "sleep") {
+    if (repair.group === "sleep") {
       for (const [key, row] of this.healthSleepDays) {
         if (
           row.personId === selfProfile.id &&
@@ -1101,10 +980,10 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       expectedChunkCount: input.expectedChunkCount,
       completedAt: nowIso
     });
-    this.healthMetricSyncState.set(`${selfProfile.id}:${repair.metric}`, {
+    this.healthMetricSyncState.set(`${selfProfile.id}:${repair.group}`, {
       personId: selfProfile.id,
       familyId: current.family.id,
-      metric: repair.metric,
+      group: repair.group,
       lastSuccessfulAt: nowIso,
       lastAttemptAt: nowIso,
       lastErrorCode: undefined,
@@ -1120,7 +999,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       resourceType: "healthkit_repair",
       resourceId: repairId,
       metadata: {
-        metric: repair.metric,
+        group: repair.group,
         expected_chunk_count: input.expectedChunkCount,
         status: "completed"
       }
@@ -1128,7 +1007,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
 
     return {
       repairId,
-      metric: repair.metric,
+      group: repair.group,
       completed: true,
       expectedChunkCount: input.expectedChunkCount,
       completedChunkCount: input.expectedChunkCount
@@ -1138,14 +1017,16 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   async getHealthMetricFreshness(
     actorUserId: string,
     personId: string,
-    metric: HealthKitMetric
+    healthMetric: HealthKitMetricKey
   ): Promise<HealthMetricFreshness> {
     const current = this.requireActiveMember(actorUserId);
     this.assertProfileInFamily(personId, current.family.id);
     const settings = this.healthKitProfileSettings.get(personId);
-    const state = this.healthMetricSyncState.get(`${personId}:${metric}`);
+    const group = HEALTHKIT_METRIC_REGISTRY[healthMetric].group;
+    const state = this.healthMetricSyncState.get(`${personId}:${group}`);
     return {
-      metric,
+      healthMetric,
+      group,
       healthTimezone: settings?.healthTimezone ?? "UTC",
       healthTimezoneVersion: settings?.healthTimezoneVersion ?? 1,
       lastSuccessfulAt: state?.lastSuccessfulAt,
@@ -1193,7 +1074,15 @@ export class InMemoryFamilyRepository implements FamilyRepository {
           personId: row.personId,
           sleepDay: row.sleepDay,
           timezoneVersion: row.timezoneVersion,
-          durationMinutes: row.durationMinutes
+          totalMinutes: row.totalMinutes,
+          coreMinutes: row.coreMinutes,
+          deepMinutes: row.deepMinutes,
+          remMinutes: row.remMinutes,
+          unspecifiedAsleepMinutes: row.unspecifiedAsleepMinutes,
+          awakeMinutes: row.awakeMinutes,
+          inBedMinutes: row.inBedMinutes,
+          wristTemperatureCelsius: row.wristTemperatureCelsius,
+          breathingDisturbanceCount: row.breathingDisturbanceCount
         });
       }
     }
@@ -1228,14 +1117,103 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       .map(stripDeleted);
   }
 
+  async listDailyMetrics(
+    actorUserId: string,
+    personId: string,
+    healthMetric: HealthKitMetricKey,
+    rangeStartDay: string,
+    rangeEndDay: string
+  ): Promise<HealthDailyMetricRecord[]> {
+    const current = this.requireActiveMember(actorUserId);
+    this.assertProfileInFamily(personId, current.family.id);
+    const definition = HEALTHKIT_METRIC_REGISTRY[healthMetric];
+    if (definition.storage !== "daily_numeric") {
+      throw new HttpError(400, "healthkit_metric_not_daily", "The requested metric is not stored as a daily aggregate.");
+    }
+    const timezoneVersion = this.healthKitProfileSettings.get(personId)?.healthTimezoneVersion ?? 1;
+    return [...this.healthDailyMetrics.values()]
+      .filter((row) => row.familyId === current.family.id && row.personId === personId)
+      .filter((row) => row.healthMetric === healthMetric && row.timezoneVersion === timezoneVersion)
+      .filter((row) => row.localDay >= rangeStartDay && row.localDay <= rangeEndDay)
+      .sort((a, b) => a.localDay.localeCompare(b.localDay))
+      .map((row) => ({ ...row, healthMetric, unit: definition.unit }));
+  }
+
+  async listHealthKitBloodGlucose(
+    actorUserId: string,
+    personId: string,
+    rangeStartUtc: string,
+    rangeEndUtc: string,
+    limit: number
+  ): Promise<BloodGlucoseReading[]> {
+    const current = this.requireActiveMember(actorUserId);
+    this.assertProfileInFamily(personId, current.family.id);
+    const start = Date.parse(rangeStartUtc);
+    const end = Date.parse(rangeEndUtc);
+    const syncUserId = this.healthKitProfileSettings.get(personId)?.userId ?? actorUserId;
+    return [...this.healthBloodGlucoseReadings.values()]
+      .filter((reading) => reading.personId === personId)
+      .filter((reading) => {
+        const time = Date.parse(reading.measuredAtUtc);
+        return time >= start && time <= end;
+      })
+      .sort((a, b) => Date.parse(a.measuredAtUtc) - Date.parse(b.measuredAtUtc))
+      .slice(0, limit)
+      .map((reading) => ({
+        id: reading.sourceSampleKey,
+        familyId: current.family.id,
+        personId,
+        recordedByUserId: syncUserId,
+        value: reading.valueMgDl,
+        unit: "mg/dL" as const,
+        measuredAt: reading.measuredAtUtc,
+        source: "healthkit" as const,
+        createdAt: reading.measuredAtUtc,
+        updatedAt: reading.measuredAtUtc
+      }));
+  }
+
+  async listHealthKitWorkouts(
+    actorUserId: string,
+    personId: string,
+    rangeStartUtc: string,
+    rangeEndUtc: string,
+    limit: number
+  ): Promise<HealthWorkoutRecord[]> {
+    const current = this.requireActiveMember(actorUserId);
+    this.assertProfileInFamily(personId, current.family.id);
+    const start = Date.parse(rangeStartUtc);
+    const end = Date.parse(rangeEndUtc);
+    return [...this.healthWorkouts.values()]
+      .filter((workout) => workout.personId === personId)
+      .filter((workout) => {
+        const time = Date.parse(workout.startedAtUtc);
+        return time >= start && time <= end;
+      })
+      .sort((a, b) => Date.parse(a.startedAtUtc) - Date.parse(b.startedAtUtc))
+      .slice(0, limit)
+      .map((workout) => ({
+        id: workout.sourceSampleKey,
+        personId,
+        workoutType: workout.workoutType,
+        startedAtUtc: workout.startedAtUtc,
+        endedAtUtc: workout.endedAtUtc,
+        durationSeconds: workout.durationSeconds,
+        activeEnergyKcal: workout.activeEnergyKcal,
+        distanceMeters: workout.distanceMeters,
+        averageHeartRateBpm: workout.averageHeartRateBpm,
+        maximumHeartRateBpm: workout.maximumHeartRateBpm
+      }));
+  }
+
   private buildHealthKitSettings(familyId: string, personId: string): HealthKitSettings {
     const settings = this.healthKitProfileSettings.get(personId);
-    const enabledMetrics = HEALTHKIT_METRICS.filter((metric) => this.healthKitMetricEnabled.get(`${personId}:${metric}`));
-    const metrics = HEALTHKIT_METRICS.map((metric) => {
-      const state = this.healthMetricSyncState.get(`${personId}:${metric}`);
-      const enabled = enabledMetrics.includes(metric);
+    const enabledGroups = HEALTHKIT_METRICS.filter((group) => this.healthKitMetricEnabled.get(`${personId}:${group}`));
+    const groups = HEALTHKIT_METRICS.map((group) => {
+      const state = this.healthMetricSyncState.get(`${personId}:${group}`);
+      const enabled = enabledGroups.includes(group);
       return {
-        metric,
+        group,
         enabled,
         lastSuccessfulAt: state?.lastSuccessfulAt,
         lastAttemptAt: state?.lastAttemptAt,
@@ -1251,9 +1229,9 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       consentedAt: settings?.consentedAt,
       healthTimezone: settings?.healthTimezone ?? "UTC",
       healthTimezoneVersion: settings?.healthTimezoneVersion ?? 1,
-      enabledMetrics,
+      enabledGroups,
       activeInstallationId: this.activeInstallation(personId)?.installationId,
-      metrics
+      groups
     };
   }
 
@@ -1280,14 +1258,46 @@ export class InMemoryFamilyRepository implements FamilyRepository {
             count: op.count
           });
           break;
+        case "steps_hour_delete":
+          this.healthStepHours.delete(`${input.personId}:${op.hourStartUtc}`);
+          break;
         case "sleep_day_upsert":
           this.healthSleepDays.set(`${input.personId}:${op.sleepDay}:${input.timezoneVersion}`, {
             familyId: input.familyId,
             personId: input.personId,
             sleepDay: op.sleepDay,
             timezoneVersion: input.timezoneVersion,
-            durationMinutes: op.durationMinutes
+            totalMinutes: op.totalMinutes,
+            coreMinutes: op.coreMinutes,
+            deepMinutes: op.deepMinutes,
+            remMinutes: op.remMinutes,
+            unspecifiedAsleepMinutes: op.unspecifiedAsleepMinutes,
+            awakeMinutes: op.awakeMinutes,
+            inBedMinutes: op.inBedMinutes,
+            wristTemperatureCelsius: op.wristTemperatureCelsius,
+            breathingDisturbanceCount: op.breathingDisturbanceCount
           });
+          break;
+        case "sleep_day_delete":
+          this.healthSleepDays.delete(`${input.personId}:${op.sleepDay}:${input.timezoneVersion}`);
+          break;
+        case "daily_metric_upsert":
+          this.healthDailyMetrics.set(`${input.personId}:${op.healthMetric}:${op.localDay}:${input.timezoneVersion}`, {
+            familyId: input.familyId,
+            personId: input.personId,
+            healthMetric: op.healthMetric,
+            localDay: op.localDay,
+            timezoneVersion: input.timezoneVersion,
+            sumValue: op.sumValue,
+            averageValue: op.averageValue,
+            minimumValue: op.minimumValue,
+            maximumValue: op.maximumValue,
+            latestValue: op.latestValue,
+            sampleCount: op.sampleCount
+          });
+          break;
+        case "daily_metric_delete":
+          this.healthDailyMetrics.delete(`${input.personId}:${op.healthMetric}:${op.localDay}:${input.timezoneVersion}`);
           break;
         case "blood_pressure_upsert": {
           const existing = [...this.bloodPressureReadings.values()].find(
@@ -1346,6 +1356,18 @@ export class InMemoryFamilyRepository implements FamilyRepository {
           }
           break;
         }
+        case "blood_glucose_upsert":
+          this.healthBloodGlucoseReadings.set(`${input.personId}:${op.sourceSampleKey}`, { ...op, personId: input.personId });
+          break;
+        case "blood_glucose_delete":
+          this.healthBloodGlucoseReadings.delete(`${input.personId}:${op.sourceSampleKey}`);
+          break;
+        case "workout_upsert":
+          this.healthWorkouts.set(`${input.personId}:${op.sourceSampleKey}`, { ...op, personId: input.personId });
+          break;
+        case "workout_delete":
+          this.healthWorkouts.delete(`${input.personId}:${op.sourceSampleKey}`);
+          break;
       }
     }
   }
@@ -1353,7 +1375,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   private touchInMemoryMetricState(input: {
     familyId: string;
     personId: string;
-    metric: HealthKitMetric;
+    group: HealthKitMetric;
     nowIso: string;
     success: boolean;
     repairing?: boolean;
@@ -1361,7 +1383,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     coverageStartAt?: string;
     coverageEndAt?: string;
   }) {
-    const key = `${input.personId}:${input.metric}`;
+    const key = `${input.personId}:${input.group}`;
     const prev = this.healthMetricSyncState.get(key);
     let status: HealthMetricSyncStatusCode = prev?.status ?? "never_synced";
     if (input.repairing) status = "repairing";
@@ -1373,7 +1395,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     this.healthMetricSyncState.set(key, {
       personId: input.personId,
       familyId: input.familyId,
-      metric: input.metric,
+      group: input.group,
       lastSuccessfulAt: input.success ? input.nowIso : prev?.lastSuccessfulAt,
       lastAttemptAt: input.nowIso,
       lastErrorCode: input.success ? undefined : input.errorCode ?? prev?.lastErrorCode,

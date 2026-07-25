@@ -19,7 +19,7 @@ re-enables the desired consent groups.
 | Consent group | HealthKit scope | Canonical shape |
 | --- | --- | --- |
 | Activity | steps, walking/running distance, flights, active energy, exercise, stand, VO2 max | hourly steps; daily numeric aggregates |
-| Sleep | total, core, deep, REM, unspecified asleep, awake, in-bed, wrist temperature, breathing disturbance classification | structured local sleep-day record |
+| Sleep | total, core, deep, REM, unspecified asleep, awake, in-bed, wrist temperature, breathing-disturbance events | structured local sleep-day record |
 | Vitals | heart rate, resting/walking heart rate, HRV, respiratory rate, oxygen saturation, body temperature, glucose, blood pressure | daily numeric aggregates; individual glucose and BP readings |
 | Body | weight, BMI, body fat, lean mass, waist | daily latest numeric values |
 | Mobility | walking speed, step length, asymmetry, double support, steadiness, falls | daily aggregate or daily latest numeric values |
@@ -61,7 +61,7 @@ health_sleep_days
   person_id, family_id, sleep_day, timezone_version,
   total_minutes, core_minutes, deep_minutes, rem_minutes,
   unspecified_asleep_minutes, awake_minutes, in_bed_minutes,
-  wrist_temperature_celsius, breathing_disturbance_classification, updated_at
+  wrist_temperature_celsius, breathing_disturbance_count, updated_at
   unique (person_id, sleep_day, timezone_version)
 
 health_blood_pressure_readings
@@ -160,9 +160,10 @@ anchors, local-ledger contents, or request bodies.
 ## 7. Clean Cutover
 
 The migration drops the current HealthKit data tables, sync tables, repair
-tables, RLS policies, and related indexes before creating the tables above. It
-also deletes existing HealthKit-derived BP and glucose records. No old HealthKit
-record is migrated, transformed, or exposed after the migration.
+tables, RLS policies, related indexes, and legacy manual BP/glucose tables
+before creating the tables above. No old HealthKit, BP, or glucose record is
+migrated, transformed, or exposed after the migration. Apple Health is the only
+BP and glucose source after the cutover.
 
 The API and iOS app ship together. On first launch after the cutover, the app
 clears its local anchors and ledger, saves the selected groups, and performs a

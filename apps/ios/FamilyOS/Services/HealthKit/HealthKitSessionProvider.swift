@@ -107,7 +107,7 @@ actor HealthKitSessionProvider {
             timezone: configuration.healthTimezone,
             timezoneVersion: configuration.healthTimezoneVersion,
             installationId: configuration.installationId,
-            enabledMetrics: configuration.enabledMetrics
+            enabledGroups: configuration.enabledMetrics
         )
     }
 }

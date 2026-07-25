@@ -44,19 +44,19 @@ actor HealthKitSyncEngine {
         var timezone: String
         var timezoneVersion: Int
         var installationId: String
-        var enabledMetrics: [HealthKitSyncMetric]
+        var enabledGroups: [HealthKitSyncMetric]
     }
 
     func enableAndRepair(context: SessionContext) async throws {
-        let metricSummary = context.enabledMetrics.map(\.rawValue).sorted().joined(separator: ",")
+        let metricSummary = context.enabledGroups.map(\.rawValue).sorted().joined(separator: ",")
         CrashReporting.setCustomValues([
             "healthkit_stage": "sync_started",
             "healthkit_metrics": metricSummary
         ])
         CrashReporting.log("healthkit.sync_started metrics=\(metricSummary)")
-        try await healthKit.requestAuthorization(for: Set(context.enabledMetrics))
-        try await healthKit.enableBackgroundDelivery(for: Set(context.enabledMetrics))
-        for metric in context.enabledMetrics {
+        try await healthKit.requestAuthorization(for: Set(context.enabledGroups))
+        try await healthKit.enableBackgroundDelivery(for: Set(context.enabledGroups))
+        for metric in context.enabledGroups {
             try await processMetric(metric, context: context)
         }
         CrashReporting.setCustomValues(["healthkit_stage": "sync_completed"])
@@ -64,13 +64,13 @@ actor HealthKitSyncEngine {
     }
 
     func processPendingWork(context: SessionContext) async throws {
-        for metric in context.enabledMetrics {
+        for metric in context.enabledGroups {
             try await processMetric(metric, context: context)
         }
     }
 
     func processMetric(_ metric: HealthKitSyncMetric, context: SessionContext) async throws {
-        guard context.enabledMetrics.contains(metric) else { return }
+        guard context.enabledGroups.contains(metric) else { return }
         let local = await stateStore.loadMetricState(
             userId: context.userId,
             personId: context.personId,
@@ -86,6 +86,32 @@ actor HealthKitSyncEngine {
             try await runRepair(metric: metric, context: context)
         } else {
             try await processAnchoredChanges(metric: metric, context: context)
+        }
+    }
+
+    /// Incremental path for each aggregate-backed HealthKit type. Group repair
+    /// establishes these anchors; an unknown deletion deliberately forces a
+    /// repair instead of silently retaining stale daily data.
+    func processDataMetric(_ dataMetric: HealthKitDataMetric, context: SessionContext) async throws {
+        guard context.enabledGroups.contains(dataMetric.group), isIncrementalDataMetric(dataMetric) else { return }
+        guard let type = dataMetric.sampleType else { return }
+        guard let anchor = await stateStore.loadDataMetricAnchor(userId: context.userId, personId: context.personId, metric: dataMetric) else {
+            try await runRepair(metric: dataMetric.group, context: context)
+            return
+        }
+
+        var currentAnchor: HKQueryAnchor? = anchor
+        var guardCount = 0
+        while guardCount < 10_000 {
+            guardCount += 1
+            let page = try await healthKit.anchoredQuery(type: type, anchor: currentAnchor, limit: anchoredPageLimit)
+            let empty = page.added.isEmpty && page.deletedObjectUUIDs.isEmpty
+            if !empty {
+                try await applyDataMetricPage(dataMetric, context: context, page: page)
+            }
+            await stateStore.saveDataMetricAnchor(page.newAnchor, userId: context.userId, personId: context.personId, metric: dataMetric)
+            currentAnchor = page.newAnchor
+            if empty || page.added.count + page.deletedObjectUUIDs.count < anchoredPageLimit { break }
         }
     }
 
@@ -151,6 +177,7 @@ actor HealthKitSyncEngine {
         )
         // History already uploaded via repair; advance anchor through the change feed without re-uploading.
         try await establishBaselineAnchor(metric: metric, context: context)
+        try await establishAdditionalBaselines(group: metric, rangeStart: rangeStart, rangeEnd: rangeEnd, context: context)
 
         local = await stateStore.loadMetricState(userId: context.userId, personId: context.personId, metric: metric)
         local.repairId = nil
@@ -228,6 +255,7 @@ actor HealthKitSyncEngine {
             context: context
         )
         try await establishBaselineAnchor(metric: metric, context: context)
+        try await establishAdditionalBaselines(group: metric, rangeStart: rangeStart, rangeEnd: rangeEnd, context: context)
 
         local = await stateStore.loadMetricState(userId: context.userId, personId: context.personId, metric: metric)
         local.repairId = nil
@@ -283,6 +311,44 @@ actor HealthKitSyncEngine {
     private func processAnchoredChanges(metric: HealthKitSyncMetric, context: SessionContext) async throws {
         let starting = await stateStore.loadAnchor(userId: context.userId, personId: context.personId, metric: metric)
         try await drainAnchoredFeed(metric: metric, context: context, startingAnchor: starting)
+        // The primary type (steps, sleep, BP, or the first available type) is
+        // anchored above. Other group members are daily aggregates, so refresh
+        // their recent calendar window whenever that group receives a change.
+        let rollingStart = Date().addingTimeInterval(-2 * 24 * 3600)
+        let now = Date()
+        let additional: [HealthKitSyncOperation]
+        if metric == .sleep {
+            additional = try await buildRepairOperations(
+                metric: metric,
+                rangeStart: rollingStart,
+                rangeEnd: now,
+                rangeStartDay: localDay(for: rollingStart, timeZone: context.timezone),
+                rangeEndDay: localDay(for: now, timeZone: context.timezone),
+                context: context
+            )
+        } else {
+            additional = try await additionalRepairOperations(
+                group: metric,
+                rangeStart: rollingStart,
+                rangeEnd: now,
+                timeZone: context.timezone
+            )
+        }
+        if !additional.isEmpty {
+            for chunk in chunkOperations(additional.sorted { $0.stableKey < $1.stableKey }) {
+                _ = try await api.syncHealthKit(
+                    baseURL: context.baseURL,
+                    accessToken: context.accessToken,
+                    syncId: UUID().uuidString.lowercased(),
+                    installationId: context.installationId,
+                    personId: context.personId,
+                    timezoneVersion: context.timezoneVersion,
+                    operations: chunk,
+                    repairId: nil,
+                    chunkIndex: nil
+                )
+            }
+        }
         var local = await stateStore.loadMetricState(userId: context.userId, personId: context.personId, metric: metric)
         local.pendingSync = false
         local.lastSuccessfulAt = Date()
@@ -333,6 +399,130 @@ actor HealthKitSyncEngine {
         }
     }
 
+    private func establishAdditionalBaselines(
+        group: HealthKitSyncMetric,
+        rangeStart: Date,
+        rangeEnd: Date,
+        context: SessionContext
+    ) async throws {
+        let expiry = Date().addingTimeInterval(90 * 24 * 3600)
+        for dataMetric in HealthKitDataMetric.metrics(for: group) where isIncrementalDataMetric(dataMetric) {
+            guard let type = dataMetric.sampleType else { continue }
+            let samples = try await healthKit.samples(for: dataMetric, from: rangeStart, to: rangeEnd)
+            var ledger: [String: HealthKitLedgerEntry] = [:]
+            for sample in samples {
+                let key = sample.uuid.uuidString.lowercased()
+                ledger[key] = HealthKitLedgerEntry(
+                    sourceUUID: key,
+                    metric: dataMetric.rawValue,
+                    bucketKeys: dataMetric.storage == .dailyNumeric ? [localDay(for: sample.endDate, timeZone: context.timezone)] : [key],
+                    measuredAt: sample.endDate,
+                    expiresAt: expiry
+                )
+            }
+            await stateStore.saveDataMetricLedger(ledger, userId: context.userId, personId: context.personId, metric: dataMetric)
+
+            var anchor: HKQueryAnchor?
+            var guardCount = 0
+            while guardCount < 10_000 {
+                guardCount += 1
+                let page = try await healthKit.anchoredQuery(type: type, anchor: anchor, limit: anchoredPageLimit)
+                anchor = page.newAnchor
+                if page.added.count + page.deletedObjectUUIDs.count < anchoredPageLimit { break }
+            }
+            await stateStore.saveDataMetricAnchor(anchor, userId: context.userId, personId: context.personId, metric: dataMetric)
+        }
+    }
+
+    private func applyDataMetricPage(
+        _ dataMetric: HealthKitDataMetric,
+        context: SessionContext,
+        page: HealthKitAnchoredChangePage
+    ) async throws {
+        var ledger = await stateStore.loadDataMetricLedger(userId: context.userId, personId: context.personId, metric: dataMetric)
+        let expiry = Date().addingTimeInterval(90 * 24 * 3600)
+        var operations: [HealthKitSyncOperation] = []
+
+        switch dataMetric.storage {
+        case .dailyNumeric:
+            var affectedDays = Set<String>()
+            for sample in page.added {
+                let key = sample.uuid.uuidString.lowercased()
+                let day = localDay(for: sample.endDate, timeZone: context.timezone)
+                affectedDays.insert(day)
+                ledger[key] = HealthKitLedgerEntry(sourceUUID: key, metric: dataMetric.rawValue, bucketKeys: [day], measuredAt: sample.endDate, expiresAt: expiry)
+            }
+            for deleted in page.deletedObjectUUIDs {
+                let key = deleted.uuidString.lowercased()
+                guard let entry = ledger.removeValue(forKey: key) else {
+                    throw HealthKitSyncEngineError.repairNeeded(dataMetric.group.rawValue)
+                }
+                affectedDays.formUnion(entry.bucketKeys)
+            }
+            for day in affectedDays {
+                guard let start = parseDayStart(day, timeZone: context.timezone) else { continue }
+                var calendar = Calendar(identifier: .gregorian)
+                calendar.timeZone = TimeZone(identifier: context.timezone) ?? TimeZone(secondsFromGMT: 0)!
+                guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { continue }
+                let replacements = try await dailyMetricOperations(metric: dataMetric, from: start, to: end, timeZone: context.timezone)
+                if replacements.isEmpty {
+                    operations.append(.dailyMetricDelete(healthMetric: dataMetric, localDay: day))
+                } else {
+                    operations += replacements.filter { $0.stableKey.hasSuffix(":" + day) }
+                }
+            }
+        case .bloodGlucose:
+            guard let unit = dataMetric.unit else { return }
+            for sample in page.added.compactMap({ $0 as? HKQuantitySample }) {
+                let key = sample.uuid.uuidString.lowercased()
+                ledger[key] = HealthKitLedgerEntry(sourceUUID: key, metric: dataMetric.rawValue, bucketKeys: [key], measuredAt: sample.startDate, expiresAt: expiry)
+                operations.append(.bloodGlucoseUpsert(sourceSampleKey: key, measuredAtUtc: isoInstant(sample.startDate), valueMgDl: sample.quantity.doubleValue(for: unit)))
+            }
+            for deleted in page.deletedObjectUUIDs {
+                let key = deleted.uuidString.lowercased()
+                guard ledger.removeValue(forKey: key) != nil else { throw HealthKitSyncEngineError.repairNeeded(dataMetric.group.rawValue) }
+                operations.append(.bloodGlucoseDelete(sourceSampleKey: key))
+            }
+        case .workout:
+            for workout in page.added.compactMap({ $0 as? HKWorkout }) {
+                let key = workout.uuid.uuidString.lowercased()
+                ledger[key] = HealthKitLedgerEntry(sourceUUID: key, metric: dataMetric.rawValue, bucketKeys: [key], measuredAt: workout.startDate, expiresAt: expiry)
+                operations.append(workoutUpsert(workout))
+            }
+            for deleted in page.deletedObjectUUIDs {
+                let key = deleted.uuidString.lowercased()
+                guard ledger.removeValue(forKey: key) != nil else { throw HealthKitSyncEngineError.repairNeeded(dataMetric.group.rawValue) }
+                operations.append(.workoutDelete(sourceSampleKey: key))
+            }
+        case .hourly, .sleepDay, .bloodPressure:
+            return
+        }
+
+        for chunk in chunkOperations(operations.sorted { $0.stableKey < $1.stableKey }) {
+            _ = try await api.syncHealthKit(
+                baseURL: context.baseURL,
+                accessToken: context.accessToken,
+                syncId: UUID().uuidString.lowercased(),
+                installationId: context.installationId,
+                personId: context.personId,
+                timezoneVersion: context.timezoneVersion,
+                operations: chunk,
+                repairId: nil,
+                chunkIndex: nil
+            )
+        }
+        await stateStore.saveDataMetricLedger(ledger, userId: context.userId, personId: context.personId, metric: dataMetric)
+    }
+
+    private func isIncrementalDataMetric(_ dataMetric: HealthKitDataMetric) -> Bool {
+        switch dataMetric.storage {
+        case .dailyNumeric, .bloodGlucose, .workout:
+            return true
+        case .hourly, .sleepDay, .bloodPressure:
+            return false
+        }
+    }
+
     private func applyAnchoredPage(
         metric: HealthKitSyncMetric,
         context: SessionContext,
@@ -344,7 +534,7 @@ actor HealthKitSyncEngine {
         let expiry = Date().addingTimeInterval(90 * 24 * 3600)
 
         switch metric {
-        case .steps:
+        case .activity:
             for sample in page.added {
                 guard let quantity = sample as? HKQuantitySample else { continue }
                 let hours = try await healthKit.hourlyStepCounts(from: quantity.startDate, to: quantity.endDate)
@@ -388,7 +578,7 @@ actor HealthKitSyncEngine {
         case .sleep:
             for sample in page.added {
                 guard let category = sample as? HKCategorySample else { continue }
-                let days = healthKit.sleepDayMinutes(samples: [category], timeZoneIdentifier: context.timezone)
+                let days = healthKit.sleepDayTotals(samples: [category], timeZoneIdentifier: context.timezone)
                 let bucketKeys = Array(days.keys).sorted()
                 affectedBuckets.formUnion(bucketKeys)
                 ledger[category.uuid.uuidString] = HealthKitLedgerEntry(
@@ -409,16 +599,15 @@ actor HealthKitSyncEngine {
             for day in affectedBuckets {
                 let dayStart = parseDayStart(day, timeZone: context.timezone) ?? Date()
                 let dayEnd = dayStart.addingTimeInterval(24 * 3600)
-                let samples = try await healthKit.sleepAsleepSamples(
+                let samples = try await healthKit.sleepSamples(
                     from: dayStart.addingTimeInterval(-12 * 3600),
                     to: dayEnd.addingTimeInterval(12 * 3600)
                 )
-                let totals = healthKit.sleepDayMinutes(samples: samples, timeZoneIdentifier: context.timezone)
-                let minutes = totals[day] ?? 0
-                operations.append(.sleepDayUpsert(sleepDay: day, durationMinutes: minutes))
+                let totals = healthKit.sleepDayTotals(samples: samples, timeZoneIdentifier: context.timezone)
+                operations.append(sleepUpsert(sleepDay: day, totals: totals[day] ?? HealthKitSleepDayTotals()))
             }
 
-        case .bloodPressure:
+        case .vitals:
             for sample in page.added {
                 guard let correlation = sample as? HKCorrelation,
                       let parsed = healthKit.parseBloodPressure(correlation)
@@ -449,6 +638,8 @@ actor HealthKitSyncEngine {
                 ledger.removeValue(forKey: key)
                 operations.append(.bloodPressureDelete(sourceSampleKey: key))
             }
+        case .body, .mobility, .workouts, .mindfulnessEnvironment, .nutrition:
+            break
         }
 
         if !operations.isEmpty {
@@ -487,27 +678,45 @@ actor HealthKitSyncEngine {
         rangeEndDay: String,
         context: SessionContext
     ) async throws -> [HealthKitSyncOperation] {
+        let primaryOperations: [HealthKitSyncOperation]
         switch metric {
-        case .steps:
+        case .activity:
             let firstHour = firstStepHourInsideRepairRange(rangeStart)
-            guard firstHour <= rangeEnd else { return [] }
-            let hours = try await healthKit.hourlyStepCounts(from: firstHour, to: rangeEnd)
-            return hours
-                .filter { $0.hourStartUtc >= firstHour && $0.hourStartUtc <= rangeEnd }
-                .map { .stepsHourUpsert(hourStartUtc: isoHour($0.hourStartUtc), count: $0.count) }
+            if firstHour > rangeEnd {
+                primaryOperations = []
+            } else {
+                let hours = try await healthKit.hourlyStepCounts(from: firstHour, to: rangeEnd)
+                primaryOperations = hours
+                    .filter { $0.hourStartUtc >= firstHour && $0.hourStartUtc <= rangeEnd }
+                    .map { .stepsHourUpsert(hourStartUtc: isoHour($0.hourStartUtc), count: $0.count) }
+            }
         case .sleep:
             let samples = try await sleepSamplesForRepair(
                 rangeStartDay: rangeStartDay,
                 rangeEndDay: rangeEndDay,
                 timeZone: context.timezone
             )
-            let days = healthKit.sleepDayMinutes(samples: samples, timeZoneIdentifier: context.timezone)
-            return days
+            var days = healthKit.sleepDayTotals(samples: samples, timeZoneIdentifier: context.timezone)
+            for dataMetric in [HealthKitDataMetric.sleepingWristTemperature, .sleepBreathingDisturbanceEvents] {
+                guard let unit = dataMetric.unit else { continue }
+                let values = try await healthKit.quantitySamples(for: dataMetric, from: rangeStart, to: rangeEnd)
+                for sample in values {
+                    let day = localDay(for: sample.endDate, timeZone: context.timezone)
+                    var totals = days[day, default: HealthKitSleepDayTotals()]
+                    if dataMetric == .sleepingWristTemperature {
+                        totals.wristTemperatureCelsius = sample.quantity.doubleValue(for: unit)
+                    } else {
+                        totals.breathingDisturbanceCount = (totals.breathingDisturbanceCount ?? 0) + Int(sample.quantity.doubleValue(for: unit).rounded())
+                    }
+                    days[day] = totals
+                }
+            }
+            primaryOperations = days
                 .filter { $0.key >= rangeStartDay && $0.key <= rangeEndDay }
-                .map { .sleepDayUpsert(sleepDay: $0.key, durationMinutes: $0.value) }
-        case .bloodPressure:
+                .map { sleepUpsert(sleepDay: $0.key, totals: $0.value) }
+        case .vitals:
             let correlations = try await healthKit.bloodPressureCorrelations(from: rangeStart, to: rangeEnd)
-            return correlations.compactMap { correlation in
+            primaryOperations = correlations.compactMap { correlation in
                 guard let parsed = healthKit.parseBloodPressure(correlation) else { return nil }
                 return .bloodPressureUpsert(
                     sourceSampleKey: correlation.uuid.uuidString.lowercased(),
@@ -517,7 +726,15 @@ actor HealthKitSyncEngine {
                     pulse: parsed.pulse
                 )
             }
+        case .body, .mobility, .workouts, .mindfulnessEnvironment, .nutrition:
+            primaryOperations = []
         }
+        return primaryOperations + (try await additionalRepairOperations(
+            group: metric,
+            rangeStart: rangeStart,
+            rangeEnd: rangeEnd,
+            timeZone: context.timezone
+        ))
     }
 
     private func seedLedgerAfterRepair(
@@ -531,7 +748,7 @@ actor HealthKitSyncEngine {
         var ledger: [String: HealthKitLedgerEntry] = [:]
         let expiry = Date().addingTimeInterval(90 * 24 * 3600)
         switch metric {
-        case .steps:
+        case .activity:
             let firstHour = firstStepHourInsideRepairRange(rangeStart)
             guard firstHour <= rangeEnd else { break }
             let samples = try await healthKit.stepQuantitySamples(from: firstHour, to: rangeEnd)
@@ -556,7 +773,7 @@ actor HealthKitSyncEngine {
                 timeZone: context.timezone
             )
             for sample in samples {
-                let days = healthKit.sleepDayMinutes(samples: [sample], timeZoneIdentifier: context.timezone)
+                let days = healthKit.sleepDayTotals(samples: [sample], timeZoneIdentifier: context.timezone)
                 let keys = days.keys.filter { $0 >= rangeStartDay && $0 <= rangeEndDay }.sorted()
                 guard !keys.isEmpty else { continue }
                 ledger[sample.uuid.uuidString] = HealthKitLedgerEntry(
@@ -567,7 +784,7 @@ actor HealthKitSyncEngine {
                     expiresAt: expiry
                 )
             }
-        case .bloodPressure:
+        case .vitals:
             let correlations = try await healthKit.bloodPressureCorrelations(from: rangeStart, to: rangeEnd)
             for correlation in correlations {
                 let key = correlation.uuid.uuidString.lowercased()
@@ -579,6 +796,8 @@ actor HealthKitSyncEngine {
                     expiresAt: expiry
                 )
             }
+        case .body, .mobility, .workouts, .mindfulnessEnvironment, .nutrition:
+            break
         }
         await stateStore.saveLedger(ledger, userId: context.userId, personId: context.personId, metric: metric)
     }
@@ -607,7 +826,131 @@ actor HealthKitSyncEngine {
         guard let end = calendar.date(byAdding: .day, value: 1, to: endDayStart) else {
             throw HealthKitSyncEngineError.repairNeeded(HealthKitSyncMetric.sleep.rawValue)
         }
-        return try await healthKit.sleepAsleepSamples(from: start, to: end)
+        return try await healthKit.sleepSamples(from: start, to: end)
+    }
+
+    private func sleepUpsert(sleepDay: String, totals: HealthKitSleepDayTotals) -> HealthKitSyncOperation {
+        .sleepDayUpsert(
+            sleepDay: sleepDay,
+            totalMinutes: totals.totalMinutes,
+            coreMinutes: totals.coreMinutes,
+            deepMinutes: totals.deepMinutes,
+            remMinutes: totals.remMinutes,
+            unspecifiedAsleepMinutes: totals.unspecifiedAsleepMinutes,
+            awakeMinutes: totals.awakeMinutes,
+            inBedMinutes: totals.inBedMinutes,
+            wristTemperatureCelsius: totals.wristTemperatureCelsius,
+            breathingDisturbanceCount: totals.breathingDisturbanceCount
+        )
+    }
+
+    /// Produces canonical records for every non-specialized type in a consent group.
+    /// Daily values are recomputed from HealthKit for the repair window, so multiple
+    /// sources do not produce duplicate backend rows.
+    private func additionalRepairOperations(
+        group: HealthKitSyncMetric,
+        rangeStart: Date,
+        rangeEnd: Date,
+        timeZone: String
+    ) async throws -> [HealthKitSyncOperation] {
+        var operations: [HealthKitSyncOperation] = []
+        for dataMetric in HealthKitDataMetric.metrics(for: group) {
+            switch dataMetric.storage {
+            case .hourly, .sleepDay, .bloodPressure:
+                continue
+            case .dailyNumeric:
+                operations += try await dailyMetricOperations(
+                    metric: dataMetric,
+                    from: rangeStart,
+                    to: rangeEnd,
+                    timeZone: timeZone
+                )
+            case .bloodGlucose:
+                let samples = try await healthKit.quantitySamples(for: dataMetric, from: rangeStart, to: rangeEnd)
+                guard let unit = dataMetric.unit else { continue }
+                operations += samples.map {
+                    .bloodGlucoseUpsert(
+                        sourceSampleKey: $0.uuid.uuidString.lowercased(),
+                        measuredAtUtc: isoInstant($0.startDate),
+                        valueMgDl: $0.quantity.doubleValue(for: unit)
+                    )
+                }
+            case .workout:
+                let workouts = try await healthKit.workouts(from: rangeStart, to: rangeEnd)
+                operations += workouts.map { workoutUpsert($0) }
+            }
+        }
+        return operations
+    }
+
+    private func dailyMetricOperations(
+        metric: HealthKitDataMetric,
+        from start: Date,
+        to end: Date,
+        timeZone: String
+    ) async throws -> [HealthKitSyncOperation] {
+        if metric == .mindfulMinutes {
+            let sessions = try await healthKit.mindfulSessions(from: start, to: end)
+            let grouped = Dictionary(grouping: sessions, by: { localDay(for: $0.endDate, timeZone: timeZone) })
+            return grouped.map { day, values in
+                .dailyMetricUpsert(
+                    healthMetric: metric,
+                    localDay: day,
+                    sumValue: values.reduce(0) { $0 + $1.endDate.timeIntervalSince($1.startDate) / 60 },
+                    averageValue: nil,
+                    minimumValue: nil,
+                    maximumValue: nil,
+                    latestValue: nil,
+                    sampleCount: values.count
+                )
+            }
+        }
+        guard let unit = metric.unit else { return [] }
+        let samples = try await healthKit.quantitySamples(for: metric, from: start, to: end)
+        let grouped = Dictionary(grouping: samples, by: { localDay(for: $0.endDate, timeZone: timeZone) })
+        return grouped.compactMap { day, values in
+            let quantities = values.map { $0.quantity.doubleValue(for: unit) }
+            guard !quantities.isEmpty else { return nil }
+            switch metric.aggregation {
+            case .sum:
+                return .dailyMetricUpsert(healthMetric: metric, localDay: day, sumValue: quantities.reduce(0, +), averageValue: nil, minimumValue: nil, maximumValue: nil, latestValue: nil, sampleCount: quantities.count)
+            case .statistics:
+                guard let latest = values.max(by: { $0.endDate < $1.endDate }) else { return nil }
+                return .dailyMetricUpsert(healthMetric: metric, localDay: day, sumValue: nil, averageValue: quantities.reduce(0, +) / Double(quantities.count), minimumValue: quantities.min(), maximumValue: quantities.max(), latestValue: latest.quantity.doubleValue(for: unit), sampleCount: quantities.count)
+            case .latest:
+                guard let latest = values.max(by: { $0.endDate < $1.endDate }) else { return nil }
+                return .dailyMetricUpsert(healthMetric: metric, localDay: day, sumValue: nil, averageValue: nil, minimumValue: nil, maximumValue: nil, latestValue: latest.quantity.doubleValue(for: unit), sampleCount: quantities.count)
+            }
+        }
+    }
+
+    private func workoutUpsert(_ workout: HKWorkout) -> HealthKitSyncOperation {
+        let distance = workout.totalDistance?.doubleValue(for: .meter())
+        let activeEnergy = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)
+        let energy = activeEnergy.flatMap { workout.statistics(for: $0)?.sumQuantity()?.doubleValue(for: .kilocalorie()) }
+        let heartRate = HKQuantityType.quantityType(forIdentifier: .heartRate)
+        let averageHeartRate = heartRate.flatMap { workout.statistics(for: $0)?.averageQuantity()?.doubleValue(for: HKUnit.count().unitDivided(by: .minute())) }
+        let maximumHeartRate = heartRate.flatMap { workout.statistics(for: $0)?.maximumQuantity()?.doubleValue(for: HKUnit.count().unitDivided(by: .minute())) }
+        return .workoutUpsert(
+            sourceSampleKey: workout.uuid.uuidString.lowercased(),
+            workoutType: "\(workout.workoutActivityType.rawValue)",
+            startedAtUtc: isoInstant(workout.startDate),
+            endedAtUtc: isoInstant(workout.endDate),
+            durationSeconds: max(0, Int(workout.duration.rounded())),
+            activeEnergyKcal: energy,
+            distanceMeters: distance,
+            averageHeartRateBpm: averageHeartRate,
+            maximumHeartRateBpm: maximumHeartRate
+        )
+    }
+
+    private func localDay(for date: Date, timeZone: String) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: timeZone) ?? TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
     }
 
     private func isoHour(_ date: Date) -> String {

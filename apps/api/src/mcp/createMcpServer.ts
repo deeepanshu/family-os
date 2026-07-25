@@ -1,16 +1,17 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { HEALTHKIT_METRIC_KEYS } from "@family-os/shared";
 import { z } from "zod";
 import type { AppConfig } from "../config";
 import type { McpCallerContext, HealthMcpReadService } from "./HealthMcpReadService";
 import { encodeCappedJson, withTimeout } from "./responseCap";
 import { toSafeToolErrorMessage } from "./toolErrors";
 
-const healthMetricSchema = z.enum(["steps", "sleep", "blood_pressure"]);
+const healthMetricSchema = z.enum(HEALTHKIT_METRIC_KEYS);
 const granularitySchema = z.enum(["hourly", "daily"]);
 
 const getHealthDataInput = {
   personId: z.string().uuid().describe("Untrusted profile ID from list_authorized_profiles"),
-  healthMetric: healthMetricSchema.describe("Allowlisted metric: steps, sleep, or blood_pressure"),
+  healthMetric: healthMetricSchema.describe("Allowlisted Family OS HealthKit metric"),
   rangeDays: z.number().int().min(1).max(90).describe("Number of local days to include, inclusive of today"),
   granularity: granularitySchema
     .optional()
@@ -59,7 +60,7 @@ export function createFamilyOsMcpServer(options: {
     {
       title: "Get health data",
       description:
-        "Returns bounded, metric-specific health data for one authorized profile. Steps: daily or hourly series. Sleep: daily duration in hours. Blood pressure: daily reading table. Always includes coverage and freshness. Informational only — not medical advice, diagnosis, or treatment guidance.",
+        "Returns bounded, metric-specific health data for one authorized profile. Steps support hourly or daily series; daily metrics include aggregate statistics; sleep includes stages; blood pressure, glucose, and workouts return bounded tables. Always includes coverage and freshness. Informational only, not medical advice, diagnosis, or treatment guidance.",
       inputSchema: getHealthDataInput
     },
     async (args) => {

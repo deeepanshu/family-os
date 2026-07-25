@@ -322,7 +322,10 @@
 			<key>buildActionMask</key>
 			<string>2147483647</string>
 			<key>files</key>
-			<array/>
+			<array>
+				<string>DE7000000000000000000013</string>
+				<string>DE7000000000000000000014</string>
+			</array>
 			<key>isa</key>
 			<string>PBXFrameworksBuildPhase</string>
 			<key>runOnlyForDeploymentPostprocessing</key>
@@ -565,6 +568,7 @@
 		<dict>
 			<key>children</key>
 			<array>
+				<string>DE7000000000000000000001</string>
 				<string>DE1000000000000000000017</string>
 				<string>DE6000000000000000000011</string>
 				<string>DE6000000000000000000012</string>
@@ -598,6 +602,8 @@
 				<string>DE0AA0000000000000000002</string>
 				<string>DE1000000000000000000016</string>
 				<string>DE1000000000000000000019</string>
+				<string>DE7000000000000000000020</string>
+				<string>DE7000000000000000000021</string>
 			</array>
 			<key>isa</key>
 			<string>PBXGroup</string>
@@ -654,6 +660,7 @@
 				<string>DE1000000000000000000060</string>
 				<string>DE1000000000000000000020</string>
 				<string>DE1000000000000000000070</string>
+				<string>DE7000000000000000000030</string>
 			</array>
 			<key>buildRules</key>
 			<array/>
@@ -669,6 +676,11 @@
 			<string>DE1000000000000000000010</string>
 			<key>productType</key>
 			<string>com.apple.product-type.application</string>
+			<key>packageProductDependencies</key>
+			<array>
+				<string>DE7000000000000000000011</string>
+				<string>DE7000000000000000000012</string>
+			</array>
 		</dict>
 		<key>DE1000000000000000000050</key>
 		<dict>
@@ -716,6 +728,10 @@
 			<array>
 				<string>DE1000000000000000000040</string>
 				<string>DE5000000000000000000011</string>
+			</array>
+			<key>packageReferences</key>
+			<array>
+				<string>DE7000000000000000000010</string>
 			</array>
 		</dict>
 		<key>DE1000000000000000000060</key>
@@ -766,6 +782,7 @@
 				<string>DE6000000000000000000002</string>
 				<string>DE6000000000000000000003</string>
 				<string>DE6000000000000000000004</string>
+				<string>DE7000000000000000000002</string>
 			</array>
 			<key>isa</key>
 			<string>PBXSourcesBuildPhase</string>
@@ -779,6 +796,7 @@
 			<key>files</key>
 			<array>
 				<string>DE0AA0000000000000000001</string>
+				<string>DE7000000000000000000022</string>
 			</array>
 			<key>isa</key>
 			<string>PBXResourcesBuildPhase</string>
@@ -876,7 +894,7 @@
 				<key>COPY_PHASE_STRIP</key>
 				<string>NO</string>
 				<key>DEBUG_INFORMATION_FORMAT</key>
-				<string>dwarf</string>
+				<string>dwarf-with-dsym</string>
 				<key>ENABLE_STRICT_OBJC_MSGSEND</key>
 				<string>YES</string>
 				<key>ENABLE_TESTABILITY</key>
@@ -1083,6 +1101,11 @@
 				<string>6.0</string>
 				<key>TARGETED_DEVICE_FAMILY</key>
 				<string>1,2</string>
+				<key>OTHER_LDFLAGS</key>
+				<array>
+					<string>$(inherited)</string>
+					<string>-ObjC</string>
+				</array>
 			</dict>
 			<key>isa</key>
 			<string>XCBuildConfiguration</string>
@@ -1138,6 +1161,11 @@
 				<string>6.0</string>
 				<key>TARGETED_DEVICE_FAMILY</key>
 				<string>1,2</string>
+				<key>OTHER_LDFLAGS</key>
+				<array>
+					<string>$(inherited)</string>
+					<string>-ObjC</string>
+				</array>
 			</dict>
 			<key>isa</key>
 			<string>XCBuildConfiguration</string>
@@ -1207,17 +1235,6 @@
 			<string>sourcecode.swift</string>
 			<key>path</key>
 			<string>FamilyView.swift</string>
-			<key>sourceTree</key>
-			<string>&lt;group&gt;</string>
-		</dict>
-		<key>DE3000000000000000000008</key>
-		<dict>
-			<key>isa</key>
-			<string>PBXFileReference</string>
-			<key>lastKnownFileType</key>
-			<string>sourcecode.swift</string>
-			<key>path</key>
-			<string>LogReadingSheet.swift</string>
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
@@ -1476,33 +1493,33 @@
 			<string>PBXBuildFile</string>
 		</dict>
 		<key>DE6000000000000000000001</key>
-			<dict>
-				<key>fileRef</key>
-				<string>DE6000000000000000000011</string>
-				<key>isa</key>
-				<string>PBXBuildFile</string>
-			</dict>
+		<dict>
+			<key>fileRef</key>
+			<string>DE6000000000000000000011</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
 		<key>DE6000000000000000000002</key>
-			<dict>
-				<key>fileRef</key>
-				<string>DE6000000000000000000012</string>
-				<key>isa</key>
-				<string>PBXBuildFile</string>
-			</dict>
+		<dict>
+			<key>fileRef</key>
+			<string>DE6000000000000000000012</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
 		<key>DE6000000000000000000003</key>
-			<dict>
-				<key>fileRef</key>
-				<string>DE6000000000000000000013</string>
-				<key>isa</key>
-				<string>PBXBuildFile</string>
-			</dict>
+		<dict>
+			<key>fileRef</key>
+			<string>DE6000000000000000000013</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
 		<key>DE6000000000000000000004</key>
-			<dict>
-				<key>fileRef</key>
-				<string>DE6000000000000000000014</string>
-				<key>isa</key>
-				<string>PBXBuildFile</string>
-			</dict>
+		<dict>
+			<key>fileRef</key>
+			<string>DE6000000000000000000014</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
 		<key>DE4000000000000000000011</key>
 		<dict>
 			<key>isa</key>
@@ -1548,49 +1565,49 @@
 			<string>&lt;group&gt;</string>
 		</dict>
 		<key>DE6000000000000000000011</key>
-			<dict>
-				<key>isa</key>
-				<string>PBXFileReference</string>
-				<key>lastKnownFileType</key>
-				<string>sourcecode.swift</string>
-				<key>path</key>
-				<string>HealthKit/HealthKitSyncStateStore.swift</string>
-				<key>sourceTree</key>
-				<string>&lt;group&gt;</string>
-			</dict>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>HealthKit/HealthKitSyncStateStore.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
 		<key>DE6000000000000000000012</key>
-			<dict>
-				<key>isa</key>
-				<string>PBXFileReference</string>
-				<key>lastKnownFileType</key>
-				<string>sourcecode.swift</string>
-				<key>path</key>
-				<string>HealthKit/HealthKitSyncEngine.swift</string>
-				<key>sourceTree</key>
-				<string>&lt;group&gt;</string>
-			</dict>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>HealthKit/HealthKitSyncEngine.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
 		<key>DE6000000000000000000013</key>
-			<dict>
-				<key>isa</key>
-				<string>PBXFileReference</string>
-				<key>lastKnownFileType</key>
-				<string>sourcecode.swift</string>
-				<key>path</key>
-				<string>HealthKit/HealthKitBackgroundSyncCoordinator.swift</string>
-				<key>sourceTree</key>
-				<string>&lt;group&gt;</string>
-			</dict>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>HealthKit/HealthKitBackgroundSyncCoordinator.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
 		<key>DE6000000000000000000014</key>
-			<dict>
-				<key>isa</key>
-				<string>PBXFileReference</string>
-				<key>lastKnownFileType</key>
-				<string>sourcecode.swift</string>
-				<key>path</key>
-				<string>HealthKit/HealthKitSessionProvider.swift</string>
-				<key>sourceTree</key>
-				<string>&lt;group&gt;</string>
-			</dict>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>HealthKit/HealthKitSessionProvider.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
 		<key>DE5000000000000000000001</key>
 		<dict>
 			<key>isa</key>
@@ -1830,6 +1847,140 @@
 			<string>XCBuildConfiguration</string>
 			<key>name</key>
 			<string>Release</string>
+		</dict>
+		<key>DE7000000000000000000001</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>CrashReporting.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>DE7000000000000000000002</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>DE7000000000000000000001</string>
+		</dict>
+		<key>DE7000000000000000000020</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>text.plist.xml</string>
+			<key>path</key>
+			<string>GoogleService-Info.plist.example</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>DE7000000000000000000010</key>
+		<dict>
+			<key>isa</key>
+			<string>XCRemoteSwiftPackageReference</string>
+			<key>repositoryURL</key>
+			<string>https://github.com/firebase/firebase-ios-sdk.git</string>
+			<key>requirement</key>
+			<dict>
+				<key>kind</key>
+				<string>upToNextMajorVersion</string>
+				<key>minimumVersion</key>
+				<string>12.0.0</string>
+			</dict>
+		</dict>
+		<key>DE7000000000000000000011</key>
+		<dict>
+			<key>isa</key>
+			<string>XCSwiftPackageProductDependency</string>
+			<key>package</key>
+			<string>DE7000000000000000000010</string>
+			<key>productName</key>
+			<string>FirebaseCore</string>
+		</dict>
+		<key>DE7000000000000000000012</key>
+		<dict>
+			<key>isa</key>
+			<string>XCSwiftPackageProductDependency</string>
+			<key>package</key>
+			<string>DE7000000000000000000010</string>
+			<key>productName</key>
+			<string>FirebaseCrashlytics</string>
+		</dict>
+		<key>DE7000000000000000000013</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>productRef</key>
+			<string>DE7000000000000000000011</string>
+		</dict>
+		<key>DE7000000000000000000014</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>productRef</key>
+			<string>DE7000000000000000000012</string>
+		</dict>
+		<key>DE7000000000000000000030</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXShellScriptBuildPhase</string>
+			<key>buildActionMask</key>
+			<string>2147483647</string>
+			<key>alwaysOutOfDate</key>
+			<string>1</string>
+			<key>files</key>
+			<array/>
+			<key>inputFileListPaths</key>
+			<array/>
+			<key>inputPaths</key>
+			<array>
+				<string>${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}</string>
+				<string>${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${PRODUCT_NAME}</string>
+				<string>${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Info.plist</string>
+				<string>$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GoogleService-Info.plist</string>
+				<string>$(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)</string>
+				<string>${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${PRODUCT_NAME}.debug.dylib</string>
+			</array>
+			<key>name</key>
+			<string>Upload Crashlytics dSYMs</string>
+			<key>outputFileListPaths</key>
+			<array/>
+			<key>outputPaths</key>
+			<array/>
+			<key>runOnlyForDeploymentPostprocessing</key>
+			<string>0</string>
+			<key>shellPath</key>
+			<string>/bin/sh</string>
+			<key>shellScript</key>
+			<string># Upload dSYMs to Firebase Crashlytics (Release archives / CI).
+GSP="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/GoogleService-Info.plist"
+if [ ! -f "$GSP" ]; then
+  echo "note: GoogleService-Info.plist not in bundle; skipping Crashlytics dSYM upload"
+  exit 0
+fi
+"${BUILD_DIR%/Build/*}/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/run"
+</string>
+		</dict>
+		<key>DE7000000000000000000021</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>text.plist.xml</string>
+			<key>path</key>
+			<string>GoogleService-Info.plist</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>DE7000000000000000000022</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>DE7000000000000000000021</string>
 		</dict>
 	</dict>
 	<key>rootObject</key>

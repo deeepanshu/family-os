@@ -1,9 +1,7 @@
-import type { BloodGlucoseReading, BloodPressureReading } from "@family-os/shared";
+import type { BloodPressureReading } from "@family-os/shared";
 import { HttpError } from "../../errors";
-import type { CreateBloodGlucoseInput, UpdateBloodGlucoseInput } from "../families";
 import { PostgresRepositoryContext } from "./context";
-import { mapBloodGlucose, mapBloodPressure } from "./mappers";
-import { requireRow } from "./types";
+import { mapBloodPressure } from "./mappers";
 
 export class PostgresReadingStore {
   constructor(private readonly context: PostgresRepositoryContext) {}
@@ -12,22 +10,20 @@ export class PostgresReadingStore {
     const current = await this.context.requireActiveMember(actorUserId);
     const rows = personId
       ? await this.context.sql`
-          select *
-          from blood_pressure_readings
-          where family_id = ${current.family.id}
-            and person_id = ${personId}
-            and source = 'healthkit'
-            and deleted_at is null
-          order by measured_at desc
+          select r.*, s.user_id as recorded_by_user_id, 'healthkit'::text as source
+          from health_blood_pressure_readings r
+          join healthkit_sync_profile_settings s on s.person_id = r.person_id
+          where r.family_id = ${current.family.id}
+            and r.person_id = ${personId}
+          order by r.measured_at desc
           limit ${limit}
         `
       : await this.context.sql`
-          select *
-          from blood_pressure_readings
-          where family_id = ${current.family.id}
-            and source = 'healthkit'
-            and deleted_at is null
-          order by measured_at desc
+          select r.*, s.user_id as recorded_by_user_id, 'healthkit'::text as source
+          from health_blood_pressure_readings r
+          join healthkit_sync_profile_settings s on s.person_id = r.person_id
+          where r.family_id = ${current.family.id}
+          order by r.measured_at desc
           limit ${limit}
         `;
     return rows.map(mapBloodPressure);
@@ -36,134 +32,15 @@ export class PostgresReadingStore {
   async getBloodPressure(actorUserId: string, readingId: string): Promise<BloodPressureReading> {
     const current = await this.context.requireActiveMember(actorUserId);
     const [reading] = await this.context.sql`
-      select *
-      from blood_pressure_readings
-      where id = ${readingId}
-        and family_id = ${current.family.id}
-        and source = 'healthkit'
-        and deleted_at is null
+      select r.*, s.user_id as recorded_by_user_id, 'healthkit'::text as source
+      from health_blood_pressure_readings r
+      join healthkit_sync_profile_settings s on s.person_id = r.person_id
+      where r.id = ${readingId}
+        and r.family_id = ${current.family.id}
     `;
     if (!reading) {
       throw new HttpError(404, "bp_reading_not_found", "Blood pressure reading was not found.");
     }
     return mapBloodPressure(reading);
   }
-
-  async createBloodGlucose(input: CreateBloodGlucoseInput): Promise<BloodGlucoseReading> {
-    const current = await this.context.requireActiveMember(input.actorUserId);
-    await this.context.requireProfileInFamily(input.personId, current.family.id);
-    const [reading] = await this.context.sql`
-      insert into blood_glucose_readings
-        (family_id, person_id, recorded_by_user_id, value, unit, context, measured_at, notes)
-      values (
-        ${current.family.id},
-        ${input.personId},
-        ${input.actorUserId},
-        ${input.value},
-        'mg/dL',
-        ${input.context},
-        ${input.measuredAt},
-        ${input.notes ?? null}
-      )
-      returning *
-    `;
-    const createdReading = requireRow(reading, "Failed to create blood sugar reading.");
-    await this.context.audit({
-      familyId: current.family.id,
-      actorUserId: input.actorUserId,
-      action: "blood_glucose.created",
-      resourceType: "blood_glucose_reading",
-      resourceId: createdReading.id,
-      metadata: { personId: input.personId }
-    });
-    return mapBloodGlucose(createdReading);
-  }
-
-  async listBloodGlucose(actorUserId: string, personId?: string, limit = 50): Promise<BloodGlucoseReading[]> {
-    const current = await this.context.requireActiveMember(actorUserId);
-    const rows = personId
-      ? await this.context.sql`
-          select *
-          from blood_glucose_readings
-          where family_id = ${current.family.id}
-            and person_id = ${personId}
-            and deleted_at is null
-          order by measured_at desc
-          limit ${limit}
-        `
-      : await this.context.sql`
-          select *
-          from blood_glucose_readings
-          where family_id = ${current.family.id}
-            and deleted_at is null
-          order by measured_at desc
-          limit ${limit}
-        `;
-    return rows.map(mapBloodGlucose);
-  }
-
-  async getBloodGlucose(actorUserId: string, readingId: string): Promise<BloodGlucoseReading> {
-    const current = await this.context.requireActiveMember(actorUserId);
-    const [reading] = await this.context.sql`
-      select *
-      from blood_glucose_readings
-      where id = ${readingId}
-        and family_id = ${current.family.id}
-        and deleted_at is null
-    `;
-    if (!reading) {
-      throw new HttpError(404, "glucose_reading_not_found", "Blood sugar reading was not found.");
-    }
-    return mapBloodGlucose(reading);
-  }
-
-  async updateBloodGlucose(
-    actorUserId: string,
-    readingId: string,
-    input: UpdateBloodGlucoseInput
-  ): Promise<BloodGlucoseReading> {
-    const current = await this.context.requireActiveMember(actorUserId);
-    const existing = await this.getBloodGlucose(actorUserId, readingId);
-    if (existing.recordedByUserId !== actorUserId && current.membership.role !== "manager") {
-      throw new HttpError(403, "reading_owner_or_manager_required", "Only the recorder or a manager can change this reading.");
-    }
-    const [reading] = await this.context.sql`
-      update blood_glucose_readings
-      set
-        value = coalesce(${input.value ?? null}, value),
-        context = coalesce(${input.context ?? null}, context),
-        measured_at = coalesce(${input.measuredAt ?? null}, measured_at),
-        notes = coalesce(${input.notes ?? null}, notes)
-      where id = ${readingId}
-      returning *
-    `;
-    if (!reading) {
-      throw new HttpError(404, "glucose_reading_not_found", "Blood sugar reading was not found.");
-    }
-    await this.context.audit({
-      familyId: current.family.id,
-      actorUserId,
-      action: "blood_glucose.updated",
-      resourceType: "blood_glucose_reading",
-      resourceId: readingId
-    });
-    return mapBloodGlucose(reading);
-  }
-
-  async deleteBloodGlucose(actorUserId: string, readingId: string): Promise<void> {
-    const current = await this.context.requireActiveMember(actorUserId);
-    const existing = await this.getBloodGlucose(actorUserId, readingId);
-    if (existing.recordedByUserId !== actorUserId && current.membership.role !== "manager") {
-      throw new HttpError(403, "reading_owner_or_manager_required", "Only the recorder or a manager can delete this reading.");
-    }
-    await this.context.sql`update blood_glucose_readings set deleted_at = now() where id = ${readingId}`;
-    await this.context.audit({
-      familyId: current.family.id,
-      actorUserId,
-      action: "blood_glucose.deleted",
-      resourceType: "blood_glucose_reading",
-      resourceId: readingId
-    });
-  }
 }
-

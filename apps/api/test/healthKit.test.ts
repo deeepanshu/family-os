@@ -63,12 +63,26 @@ async function putSettings(
     body: JSON.stringify({
       personId: profileId,
       consentVersion: "2026-07-25",
-      enabledMetrics: ["steps", "sleep", "blood_pressure"],
+      enabledGroups: ["activity", "sleep", "vitals"],
       healthTimezone: "UTC",
       installationId,
       ...overrides
     })
   });
+}
+
+function sleepDayOperation(sleepDay: string) {
+  return {
+    kind: "sleep_day_upsert",
+    sleepDay,
+    totalMinutes: 400,
+    coreMinutes: 200,
+    deepMinutes: 80,
+    remMinutes: 100,
+    unspecifiedAsleepMinutes: 20,
+    awakeMinutes: 15,
+    inBedMinutes: 430
+  };
 }
 
 describe("HealthKit background sync", () => {
@@ -86,7 +100,7 @@ describe("HealthKit background sync", () => {
         body: JSON.stringify({
           installationId,
           personId: profileId,
-          metric: "steps",
+          group: "activity",
           timezoneVersion: 1
         })
       });
@@ -128,7 +142,7 @@ describe("HealthKit background sync", () => {
       personId: profileId,
       healthTimezone: "UTC",
       healthTimezoneVersion: 1,
-      enabledMetrics: ["steps", "sleep", "blood_pressure"],
+      enabledGroups: ["activity", "sleep", "vitals"],
       activeInstallationId: installationId
     });
 
@@ -162,7 +176,7 @@ describe("HealthKit background sync", () => {
       syncId,
       accepted: true,
       operationCount: 2,
-      metricsAffected: expect.arrayContaining(["steps", "blood_pressure"])
+      groupsAffected: expect.arrayContaining(["activity", "vitals"])
     });
     expect(JSON.stringify(firstBody)).not.toContain("118");
     expect(JSON.stringify(firstBody)).not.toContain("842");
@@ -183,8 +197,8 @@ describe("HealthKit background sync", () => {
         headers: { authorization: `Bearer ${token}` }
       })
     ).json();
-    const stepsState = status.data.metrics.find((m: { metric: string }) => m.metric === "steps");
-    const sleepState = status.data.metrics.find((m: { metric: string }) => m.metric === "sleep");
+    const stepsState = status.data.groups.find((g: { group: string }) => g.group === "activity");
+    const sleepState = status.data.groups.find((g: { group: string }) => g.group === "sleep");
     expect(stepsState.lastSuccessfulAt).toBeTruthy();
     expect(sleepState.lastSuccessfulAt).toBeFalsy();
   });
@@ -211,7 +225,7 @@ describe("HealthKit background sync", () => {
     });
 
     await putSettings(api, token, profileId, {
-      enabledMetrics: ["sleep"],
+      enabledGroups: ["sleep"],
       replaceActiveInstallation: false
     });
     const disabled = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
@@ -275,7 +289,7 @@ describe("HealthKit background sync", () => {
       body: JSON.stringify({
         installationId,
         personId: profileId,
-        metric: "steps",
+        group: "activity",
         timezoneVersion: 1
       })
     });
@@ -349,7 +363,7 @@ describe("HealthKit background sync", () => {
         body: JSON.stringify({
           installationId,
           personId: profileId,
-          metric: "sleep",
+          group: "sleep",
           timezoneVersion: 1
         })
       })
@@ -368,7 +382,7 @@ describe("HealthKit background sync", () => {
         timezoneVersion: 1,
         repairId: created.data.repairId,
         chunkIndex: 0,
-        operations: [{ kind: "sleep_day_upsert", sleepDay: "2019-01-01", durationMinutes: 400 }]
+        operations: [sleepDayOperation("2019-01-01")]
       })
     });
     expect(outside.status).toBe(400);
@@ -387,7 +401,7 @@ describe("HealthKit background sync", () => {
         timezoneVersion: 1,
         repairId: created.data.repairId,
         chunkIndex: 0,
-        operations: [{ kind: "sleep_day_upsert", sleepDay: insideDay, durationMinutes: 400 }]
+        operations: [sleepDayOperation(insideDay)]
       })
     });
     expect(ok.status).toBe(200);
@@ -405,7 +419,7 @@ describe("HealthKit background sync", () => {
         body: JSON.stringify({
           installationId,
           personId: profileId,
-          metric: "steps",
+          group: "activity",
           timezoneVersion: 1
         })
       })
@@ -445,7 +459,7 @@ describe("HealthKit background sync", () => {
     });
     expect(okChunk.status).toBe(200);
 
-    await putSettings(api, token, profileId, { enabledMetrics: ["sleep"] });
+    await putSettings(api, token, profileId, { enabledGroups: ["sleep"] });
     const completeAfterDisable = await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs/${repairId}/complete`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },

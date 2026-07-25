@@ -21,6 +21,18 @@ struct HealthKitAnchoredChangePage {
     var newAnchor: HKQueryAnchor
 }
 
+struct HealthKitSleepDayTotals {
+    var totalMinutes: Int = 0
+    var coreMinutes: Int = 0
+    var deepMinutes: Int = 0
+    var remMinutes: Int = 0
+    var unspecifiedAsleepMinutes: Int = 0
+    var awakeMinutes: Int = 0
+    var inBedMinutes: Int = 0
+    var wristTemperatureCelsius: Double?
+    var breathingDisturbanceCount: Int?
+}
+
 struct HealthKitClient {
     private let store = HKHealthStore()
 
@@ -28,24 +40,59 @@ struct HealthKitClient {
         HKHealthStore.isHealthDataAvailable()
     }
 
-    func requestAuthorization() async throws {
+    func requestAuthorization(for metrics: Set<HealthKitSyncMetric>) async throws {
         guard isAvailable else { throw HealthKitClientError.unavailable }
-        try await store.requestAuthorization(toShare: [], read: Set(readTypes()))
+        let types = readTypes(for: metrics)
+        guard !types.isEmpty else { throw HealthKitClientError.sampleTypeUnavailable }
+        let metricSummary = metrics.map(\.rawValue).sorted().joined(separator: ",")
+        CrashReporting.setCustomValues([
+            "healthkit_stage": "authorization_requested",
+            "healthkit_metrics": metricSummary
+        ])
+        CrashReporting.log("healthkit.authorization_requested metrics=\(metricSummary)")
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            store.requestAuthorization(toShare: nil, read: types) { success, error in
+                if let error {
+                    CrashReporting.setCustomValues(["healthkit_stage": "authorization_failed"])
+                    CrashReporting.log("healthkit.authorization_failed")
+                    continuation.resume(throwing: error)
+                } else if success {
+                    CrashReporting.setCustomValues(["healthkit_stage": "authorization_succeeded"])
+                    CrashReporting.log("healthkit.authorization_succeeded")
+                    continuation.resume()
+                } else {
+                    CrashReporting.setCustomValues(["healthkit_stage": "authorization_unavailable"])
+                    CrashReporting.log("healthkit.authorization_unavailable")
+                    continuation.resume(throwing: HealthKitClientError.unavailable)
+                }
+            }
+        }
     }
 
-    func enableBackgroundDelivery() async throws {
+    func enableBackgroundDelivery(for metrics: Set<HealthKitSyncMetric>) async throws {
         guard isAvailable else { throw HealthKitClientError.unavailable }
-        for type in observerTypes() {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        for type in backgroundDeliveryTypes(for: metrics) {
+            CrashReporting.setCustomValues(["healthkit_stage": "background_delivery_requested"])
+            CrashReporting.log("healthkit.background_delivery_requested type=\(type.identifier)")
+            do {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 store.enableBackgroundDelivery(for: type, frequency: .immediate) { success, error in
                     if let error {
+                        CrashReporting.log("healthkit.background_delivery_unavailable type=\(type.identifier)")
                         continuation.resume(throwing: error)
                     } else if success {
+                        CrashReporting.log("healthkit.background_delivery_succeeded type=\(type.identifier)")
                         continuation.resume()
                     } else {
+                        CrashReporting.log("healthkit.background_delivery_unavailable type=\(type.identifier)")
                         continuation.resume(throwing: HealthKitClientError.unavailable)
                     }
                 }
+                }
+            } catch {
+                // Background delivery is advisory. Foreground sync and the next app launch
+                // still reconcile this type, so an unsupported type must not block consent.
+                continue
             }
         }
     }
@@ -86,13 +133,51 @@ struct HealthKitClient {
 
     func sampleType(for metric: HealthKitSyncMetric) throws -> HKSampleType {
         switch metric {
-        case .steps:
+        case .activity:
             return try stepQuantityType()
         case .sleep:
             return try sleepType()
-        case .bloodPressure:
+        case .vitals:
             return try bloodPressureType()
+        default:
+            guard let type = HealthKitDataMetric.metrics(for: metric).compactMap(\.sampleType).first else {
+                throw HealthKitClientError.sampleTypeUnavailable
+            }
+            return type
         }
+    }
+
+    /// Blood-pressure correlations do not support background delivery. Their
+    /// systolic component is written with every BP correlation and wakes a
+    /// sync that reads the complete correlation.
+    func backgroundDeliveryType(for metric: HealthKitSyncMetric) throws -> HKSampleType {
+        switch metric {
+        case .vitals:
+            guard let type = HKQuantityType.quantityType(forIdentifier: .bloodPressureSystolic) else {
+                throw HealthKitClientError.sampleTypeUnavailable
+            }
+            return type
+        case .activity, .sleep:
+            return try sampleType(for: metric)
+        default:
+            guard let type = backgroundDeliveryTypes(for: [metric]).first else {
+                throw HealthKitClientError.sampleTypeUnavailable
+            }
+            return type
+        }
+    }
+
+    func backgroundDeliveryTypes(for groups: Set<HealthKitSyncMetric>) -> Set<HKSampleType> {
+        var types = Set(
+            HealthKitDataMetric.allCases
+                .filter { groups.contains($0.group) }
+                .compactMap(\.sampleType)
+                .filter { !($0 is HKCorrelationType) }
+        )
+        if groups.contains(.vitals), let systolic = HKQuantityType.quantityType(forIdentifier: .bloodPressureSystolic) {
+            types.insert(systolic)
+        }
+        return types
     }
 
     func anchoredQuery(
@@ -159,27 +244,80 @@ struct HealthKitClient {
         }
     }
 
-    func sleepAsleepSamples(from start: Date, to end: Date) async throws -> [HKCategorySample] {
+    func sleepSamples(from start: Date, to end: Date) async throws -> [HKCategorySample] {
         let type = try sleepType()
-        // Sleep can start on the preceding local day. Include overlapping samples
-        // and let the caller keep only the requested profile-local sleep days.
         let samples = try await sampleQuery(type: type, since: start, until: end, options: [])
-        return samples.compactMap { sample in
-            guard let category = sample as? HKCategorySample, isAsleep(category.value) else { return nil }
-            return category
-        }
+        return preferredSamples(samples.compactMap { $0 as? HKCategorySample })
     }
 
     func bloodPressureCorrelations(from start: Date, to end: Date) async throws -> [HKCorrelation] {
         let type = try bloodPressureType()
         let samples = try await sampleQuery(type: type, since: start, until: end)
-        return samples.compactMap { $0 as? HKCorrelation }
+        return preferredSamples(samples.compactMap { $0 as? HKCorrelation })
     }
 
     func stepQuantitySamples(from start: Date, to end: Date) async throws -> [HKQuantitySample] {
         let type = try stepQuantityType()
         let samples = try await sampleQuery(type: type, since: start, until: end)
         return samples.compactMap { $0 as? HKQuantitySample }
+    }
+
+    func quantitySamples(for metric: HealthKitDataMetric, from start: Date, to end: Date) async throws -> [HKQuantitySample] {
+        guard let type = metric.sampleType as? HKQuantityType else { return [] }
+        let samples = try await sampleQuery(type: type, since: start, until: end)
+        return preferredSamples(samples.compactMap { $0 as? HKQuantitySample })
+    }
+
+    func samples(for metric: HealthKitDataMetric, from start: Date, to end: Date) async throws -> [HKSample] {
+        guard let type = metric.sampleType else { return [] }
+        return try await sampleQuery(type: type, since: start, until: end)
+    }
+
+    func workouts(from start: Date, to end: Date) async throws -> [HKWorkout] {
+        guard let type = HealthKitDataMetric.workout.sampleType else { return [] }
+        let samples = try await sampleQuery(type: type, since: start, until: end)
+        return preferredSamples(samples.compactMap { $0 as? HKWorkout })
+    }
+
+    func mindfulSessions(from start: Date, to end: Date) async throws -> [HKCategorySample] {
+        guard let type = HealthKitDataMetric.mindfulMinutes.sampleType else { return [] }
+        let samples = try await sampleQuery(type: type, since: start, until: end)
+        return preferredSamples(samples.compactMap { $0 as? HKCategorySample })
+    }
+
+    /// HealthKit may surface equivalent writes from a watch, phone, and third-party
+    /// apps. Keep the highest-priority overlapping source instead of adding both.
+    /// Non-overlapping samples remain, so separate meals or workouts still count.
+    private func preferredSamples<T: HKSample>(_ samples: [T]) -> [T] {
+        let sorted = samples.sorted { lhs, rhs in
+            let lhsRank = sourceRank(lhs)
+            let rhsRank = sourceRank(rhs)
+            if lhsRank != rhsRank { return lhsRank < rhsRank }
+            if lhs.startDate != rhs.startDate { return lhs.startDate < rhs.startDate }
+            return lhs.uuid.uuidString < rhs.uuid.uuidString
+        }
+        var accepted: [T] = []
+        for sample in sorted {
+            let overlapsAccepted = accepted.contains { existing in
+                let startsTogether = abs(existing.startDate.timeIntervalSince(sample.startDate)) < 60
+                let endsTogether = abs(existing.endDate.timeIntervalSince(sample.endDate)) < 60
+                return startsTogether && endsTogether
+                    || (sample.startDate < existing.endDate && existing.startDate < sample.endDate)
+            }
+            if !overlapsAccepted {
+                accepted.append(sample)
+            }
+        }
+        return accepted
+    }
+
+    private func sourceRank(_ sample: HKSample) -> Int {
+        let source = sample.sourceRevision.source
+        let bundle = source.bundleIdentifier.lowercased()
+        let product = sample.sourceRevision.productType?.lowercased() ?? ""
+        if product.contains("watch") { return 0 }
+        if bundle.hasPrefix("com.apple") { return 1 }
+        return 2
     }
 
     func parseBloodPressure(_ correlation: HKCorrelation) -> (systolic: Int, diastolic: Int, pulse: Int?, measuredAt: Date)? {
@@ -203,31 +341,56 @@ struct HealthKitClient {
         return (systolic, diastolic, pulse, correlation.startDate)
     }
 
-    /// Merge overlapping asleep intervals and attribute minutes to profile-local ending day.
-    func sleepDayMinutes(
+    /// Attribute sleep stages to the profile-local calendar day containing the sample end.
+    /// Asleep totals merge intervals so duplicate HealthKit sources do not inflate duration.
+    func sleepDayTotals(
         samples: [HKCategorySample],
         timeZoneIdentifier: String
-    ) -> [String: Int] {
+    ) -> [String: HealthKitSleepDayTotals] {
         guard let timeZone = TimeZone(identifier: timeZoneIdentifier) else { return [:] }
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
 
-        let intervals = samples
-            .map { (start: $0.startDate, end: $0.endDate) }
-            .sorted { $0.start < $1.start }
-        let merged = mergeIntervals(intervals)
-
-        var totals: [String: Int] = [:]
+        var asleepIntervals: [String: [(start: Date, end: Date)]] = [:]
+        var totals: [String: HealthKitSleepDayTotals] = [:]
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = timeZone
         formatter.dateFormat = "yyyy-MM-dd"
 
-        for interval in merged {
-            let minutes = Int((interval.end.timeIntervalSince(interval.start) / 60).rounded())
-            let day = formatter.string(from: interval.end)
-            totals[day, default: 0] += max(0, minutes)
+        for sample in samples {
+            let day = formatter.string(from: sample.endDate)
+            let minutes = max(0, Int((sample.endDate.timeIntervalSince(sample.startDate) / 60).rounded()))
+            var total = totals[day, default: HealthKitSleepDayTotals()]
+            switch sample.value {
+            case HKCategoryValueSleepAnalysis.asleepCore.rawValue:
+                total.coreMinutes += minutes
+                asleepIntervals[day, default: []].append((sample.startDate, sample.endDate))
+            case HKCategoryValueSleepAnalysis.asleepDeep.rawValue:
+                total.deepMinutes += minutes
+                asleepIntervals[day, default: []].append((sample.startDate, sample.endDate))
+            case HKCategoryValueSleepAnalysis.asleepREM.rawValue:
+                total.remMinutes += minutes
+                asleepIntervals[day, default: []].append((sample.startDate, sample.endDate))
+            case HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue:
+                total.unspecifiedAsleepMinutes += minutes
+                asleepIntervals[day, default: []].append((sample.startDate, sample.endDate))
+            case HKCategoryValueSleepAnalysis.awake.rawValue:
+                total.awakeMinutes += minutes
+            case HKCategoryValueSleepAnalysis.inBed.rawValue:
+                total.inBedMinutes += minutes
+            default:
+                break
+            }
+            totals[day] = total
+        }
+        for (day, intervals) in asleepIntervals {
+            var total = totals[day, default: HealthKitSleepDayTotals()]
+            total.totalMinutes = mergeIntervals(intervals).reduce(0) { partial, interval in
+                partial + max(0, Int((interval.end.timeIntervalSince(interval.start) / 60).rounded()))
+            }
+            totals[day] = total
         }
         return totals
     }
@@ -267,31 +430,20 @@ struct HealthKitClient {
         }
     }
 
-    private func readTypes() -> [HKObjectType] {
-        [
-            HKQuantityType.quantityType(forIdentifier: .stepCount),
-            HKQuantityType.quantityType(forIdentifier: .bloodPressureSystolic),
-            HKQuantityType.quantityType(forIdentifier: .bloodPressureDiastolic),
-            HKQuantityType.quantityType(forIdentifier: .heartRate),
-            HKCategoryType.categoryType(forIdentifier: .sleepAnalysis),
-            HKCorrelationType.correlationType(forIdentifier: .bloodPressure)
-        ].compactMap { $0 }
+    private func readTypes(for metrics: Set<HealthKitSyncMetric>) -> Set<HKObjectType> {
+        var types = Set(
+            HealthKitDataMetric.allCases
+                .filter { metrics.contains($0.group) }
+                .compactMap(\.sampleType)
+                .filter { !($0 is HKCorrelationType) }
+        )
+        if metrics.contains(.vitals) {
+            [
+                HKQuantityType.quantityType(forIdentifier: .bloodPressureSystolic),
+                HKQuantityType.quantityType(forIdentifier: .bloodPressureDiastolic)
+            ].compactMap { $0 }.forEach { types.insert($0) }
+        }
+        return types
     }
 
-    private func observerTypes() -> [HKSampleType] {
-        [
-            HKQuantityType.quantityType(forIdentifier: .stepCount),
-            HKCategoryType.categoryType(forIdentifier: .sleepAnalysis),
-            HKCorrelationType.correlationType(forIdentifier: .bloodPressure)
-        ].compactMap { $0 }
-    }
-
-    private func isAsleep(_ value: Int) -> Bool {
-        [
-            HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue,
-            HKCategoryValueSleepAnalysis.asleepCore.rawValue,
-            HKCategoryValueSleepAnalysis.asleepDeep.rawValue,
-            HKCategoryValueSleepAnalysis.asleepREM.rawValue
-        ].contains(value)
-    }
 }

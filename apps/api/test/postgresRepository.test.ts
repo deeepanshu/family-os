@@ -67,14 +67,16 @@ describe("Postgres RLS policies", () => {
         healthkit_repair_chunks,
         healthkit_repairs,
         healthkit_sync_receipts,
-        health_metric_sync_state,
-        healthkit_sync_metrics,
+        healthkit_sync_state,
+        healthkit_sync_groups,
         healthkit_sync_installations,
         healthkit_sync_profile_settings,
         health_step_hours,
         health_sleep_days,
-        blood_glucose_readings,
-        blood_pressure_readings,
+        health_daily_metrics,
+        health_blood_glucose_readings,
+        health_blood_pressure_readings,
+        health_workouts,
         people,
         family_invites,
         family_memberships,
@@ -148,14 +150,16 @@ describe("Postgres repository wiring", () => {
         healthkit_repair_chunks,
         healthkit_repairs,
         healthkit_sync_receipts,
-        health_metric_sync_state,
-        healthkit_sync_metrics,
+        healthkit_sync_state,
+        healthkit_sync_groups,
         healthkit_sync_installations,
         healthkit_sync_profile_settings,
         health_step_hours,
         health_sleep_days,
-        blood_glucose_readings,
-        blood_pressure_readings,
+        health_daily_metrics,
+        health_blood_glucose_readings,
+        health_blood_pressure_readings,
+        health_workouts,
         people,
         family_invites,
         family_memberships,
@@ -189,30 +193,52 @@ describe("Postgres repository wiring", () => {
     });
     expect(accept.status).toBe(200);
 
-    const profile = await (await api.request(`${HEALTH_API_PREFIX}/people`, {
+    const profile = await (await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
       method: "POST",
       headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ displayName: "Mom", relationshipLabel: "Mother" })
+      body: JSON.stringify({ displayName: "Manager" })
     })).json();
 
-    const glucose = await api.request(`${HEALTH_API_PREFIX}/readings/blood-glucose`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${memberToken}`, "content-type": "application/json" },
+    const settings = await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
       body: JSON.stringify({
         personId: profile.data.id,
-        value: 104,
-        context: "fasting",
-        measuredAt: "2026-06-21T10:00:00.000Z"
+        enabledGroups: ["vitals"],
+        healthTimezone: "UTC",
+        installationId: "00000000-0000-4000-8000-000000009010",
+        consentVersion: "healthkit-v1"
       })
     });
-    expect(glucose.status).toBe(201);
+    expect(settings.status).toBe(200);
 
-    const history = await api.request(`${HEALTH_API_PREFIX}/readings/blood-glucose?personId=${profile.data.id}`, {
-      headers: { authorization: `Bearer ${managerToken}` }
+    const sync = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        syncId: "00000000-0000-4000-8000-000000009011",
+        installationId: "00000000-0000-4000-8000-000000009010",
+        personId: profile.data.id,
+        timezoneVersion: 1,
+        operations: [{
+          kind: "blood_glucose_upsert",
+          sourceSampleKey: "00000000-0000-4000-8000-000000009012",
+          measuredAtUtc: "2026-06-21T10:00:00.000Z",
+          valueMgDl: 104
+        }]
+      })
     });
-    await expect(history.json()).resolves.toMatchObject({
-      data: [{ value: 104, personId: profile.data.id }]
-    });
+    expect(sync.status).toBe(200);
+
+    const repository = PostgresFamilyRepository.fromDatabaseUrl(databaseUrl, { syncLocalAuthUsers: true });
+    const readings = await repository.listHealthKitBloodGlucose(
+      managerId,
+      profile.data.id,
+      "2026-06-21T00:00:00.000Z",
+      "2026-06-22T00:00:00.000Z",
+      10
+    );
+    expect(readings).toMatchObject([{ value: 104, personId: profile.data.id, source: "healthkit" }]);
   });
 
   it("returns canonical ISO sleep days from Postgres", async () => {
@@ -232,14 +258,16 @@ describe("Postgres repository wiring", () => {
       values (${profileId}, ${familyId}, ${managerId}, ${managerId}, 'Me', 'Self', 'active')
     `;
     await sql`
-      insert into health_sleep_days (family_id, person_id, sleep_day, timezone_version, duration_minutes)
-      values (${familyId}, ${profileId}, '2026-07-25'::date, 1, 480)
+      insert into health_sleep_days (
+        family_id, person_id, sleep_day, timezone_version, total_minutes,
+        core_minutes, deep_minutes, rem_minutes, unspecified_asleep_minutes, awake_minutes, in_bed_minutes
+      ) values (${familyId}, ${profileId}, '2026-07-25'::date, 1, 480, 200, 100, 100, 80, 0, 480)
     `;
 
     const repository = PostgresFamilyRepository.fromDatabaseUrl(databaseUrl, { syncLocalAuthUsers: true });
     const rows = await repository.listSleepDays(managerId, profileId, "2026-07-19", "2026-07-25");
     expect(rows).toEqual([
-      expect.objectContaining({ sleepDay: "2026-07-25", durationMinutes: 480, timezoneVersion: 1 })
+      expect.objectContaining({ sleepDay: "2026-07-25", totalMinutes: 480, timezoneVersion: 1 })
     ]);
   });
 

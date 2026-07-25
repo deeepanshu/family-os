@@ -53,7 +53,7 @@ async function setupHealthKitBp(api: ReturnType<typeof app>) {
     body: JSON.stringify({
       personId: profileId,
       consentVersion: "1",
-      enabledMetrics: ["blood_pressure"],
+      enabledGroups: ["vitals"],
       healthTimezone: "UTC",
       installationId
     })

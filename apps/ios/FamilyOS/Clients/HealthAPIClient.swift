@@ -134,27 +134,6 @@ struct HealthAPIClient {
         return try await get(path: "readings/blood-pressure?personId=\(encodedPersonId)", baseURL: baseURL, accessToken: accessToken)
     }
 
-    func listBloodGlucose(baseURL: String, accessToken: String, personId: String) async throws -> [BloodGlucoseReading] {
-        let encodedPersonId = personId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? personId
-        return try await get(path: "readings/blood-glucose?personId=\(encodedPersonId)", baseURL: baseURL, accessToken: accessToken)
-    }
-
-    func createBloodGlucose(
-        baseURL: String,
-        accessToken: String,
-        personId: String,
-        value: Double,
-        context: GlucoseContext
-    ) async throws -> BloodGlucoseReading {
-        let body = CreateBloodGlucoseRequest(
-            personId: personId,
-            value: value,
-            context: context,
-            measuredAt: ISO8601DateFormatter().string(from: Date())
-        )
-        return try await post(path: "readings/blood-glucose", baseURL: baseURL, accessToken: accessToken, body: body)
-    }
-
     func healthKitSettings(baseURL: String, accessToken: String, personId: String? = nil) async throws -> HealthKitSyncStatus {
         if let personId {
             let encoded = personId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? personId
@@ -169,7 +148,7 @@ struct HealthAPIClient {
         accessToken: String,
         personId: String,
         consentVersion: String?,
-        enabledMetrics: [HealthKitSyncMetric],
+        enabledGroups: [HealthKitSyncMetric],
         healthTimezone: String,
         installationId: String,
         replaceActiveInstallation: Bool = false
@@ -181,7 +160,7 @@ struct HealthAPIClient {
             body: HealthKitSettingsRequest(
                 personId: personId,
                 consentVersion: consentVersion,
-                enabledMetrics: enabledMetrics,
+                enabledGroups: enabledGroups,
                 healthTimezone: healthTimezone,
                 installationId: installationId,
                 replaceActiveInstallation: replaceActiveInstallation
@@ -231,7 +210,7 @@ struct HealthAPIClient {
             body: HealthKitRepairBody(
                 installationId: installationId,
                 personId: personId,
-                metric: metric,
+                group: metric,
                 timezoneVersion: timezoneVersion
             )
         )
@@ -382,18 +361,10 @@ private struct CreateSelfProfileRequest: Encodable {
     let displayName: String
 }
 
-private struct CreateBloodGlucoseRequest: Encodable {
-    let personId: String
-    let value: Double
-    let unit = "mg/dL"
-    let context: GlucoseContext
-    let measuredAt: String
-}
-
 private struct HealthKitSettingsRequest: Encodable {
     let personId: String
     let consentVersion: String?
-    let enabledMetrics: [HealthKitSyncMetric]
+    let enabledGroups: [HealthKitSyncMetric]
     let healthTimezone: String
     let installationId: String
     let replaceActiveInstallation: Bool
@@ -402,7 +373,7 @@ private struct HealthKitSettingsRequest: Encodable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(personId, forKey: .personId)
         try container.encodeIfPresent(consentVersion, forKey: .consentVersion)
-        try container.encode(enabledMetrics, forKey: .enabledMetrics)
+        try container.encode(enabledGroups, forKey: .enabledGroups)
         try container.encode(healthTimezone, forKey: .healthTimezone)
         try container.encode(installationId, forKey: .installationId)
         try container.encode(replaceActiveInstallation, forKey: .replaceActiveInstallation)
@@ -411,7 +382,7 @@ private struct HealthKitSettingsRequest: Encodable {
     private enum CodingKeys: String, CodingKey {
         case personId
         case consentVersion
-        case enabledMetrics
+        case enabledGroups
         case healthTimezone
         case installationId
         case replaceActiveInstallation
@@ -431,7 +402,7 @@ private struct HealthKitSyncBody: Encodable {
 private struct HealthKitRepairBody: Encodable {
     let installationId: String
     let personId: String
-    let metric: HealthKitSyncMetric
+    let group: HealthKitSyncMetric
     let timezoneVersion: Int
 }
 

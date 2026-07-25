@@ -76,7 +76,7 @@ async function seedWithSteps(repo: InMemoryFamilyRepository, subject: string) {
     body: JSON.stringify({
       personId: profileId,
       consentVersion: "2026-07-18",
-      enabledMetrics: ["steps", "sleep", "blood_pressure"],
+      enabledGroups: ["activity", "sleep", "vitals"],
       healthTimezone: "UTC",
       installationId
     })
@@ -88,7 +88,7 @@ async function seedWithSteps(repo: InMemoryFamilyRepository, subject: string) {
       body: JSON.stringify({
         installationId,
         personId: profileId,
-        metric: "steps",
+        group: "activity",
         timezoneVersion: 1
       })
     })

@@ -134,12 +134,52 @@ actor HealthKitSyncStateStore {
         for metric in HealthKitSyncMetric.allCases {
             clearMetric(userId: userId, personId: personId, metric: metric)
         }
+        for metric in HealthKitDataMetric.allCases {
+            clearDataMetric(userId: userId, personId: personId, metric: metric)
+        }
         clearConfiguration()
+    }
+
+    func loadDataMetricState(userId: String, personId: String, metric: HealthKitDataMetric) -> HealthKitLocalMetricState {
+        loadState(key: dataMetricStateKey(userId: userId, personId: personId, metric: metric))
+    }
+
+    func saveDataMetricState(userId: String, personId: String, metric: HealthKitDataMetric, state: HealthKitLocalMetricState) {
+        saveState(state, key: dataMetricStateKey(userId: userId, personId: personId, metric: metric))
+    }
+
+    func loadDataMetricAnchor(userId: String, personId: String, metric: HealthKitDataMetric) -> HKQueryAnchor? {
+        let state = loadDataMetricState(userId: userId, personId: personId, metric: metric)
+        guard let data = state.anchorData else { return nil }
+        return try? NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: data)
+    }
+
+    func saveDataMetricAnchor(_ anchor: HKQueryAnchor?, userId: String, personId: String, metric: HealthKitDataMetric) {
+        var state = loadDataMetricState(userId: userId, personId: personId, metric: metric)
+        state.anchorData = anchor.flatMap { try? NSKeyedArchiver.archivedData(withRootObject: $0, requiringSecureCoding: true) }
+        saveDataMetricState(userId: userId, personId: personId, metric: metric, state: state)
+    }
+
+    func clearDataMetric(userId: String, personId: String, metric: HealthKitDataMetric) {
+        defaults.removeObject(forKey: dataMetricStateKey(userId: userId, personId: personId, metric: metric))
+        try? fileManager.removeItem(at: dataMetricLedgerURL(userId: userId, personId: personId, metric: metric))
+    }
+
+    func loadDataMetricLedger(userId: String, personId: String, metric: HealthKitDataMetric) -> [String: HealthKitLedgerEntry] {
+        loadLedger(url: dataMetricLedgerURL(userId: userId, personId: personId, metric: metric))
+    }
+
+    func saveDataMetricLedger(_ ledger: [String: HealthKitLedgerEntry], userId: String, personId: String, metric: HealthKitDataMetric) {
+        saveLedger(ledger, url: dataMetricLedgerURL(userId: userId, personId: personId, metric: metric))
     }
 
     /// Ledger keyed by source UUID → multi-bucket entry.
     func loadLedger(userId: String, personId: String, metric: HealthKitSyncMetric) -> [String: HealthKitLedgerEntry] {
         let url = ledgerURL(userId: userId, personId: personId, metric: metric)
+        return loadLedger(url: url)
+    }
+
+    private func loadLedger(url: URL) -> [String: HealthKitLedgerEntry] {
         guard let data = try? Data(contentsOf: url),
               let decoded = try? JSONDecoder().decode([String: HealthKitLedgerEntry].self, from: data)
         else {
@@ -151,6 +191,10 @@ actor HealthKitSyncStateStore {
 
     func saveLedger(_ ledger: [String: HealthKitLedgerEntry], userId: String, personId: String, metric: HealthKitSyncMetric) {
         let url = ledgerURL(userId: userId, personId: personId, metric: metric)
+        saveLedger(ledger, url: url)
+    }
+
+    private func saveLedger(_ ledger: [String: HealthKitLedgerEntry], url: URL) {
         try? fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         if let data = try? JSONEncoder().encode(ledger) {
             try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
@@ -161,6 +205,30 @@ actor HealthKitSyncStateStore {
         "healthkit.metricState.\(userId).\(personId).\(metric.rawValue)"
     }
 
+    private func dataMetricStateKey(userId: String, personId: String, metric: HealthKitDataMetric) -> String {
+        "healthkit.dataMetricState.\(userId).\(personId).\(metric.rawValue)"
+    }
+
+    private func loadState(key: String) -> HealthKitLocalMetricState {
+        guard let data = defaults.data(forKey: key),
+              let decoded = try? JSONDecoder().decode(HealthKitLocalMetricState.self, from: data)
+        else {
+            return HealthKitLocalMetricState(
+                anchorData: nil, pendingSync: false, repairId: nil, repairChunkIndex: nil,
+                repairExpectedChunks: nil, repairRangeStart: nil, repairRangeEnd: nil,
+                repairRangeStartDay: nil, repairRangeEndDay: nil, repairChunkSyncIds: nil,
+                lastErrorCode: nil, lastSuccessfulAt: nil, redactedStatus: nil
+            )
+        }
+        return decoded
+    }
+
+    private func saveState(_ state: HealthKitLocalMetricState, key: String) {
+        if let data = try? JSONEncoder().encode(state) {
+            defaults.set(data, forKey: key)
+        }
+    }
+
     private func ledgerURL(userId: String, personId: String, metric: HealthKitSyncMetric) -> URL {
         let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? fileManager.temporaryDirectory
@@ -168,5 +236,14 @@ actor HealthKitSyncStateStore {
             .appendingPathComponent("FamilyOS", isDirectory: true)
             .appendingPathComponent("HealthKitLedger", isDirectory: true)
             .appendingPathComponent("\(userId)_\(personId)_\(metric.rawValue).json")
+    }
+
+    private func dataMetricLedgerURL(userId: String, personId: String, metric: HealthKitDataMetric) -> URL {
+        let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.temporaryDirectory
+        return base
+            .appendingPathComponent("FamilyOS", isDirectory: true)
+            .appendingPathComponent("HealthKitLedger", isDirectory: true)
+            .appendingPathComponent("\(userId)_\(personId)_data_\(metric.rawValue).json")
     }
 }

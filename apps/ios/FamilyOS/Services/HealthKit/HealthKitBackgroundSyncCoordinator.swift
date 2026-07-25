@@ -41,18 +41,35 @@ final class HealthKitBackgroundSyncCoordinator {
         stopObservers()
         guard !enabled.isEmpty else { return }
 
-        for metric in enabled {
-            guard let type = try? healthKit.sampleType(for: metric) else { continue }
+        var observedTypes: [String: (type: HKSampleType, dataMetric: HealthKitDataMetric?)] = [:]
+        for dataMetric in HealthKitDataMetric.allCases where enabled.contains(dataMetric.group) {
+            guard let type = dataMetric.sampleType, !(type is HKCorrelationType) else { continue }
+            observedTypes[type.identifier] = (type, dataMetric)
+        }
+        if enabled.contains(.vitals), let systolic = HKQuantityType.quantityType(forIdentifier: .bloodPressureSystolic) {
+            observedTypes[systolic.identifier] = (systolic, nil)
+        }
+        for (_, registration) in observedTypes {
+            let type = registration.type
             let query = healthKit.observe(type: type) {
                 Task { @MainActor in
-                    await HealthKitBackgroundSyncCoordinator.shared.handleObserverFire(metric: metric)
+                    if let dataMetric = registration.dataMetric {
+                        switch dataMetric.storage {
+                        case .dailyNumeric, .bloodGlucose, .workout:
+                            await HealthKitBackgroundSyncCoordinator.shared.handleObserverFire(dataMetric: dataMetric)
+                        case .hourly, .sleepDay, .bloodPressure:
+                            await HealthKitBackgroundSyncCoordinator.shared.handleObserverFire(metric: dataMetric.group)
+                        }
+                    } else {
+                        await HealthKitBackgroundSyncCoordinator.shared.handleObserverFire(metric: .vitals)
+                    }
                 }
             }
             observerQueries.append(query)
         }
         observedMetrics = enabled
         Task {
-            try? await healthKit.enableBackgroundDelivery()
+            try? await healthKit.enableBackgroundDelivery(for: enabled)
         }
     }
 
@@ -92,17 +109,28 @@ final class HealthKitBackgroundSyncCoordinator {
                 context = try await self.sessionProvider.makeContext()
             }
             try await self.engine.processPendingWork(context: context)
-            self.configureObservers(for: context.enabledMetrics)
+            self.configureObservers(for: context.enabledGroups)
+            if let viewModel {
+                await viewModel.loadHealthKitStatus()
+            }
         }
     }
 
     private func handleObserverFire(metric: HealthKitSyncMetric) async {
         await processSerialized {
             let context = try await self.sessionProvider.makeContext()
-            guard context.enabledMetrics.contains(metric) else { return }
+            guard context.enabledGroups.contains(metric) else { return }
             try await self.engine.processMetric(metric, context: context)
         }
         // Always mark pending and schedule retry if process failed internally.
+        scheduleBackgroundRetry()
+    }
+
+    private func handleObserverFire(dataMetric: HealthKitDataMetric) async {
+        await processSerialized {
+            let context = try await self.sessionProvider.makeContext()
+            try await self.engine.processDataMetric(dataMetric, context: context)
+        }
         scheduleBackgroundRetry()
     }
 
@@ -116,7 +144,7 @@ final class HealthKitBackgroundSyncCoordinator {
         let success = await processSerialized {
             let context = try await self.sessionProvider.makeContext()
             try await self.engine.processPendingWork(context: context)
-            self.configureObservers(for: context.enabledMetrics)
+            self.configureObservers(for: context.enabledGroups)
         }
 
         task.setTaskCompleted(success: success)
@@ -166,7 +194,7 @@ final class HealthKitBackgroundSyncCoordinator {
             timezone: status.healthTimezone,
             timezoneVersion: status.healthTimezoneVersion,
             installationId: installationId,
-            enabledMetrics: status.enabledMetrics
+            enabledGroups: status.enabledGroups
         )
     }
 }

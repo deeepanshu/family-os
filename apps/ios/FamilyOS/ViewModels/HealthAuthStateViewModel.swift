@@ -39,6 +39,9 @@ final class HealthAuthViewModel: ObservableObject {
         } else {
             defaults.removeObject(forKey: DefaultsKey.userEmail)
         }
+
+        // UUID only — never email or tokens.
+        CrashReporting.setUserID(signedInUserId)
     }
 
     func clear(defaults: UserDefaults, keychain: KeychainStore) {
@@ -51,5 +54,6 @@ final class HealthAuthViewModel: ObservableObject {
         keychain.remove(DefaultsKey.refreshToken)
         defaults.removeObject(forKey: DefaultsKey.userId)
         defaults.removeObject(forKey: DefaultsKey.userEmail)
+        CrashReporting.setUserID(nil)
     }
 }

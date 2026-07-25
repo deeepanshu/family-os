@@ -27,19 +27,6 @@ struct HistoryView: View {
                     }
                 }
 
-                Section("Blood Sugar") {
-                    if viewModel.readings.bloodGlucoseReadings.isEmpty {
-                        EmptyRow("No blood sugar readings yet.")
-                    } else {
-                        ForEach(viewModel.readings.bloodGlucoseReadings) { reading in
-                            ReadingRow(
-                                title: "\(String(format: "%.0f", reading.value)) mg/dL",
-                                detail: reading.context.displayName,
-                                source: reading.source.displayName
-                            )
-                        }
-                    }
-                }
             }
             .navigationTitle("History")
             .task {
@@ -52,6 +39,5 @@ struct HistoryView: View {
     private func refreshHistory() async {
         guard viewModel.hasSelectedProfile else { return }
         await viewModel.loadBloodPressure()
-        await viewModel.loadBloodGlucose()
     }
 }

@@ -1,6 +1,5 @@
 import type {
   AuditLog,
-  BloodGlucoseReading,
   BloodPressureReading,
   BootstrapResponse,
   CompleteHealthKitRepairInput,
@@ -10,15 +9,19 @@ import type {
   FamilyMember,
   FamilyMembership,
   HealthKitMetric,
+  HealthKitMetricKey,
   HealthKitRepair,
   HealthKitRepairCompleteResult,
   HealthKitSettings,
   HealthKitSyncInput,
   HealthKitSyncResult,
+  HealthDailyMetricRecord,
   HealthMetricFreshness,
   HealthProfile,
   HealthSleepDayRecord,
   HealthStepHourRecord,
+  HealthWorkoutRecord,
+  BloodGlucoseReading,
   McpCapability,
   McpConnectionGrant,
   NotificationDelivery,
@@ -29,13 +32,11 @@ import type {
   ReminderRecipient
 } from "@family-os/shared";
 import type {
-  CreateBloodGlucoseInput,
   CreateFamilyInput,
   CreateInviteInput,
   CreateProfileInput,
   CreateReminderInput,
   RegisterDeviceInput,
-  UpdateBloodGlucoseInput,
   UpdateProfileInput,
   UpdateReminderInput
 } from "./families";
@@ -73,14 +74,9 @@ export interface ProfileStore {
 }
 
 export interface ReadingStore {
-  /** HealthKit-synced BP only (manual BP write paths are removed). */
+  /** HealthKit-synced readings only; manual write paths are removed. */
   listBloodPressure(actorUserId: string, personId?: string, limit?: number): Promise<BloodPressureReading[]>;
   getBloodPressure(actorUserId: string, readingId: string): Promise<BloodPressureReading>;
-  createBloodGlucose(input: CreateBloodGlucoseInput): Promise<BloodGlucoseReading>;
-  listBloodGlucose(actorUserId: string, personId?: string, limit?: number): Promise<BloodGlucoseReading[]>;
-  getBloodGlucose(actorUserId: string, readingId: string): Promise<BloodGlucoseReading>;
-  updateBloodGlucose(actorUserId: string, readingId: string, input: UpdateBloodGlucoseInput): Promise<BloodGlucoseReading>;
-  deleteBloodGlucose(actorUserId: string, readingId: string): Promise<void>;
 }
 
 export interface HealthKitStore {
@@ -93,7 +89,7 @@ export interface HealthKitStore {
     repairId: string,
     input: CompleteHealthKitRepairInput
   ): Promise<HealthKitRepairCompleteResult>;
-  getHealthMetricFreshness(actorUserId: string, personId: string, metric: HealthKitMetric): Promise<HealthMetricFreshness>;
+  getHealthMetricFreshness(actorUserId: string, personId: string, healthMetric: HealthKitMetricKey): Promise<HealthMetricFreshness>;
   listStepHours(
     actorUserId: string,
     personId: string,
@@ -106,6 +102,13 @@ export interface HealthKitStore {
     rangeStartDay: string,
     rangeEndDay: string
   ): Promise<HealthSleepDayRecord[]>;
+  listDailyMetrics(
+    actorUserId: string,
+    personId: string,
+    healthMetric: HealthKitMetricKey,
+    rangeStartDay: string,
+    rangeEndDay: string
+  ): Promise<HealthDailyMetricRecord[]>;
   listHealthKitBloodPressure(
     actorUserId: string,
     personId: string,
@@ -113,6 +116,20 @@ export interface HealthKitStore {
     rangeEndUtc: string,
     limit: number
   ): Promise<BloodPressureReading[]>;
+  listHealthKitBloodGlucose(
+    actorUserId: string,
+    personId: string,
+    rangeStartUtc: string,
+    rangeEndUtc: string,
+    limit: number
+  ): Promise<BloodGlucoseReading[]>;
+  listHealthKitWorkouts(
+    actorUserId: string,
+    personId: string,
+    rangeStartUtc: string,
+    rangeEndUtc: string,
+    limit: number
+  ): Promise<HealthWorkoutRecord[]>;
 }
 
 export type CreateMcpConnectionInput = {
