@@ -142,6 +142,30 @@ for `main` and pull requests. The workflow runs:
 
 CI uses fake JWT/Supabase values only; no production secrets are included.
 
+## Xcode Cloud Releases
+
+Xcode Cloud is the TestFlight release surface. Its workflow configuration lives
+in App Store Connect and uses the `FamilyOS` scheme:
+
+- Start condition: Git tag changes matching `release/*`.
+- Action: Archive the iOS app.
+- Post-action: distribute the archive to the internal TestFlight group.
+- Build number: Xcode Cloud owns the number and increments it for each cloud
+  build. The initial number is seeded in App Store Connect to avoid colliding
+  with manually uploaded builds.
+
+After a verified commit reaches `main`, create and push a release tag. The tag
+name triggers the workflow; it does not set the Apple build number.
+
+```sh
+git tag release/0.1.0-9
+git push origin release/0.1.0-9
+```
+
+Use a new tag for every retry. A manual workflow start is only a recovery path
+and must select the intended release tag. After Xcode Cloud succeeds, wait for
+Apple processing before the build appears in TestFlight.
+
 Install the repo-managed local git hooks for faster pre-commit and pre-push
 feedback:
 

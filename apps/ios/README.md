@@ -82,6 +82,35 @@ In `.xcconfig` files, write URLs as `https:/$()/your-project.supabase.co`.
 Xcode expands that to `https://your-project.supabase.co`; a literal `https://`
 is parsed as a comment after `https:`.
 
+## Xcode Cloud TestFlight Workflow
+
+The release workflow is configured in App Store Connect for the `FamilyOS`
+scheme. It has this shape:
+
+| Workflow setting | Value |
+| --- | --- |
+| Start condition | Git tag changes matching `release/*` |
+| Action | Archive for iOS |
+| Post-action | TestFlight internal distribution |
+| Source ref | The pushed release tag |
+
+Xcode Cloud assigns the Apple build number. It increments automatically after
+the initial number is seeded in App Store Connect, so do not manually change
+`CURRENT_PROJECT_VERSION` for a cloud release. The tag is a source-release
+identifier, not the TestFlight build number.
+
+Create a release only after the intended commit is on `main` and local Release
+checks pass:
+
+```sh
+git tag release/<marketing-version>-<release-sequence>
+git push origin release/<marketing-version>-<release-sequence>
+```
+
+Each retry needs a new tag. Xcode Cloud must complete and Apple must process
+the upload before testers can install it. Use a manual workflow start only to
+recover a missed trigger, selecting the same release tag.
+
 The current bootstrap screen can call:
 
 - `GET /health/api/v1/healthcheck`
