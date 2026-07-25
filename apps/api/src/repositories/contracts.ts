@@ -3,21 +3,28 @@ import type {
   BloodGlucoseReading,
   BloodPressureReading,
   BootstrapResponse,
+  CompleteHealthKitRepairInput,
+  CreateHealthKitRepairInput,
   CreateInviteResponse,
   CurrentFamilyResponse,
   FamilyMember,
   FamilyMembership,
+  HealthKitMetric,
+  HealthKitRepair,
+  HealthKitRepairCompleteResult,
+  HealthKitSettings,
+  HealthKitSyncInput,
+  HealthKitSyncResult,
+  HealthMetricFreshness,
   HealthProfile,
-  HealthKitImportResult,
-  HealthKitMetricType,
-  HealthKitSampleInput,
-  HealthKitSyncStatus,
-  HealthMetricDailySummary,
+  HealthSleepDayRecord,
+  HealthStepHourRecord,
   McpCapability,
   McpConnectionGrant,
   NotificationDelivery,
   NotificationDevice,
   PublicInviteResponse,
+  PutHealthKitSettingsInput,
   Reminder,
   ReminderRecipient
 } from "@family-os/shared";
@@ -80,28 +87,36 @@ export interface ReadingStore {
   deleteBloodGlucose(actorUserId: string, readingId: string): Promise<void>;
 }
 
-export type HealthKitSampleRecord = HealthKitSampleInput & {
-  id: string;
-  familyId: string;
-  personId: string;
-  userId: string;
-  syncRunId: string;
-};
-
 export interface HealthKitStore {
-  getHealthKitSyncStatus(actorUserId: string): Promise<HealthKitSyncStatus>;
-  getLastHealthKitSyncFinishedAt(actorUserId: string, personId: string): Promise<string | undefined>;
-  linkHealthKitProfile(actorUserId: string, personId: string): Promise<HealthKitSyncStatus>;
-  updateHealthKitSyncSettings(actorUserId: string, enabledMetrics: HealthKitMetricType[]): Promise<HealthKitSyncStatus>;
-  importHealthKitSamples(actorUserId: string, samples: HealthKitSampleInput[]): Promise<HealthKitImportResult>;
-  listHealthMetricDailySummaries(actorUserId: string, personId?: string, metricType?: HealthKitMetricType, limit?: number): Promise<HealthMetricDailySummary[]>;
-  listHealthKitSamplesForMetric(
+  getHealthKitSettings(actorUserId: string, personId?: string): Promise<HealthKitSettings>;
+  putHealthKitSettings(actorUserId: string, input: PutHealthKitSettingsInput): Promise<HealthKitSettings>;
+  syncHealthKit(actorUserId: string, input: HealthKitSyncInput): Promise<HealthKitSyncResult>;
+  createHealthKitRepair(actorUserId: string, input: CreateHealthKitRepairInput): Promise<HealthKitRepair>;
+  completeHealthKitRepair(
+    actorUserId: string,
+    repairId: string,
+    input: CompleteHealthKitRepairInput
+  ): Promise<HealthKitRepairCompleteResult>;
+  getHealthMetricFreshness(actorUserId: string, personId: string, metric: HealthKitMetric): Promise<HealthMetricFreshness>;
+  listStepHours(
     actorUserId: string,
     personId: string,
-    metricType: HealthKitMetricType,
-    rangeStartDate: string,
-    rangeEndDate: string
-  ): Promise<HealthKitSampleRecord[]>;
+    rangeStartUtc: string,
+    rangeEndUtc: string
+  ): Promise<HealthStepHourRecord[]>;
+  listSleepDays(
+    actorUserId: string,
+    personId: string,
+    rangeStartDay: string,
+    rangeEndDay: string
+  ): Promise<HealthSleepDayRecord[]>;
+  listHealthKitBloodPressure(
+    actorUserId: string,
+    personId: string,
+    rangeStartUtc: string,
+    rangeEndUtc: string,
+    limit: number
+  ): Promise<BloodPressureReading[]>;
 }
 
 export type CreateMcpConnectionInput = {

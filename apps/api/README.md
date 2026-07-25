@@ -148,20 +148,28 @@ curl -H "Authorization: Bearer <supabase_access_token>" \
   "http://localhost:3001/health/v1/readings/blood-glucose?personId=<profile_id>"
 ```
 
-Link the signed-in user's own profile for HealthKit import:
+Configure HealthKit background sync for the signed-in user's Self profile
+(consent, enabled metrics, health timezone, and active installation):
 
 ```sh
-curl -X POST \
+curl -X PUT \
   -H "Authorization: Bearer <supabase_access_token>" \
   -H "Content-Type: application/json" \
-  -d '{"personId":"<own_profile_id>"}' \
-  http://localhost:3001/health/v1/healthkit/link-profile
+  -d '{
+    "personId":"<own_profile_id>",
+    "consentVersion":"2026-07-25",
+    "enabledMetrics":["steps","sleep","blood_pressure"],
+    "healthTimezone":"Asia/Bangkok",
+    "installationId":"<keychain_installation_uuid>"
+  }' \
+  http://localhost:3001/health/v1/healthkit/settings
 ```
 
-Enable HealthKit categories and import samples through
-`/health/v1/healthkit/sync/settings` and
-`/health/v1/healthkit/samples/batch`. Family OS imports only from Apple Health;
-third-party device apps should sync into HealthKit first.
+Upload final metric records with `POST /health/v1/healthkit/sync` (idempotent
+`syncId`, at most 500 operations). First import and timezone repair use
+`POST /health/v1/healthkit/repairs` plus chunked `/sync` and
+`POST /health/v1/healthkit/repairs/{repairId}/complete`. Family OS imports only
+from Apple Health; third-party device apps should sync into HealthKit first.
 
 Create a reminder:
 

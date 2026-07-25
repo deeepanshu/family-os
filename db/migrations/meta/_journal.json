@@ -50,6 +50,13 @@
       "when": 1784357349810,
       "tag": "0006_elite_harry_osborn",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785000000000,
+      "tag": "0007_healthkit_background_sync",
+      "breakpoints": true
     }
   ]
 }

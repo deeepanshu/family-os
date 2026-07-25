@@ -1,6 +1,13 @@
-import type { HealthKitSampleRecord } from "../repositories/contracts";
 import type { McpSeriesPoint } from "@family-os/shared";
 import { isDateInInclusiveRange, localDateString, localHourBucket } from "./timezone";
+
+/** Local shape for pure aggregation helpers/tests (not a storage/API contract). */
+export type AggregateSample = {
+  startDate: string;
+  endDate?: string;
+  value?: number;
+  metricType: string;
+};
 
 export function expandDateRangeForTimezoneEdges(rangeStart: string, rangeEnd: string): {
   fetchStart: string;
@@ -15,7 +22,7 @@ export function expandDateRangeForTimezoneEdges(rangeStart: string, rangeEnd: st
 }
 
 export function aggregateHourlySteps(
-  samples: HealthKitSampleRecord[],
+  samples: AggregateSample[],
   rangeStart: string,
   rangeEnd: string,
   timezone: string
@@ -42,7 +49,7 @@ export function aggregateHourlySteps(
 }
 
 export function aggregateDailySteps(
-  samples: HealthKitSampleRecord[],
+  samples: AggregateSample[],
   rangeStart: string,
   rangeEnd: string,
   timezone: string
@@ -69,7 +76,7 @@ export function aggregateDailySteps(
 }
 
 export function aggregateDailySleepHours(
-  samples: HealthKitSampleRecord[],
+  samples: AggregateSample[],
   rangeStart: string,
   rangeEnd: string,
   timezone: string

@@ -412,7 +412,7 @@ describe("solo-first bootstrap", () => {
     expect(response.status).toBe(409);
   });
 
-  it("rejects HealthKit import when no linked self profile exists", async () => {
+  it("rejects HealthKit settings when no linked self profile exists", async () => {
     const api = app();
     const token = await jwtFor(userId);
 
@@ -421,16 +421,22 @@ describe("solo-first bootstrap", () => {
       headers: { authorization: `Bearer ${token}` }
     });
 
-    const response = await api.request(`${HEALTH_API_PREFIX}/healthkit/samples/batch`, {
-      method: "POST",
+    const response = await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
+      method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ samples: [] })
+      body: JSON.stringify({
+        personId: "00000000-0000-4000-8000-000000000099",
+        consentVersion: "1",
+        enabledMetrics: ["steps"],
+        healthTimezone: "UTC",
+        installationId: "53064303-35cf-4db0-a5d3-8af7d8f747e1"
+      })
     });
 
     expect(response.status).toBe(409);
   });
 
-  it("imports HealthKit samples only into the linked self profile", async () => {
+  it("accepts HealthKit settings and sync only for the linked self profile", async () => {
     const api = app();
     const token = await jwtFor(userId);
 
@@ -438,35 +444,42 @@ describe("solo-first bootstrap", () => {
       method: "POST",
       headers: { authorization: `Bearer ${token}` }
     });
-    await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
-      method: "POST",
+    const profile = await (
+      await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ displayName: "Deepanshu" })
+      })
+    ).json();
+    const installationId = "53064303-35cf-4db0-a5d3-8af7d8f747e1";
+    const settings = await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
+      method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ displayName: "Deepanshu" })
+      body: JSON.stringify({
+        personId: profile.data.id,
+        consentVersion: "1",
+        enabledMetrics: ["steps"],
+        healthTimezone: "UTC",
+        installationId
+      })
     });
-    await api.request(`${HEALTH_API_PREFIX}/healthkit/sync/settings`, {
-      method: "PATCH",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ enabledMetrics: ["steps"] })
-    });
+    expect(settings.status).toBe(200);
 
-    const response = await api.request(`${HEALTH_API_PREFIX}/healthkit/samples/batch`, {
+    const response = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({
-        samples: [
-          {
-            metricType: "steps",
-            sourceSampleKey: "steps-1",
-            startDate: "2026-06-30T00:00:00.000Z",
-            value: 8000,
-            unit: "count"
-          }
-        ]
+        syncId: "7afbe594-7e1d-4b31-a9a1-420b7fba42b0",
+        installationId,
+        personId: profile.data.id,
+        timezoneVersion: 1,
+        operations: [{ kind: "steps_hour_upsert", hourStartUtc: "2026-06-30T00:00:00.000Z", count: 8000 }]
       })
     });
 
-    expect(response.status).toBe(201);
+    expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.data.importedCount).toBe(1);
+    expect(body.data.accepted).toBe(true);
+    expect(body.data.operationCount).toBe(1);
   });
 });

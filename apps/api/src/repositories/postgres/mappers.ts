@@ -7,7 +7,6 @@ import type {
   FamilyInvite,
   FamilyMembership,
   HealthProfile,
-  HealthMetricDailySummary,
   NotificationDelivery,
   NotificationDevice,
   Reminder,
@@ -118,21 +117,6 @@ export function mapBloodGlucose(row: Row): BloodGlucoseReading {
     notes: row.notes ?? undefined,
     source: row.source ?? "manual",
     createdAt: toIso(row.created_at),
-    updatedAt: toIso(row.updated_at)
-  };
-}
-
-export function mapHealthMetricDailySummary(row: Row): HealthMetricDailySummary {
-  return {
-    id: row.id,
-    familyId: row.family_id,
-    personId: row.person_id,
-    metricType: row.metric_type,
-    date: toDateString(row.date)!,
-    value: Number(row.value),
-    unit: row.unit,
-    source: "healthkit",
-    sampleCount: row.sample_count,
     updatedAt: toIso(row.updated_at)
   };
 }

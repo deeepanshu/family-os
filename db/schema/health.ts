@@ -162,8 +162,8 @@ export const bloodGlucoseReadings = pgTable(
   ]
 );
 
-export const healthKitSyncSettings = pgTable(
-  "healthkit_sync_settings",
+export const healthStepHours = pgTable(
+  "health_step_hours",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     familyId: uuid("family_id")
@@ -172,20 +172,20 @@ export const healthKitSyncSettings = pgTable(
     personId: uuid("person_id")
       .notNull()
       .references(() => people.id, { onDelete: "cascade" }),
-    userId: uuid("user_id").notNull(),
-    metricType: text("metric_type").notNull(),
-    enabled: boolean("enabled").notNull().default(true),
+    hourStartUtc: timestamp("hour_start_utc", { withTimezone: true }).notNull(),
+    count: integer("count").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => [
-    uniqueIndex("healthkit_sync_settings_user_metric_idx").on(table.userId, table.metricType),
-    check("healthkit_sync_settings_metric_check", sql`${table.metricType} in ('steps', 'walking_distance', 'sleep', 'weight', 'blood_pressure', 'blood_glucose')`)
+    uniqueIndex("health_step_hours_person_hour_idx").on(table.personId, table.hourStartUtc),
+    index("health_step_hours_family_person_hour_idx").on(table.familyId, table.personId, table.hourStartUtc),
+    check("health_step_hours_count_check", sql`${table.count} >= 0`)
   ]
 );
 
-export const healthKitSyncRuns = pgTable(
-  "healthkit_sync_runs",
+export const healthSleepDays = pgTable(
+  "health_sleep_days",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     familyId: uuid("family_id")
@@ -194,81 +194,168 @@ export const healthKitSyncRuns = pgTable(
     personId: uuid("person_id")
       .notNull()
       .references(() => people.id, { onDelete: "cascade" }),
+    sleepDay: date("sleep_day").notNull(),
+    timezoneVersion: integer("timezone_version").notNull(),
+    durationMinutes: integer("duration_minutes").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("health_sleep_days_person_day_version_idx").on(table.personId, table.sleepDay, table.timezoneVersion),
+    index("health_sleep_days_family_person_day_idx").on(table.familyId, table.personId, table.sleepDay),
+    check("health_sleep_days_duration_check", sql`${table.durationMinutes} >= 0`),
+    check("health_sleep_days_timezone_version_check", sql`${table.timezoneVersion} >= 1`)
+  ]
+);
+
+export const healthkitSyncProfileSettings = pgTable(
+  "healthkit_sync_profile_settings",
+  {
+    personId: uuid("person_id")
+      .primaryKey()
+      .references(() => people.id, { onDelete: "cascade" }),
+    familyId: uuid("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
     userId: uuid("user_id").notNull(),
-    status: text("status").notNull(),
-    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
-    finishedAt: timestamp("finished_at", { withTimezone: true }).notNull(),
-    importedCount: integer("imported_count").notNull().default(0),
-    skippedCount: integer("skipped_count").notNull().default(0),
-    failedCount: integer("failed_count").notNull().default(0),
+    consentVersion: text("consent_version"),
+    consentedAt: timestamp("consented_at", { withTimezone: true }),
+    healthTimezone: text("health_timezone").notNull(),
+    healthTimezoneVersion: integer("health_timezone_version").notNull().default(1),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [check("healthkit_sync_profile_settings_tz_version_check", sql`${table.healthTimezoneVersion} >= 1`)]
+);
+
+export const healthkitSyncMetrics = pgTable(
+  "healthkit_sync_metrics",
+  {
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    familyId: uuid("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    metric: text("metric").notNull(),
+    enabled: boolean("enabled").notNull().default(false),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("healthkit_sync_metrics_person_metric_idx").on(table.personId, table.metric),
+    check("healthkit_sync_metrics_metric_check", sql`${table.metric} in ('steps', 'sleep', 'blood_pressure')`)
+  ]
+);
+
+export const healthMetricSyncState = pgTable(
+  "health_metric_sync_state",
+  {
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    familyId: uuid("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    metric: text("metric").notNull(),
+    lastSuccessfulAt: timestamp("last_successful_at", { withTimezone: true }),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    lastErrorCode: text("last_error_code"),
+    coverageStartAt: timestamp("coverage_start_at", { withTimezone: true }),
+    coverageEndAt: timestamp("coverage_end_at", { withTimezone: true }),
+    status: text("status").notNull().default("never_synced"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("health_metric_sync_state_person_metric_idx").on(table.personId, table.metric),
+    check("health_metric_sync_state_metric_check", sql`${table.metric} in ('steps', 'sleep', 'blood_pressure')`),
+    check(
+      "health_metric_sync_state_status_check",
+      sql`${table.status} in ('never_synced', 'ready', 'repairing', 'repair_needed', 'error', 'disabled')`
+    )
+  ]
+);
+
+export const healthkitSyncInstallations = pgTable(
+  "healthkit_sync_installations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    familyId: uuid("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    installationId: uuid("installation_id").notNull(),
+    activatedAt: timestamp("activated_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true })
+  },
+  (table) => [
+    uniqueIndex("healthkit_sync_installations_person_installation_idx").on(table.personId, table.installationId),
+    uniqueIndex("healthkit_sync_installations_one_active_per_person_idx")
+      .on(table.personId)
+      .where(sql`${table.revokedAt} is null`)
+  ]
+);
+
+export const healthkitRepairs = pgTable(
+  "healthkit_repairs",
+  {
+    repairId: uuid("repair_id").primaryKey().defaultRandom(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    familyId: uuid("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    metric: text("metric").notNull(),
+    installationId: uuid("installation_id").notNull(),
+    timezoneVersion: integer("timezone_version").notNull(),
+    rangeStart: timestamp("range_start", { withTimezone: true }).notNull(),
+    rangeEnd: timestamp("range_end", { withTimezone: true }).notNull(),
+    expectedChunkCount: integer("expected_chunk_count"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => [
-    index("healthkit_sync_runs_user_started_idx").on(table.userId, table.startedAt),
-    check("healthkit_sync_runs_status_check", sql`${table.status} in ('completed', 'failed')`)
+    index("healthkit_repairs_person_metric_idx").on(table.personId, table.metric, table.createdAt),
+    check("healthkit_repairs_metric_check", sql`${table.metric} in ('steps', 'sleep', 'blood_pressure')`),
+    check("healthkit_repairs_tz_version_check", sql`${table.timezoneVersion} >= 1`)
   ]
 );
 
-export const healthKitSamples = pgTable(
-  "healthkit_samples",
+export const healthkitRepairChunks = pgTable(
+  "healthkit_repair_chunks",
+  {
+    repairId: uuid("repair_id")
+      .notNull()
+      .references(() => healthkitRepairs.repairId, { onDelete: "cascade" }),
+    chunkIndex: integer("chunk_index").notNull(),
+    syncId: uuid("sync_id").notNull(),
+    responseJson: jsonb("response_json").notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("healthkit_repair_chunks_repair_chunk_idx").on(table.repairId, table.chunkIndex),
+    check("healthkit_repair_chunks_index_check", sql`${table.chunkIndex} >= 0`)
+  ]
+);
+
+export const healthkitSyncReceipts = pgTable(
+  "healthkit_sync_receipts",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    familyId: uuid("family_id")
-      .notNull()
-      .references(() => families.id, { onDelete: "cascade" }),
-    personId: uuid("person_id")
-      .notNull()
-      .references(() => people.id, { onDelete: "cascade" }),
     userId: uuid("user_id").notNull(),
-    syncRunId: uuid("sync_run_id")
-      .notNull()
-      .references(() => healthKitSyncRuns.id, { onDelete: "cascade" }),
-    metricType: text("metric_type").notNull(),
-    sourceSampleKey: text("source_sample_key").notNull(),
-    startDate: timestamp("start_date", { withTimezone: true }).notNull(),
-    endDate: timestamp("end_date", { withTimezone: true }),
-    value: numeric("value", { precision: 12, scale: 3 }),
-    unit: text("unit"),
-    systolic: integer("systolic"),
-    diastolic: integer("diastolic"),
-    pulse: integer("pulse"),
-    glucoseContext: text("glucose_context"),
-    importedAt: timestamp("imported_at", { withTimezone: true }).notNull().defaultNow(),
-    deletedAt: timestamp("deleted_at", { withTimezone: true })
-  },
-  (table) => [
-    uniqueIndex("healthkit_samples_person_source_idx").on(table.personId, table.sourceSampleKey),
-    index("healthkit_samples_family_person_metric_idx").on(table.familyId, table.personId, table.metricType, table.startDate),
-    check("healthkit_samples_metric_check", sql`${table.metricType} in ('steps', 'walking_distance', 'sleep', 'weight', 'blood_pressure', 'blood_glucose')`),
-    check("healthkit_samples_glucose_context_check", sql`${table.glucoseContext} is null or ${table.glucoseContext} in ('fasting', 'before_meal', 'after_meal', 'bedtime', 'random')`)
-  ]
-);
-
-export const healthMetricDailySummaries = pgTable(
-  "health_metric_daily_summaries",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    familyId: uuid("family_id")
-      .notNull()
-      .references(() => families.id, { onDelete: "cascade" }),
     personId: uuid("person_id")
       .notNull()
       .references(() => people.id, { onDelete: "cascade" }),
-    metricType: text("metric_type").notNull(),
-    date: date("date").notNull(),
-    value: numeric("value", { precision: 12, scale: 3 }).notNull(),
-    unit: text("unit").notNull(),
-    source: text("source").notNull().default("healthkit"),
-    sampleCount: integer("sample_count").notNull().default(0),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+    familyId: uuid("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    syncId: uuid("sync_id").notNull(),
+    responseJson: jsonb("response_json").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
-  (table) => [
-    uniqueIndex("health_metric_daily_summary_unique_idx").on(table.personId, table.metricType, table.date, table.source),
-    index("health_metric_daily_summary_family_person_idx").on(table.familyId, table.personId, table.date),
-    check("health_metric_daily_summary_metric_check", sql`${table.metricType} in ('steps', 'walking_distance', 'sleep', 'weight', 'blood_pressure', 'blood_glucose')`),
-    check("health_metric_daily_summary_source_check", sql`${table.source} = 'healthkit'`)
-  ]
+  (table) => [uniqueIndex("healthkit_sync_receipts_user_person_sync_idx").on(table.userId, table.personId, table.syncId)]
 );
 
 export const reminders = pgTable(

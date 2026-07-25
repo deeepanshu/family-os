@@ -51,7 +51,6 @@ export function createMcpRoutes(deps: McpRouteDeps) {
       families: deps.repositories.families,
       profiles: deps.repositories.profiles,
       healthKit: deps.repositories.healthKit,
-      readings: deps.repositories.readings,
       mcpConnections: deps.repositories.mcpConnections,
       auditLogs: deps.repositories.auditLogs,
       allowedOAuthClientIds: deps.config.MCP_ALLOWED_OAUTH_CLIENT_IDS,

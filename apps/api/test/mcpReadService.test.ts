@@ -53,71 +53,126 @@ async function seedUserWithSteps(repo: InMemoryFamilyRepository, subject: string
   const profile = await profileResponse.json();
   const profileId = profile.data.id as string;
 
-  await api.request(`${HEALTH_API_PREFIX}/healthkit/link-profile`, {
-    method: "POST",
+  const installationId = "53064303-35cf-4db0-a5d3-8af7d8f747e1";
+  await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
+    method: "PUT",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ personId: profileId })
+    body: JSON.stringify({
+      personId: profileId,
+      consentVersion: "2026-07-18",
+      enabledMetrics: ["steps", "sleep", "blood_pressure"],
+      healthTimezone: "UTC",
+      installationId
+    })
   });
-  await api.request(`${HEALTH_API_PREFIX}/healthkit/sync/settings`, {
-    method: "PATCH",
-    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ enabledMetrics: ["steps", "sleep", "blood_pressure"] })
-  });
-  await api.request(`${HEALTH_API_PREFIX}/healthkit/samples/batch`, {
+
+  const repair = await (
+    await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        installationId,
+        personId: profileId,
+        metric: "steps",
+        timezoneVersion: 1
+      })
+    })
+  ).json();
+
+  await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({
-      samples: [
+      syncId: "7afbe594-7e1d-4b31-a9a1-420b7fba4201",
+      installationId,
+      personId: profileId,
+      timezoneVersion: 1,
+      repairId: repair.data.repairId,
+      chunkIndex: 0,
+      operations: [
+        { kind: "steps_hour_upsert", hourStartUtc: "2026-07-15T08:00:00.000Z", count: 1200 },
+        { kind: "steps_hour_upsert", hourStartUtc: "2026-07-15T14:00:00.000Z", count: 800 },
+        { kind: "steps_hour_upsert", hourStartUtc: "2026-07-16T10:00:00.000Z", count: 5000 },
+        { kind: "steps_hour_upsert", hourStartUtc: "2026-07-17T08:00:00.000Z", count: 500 },
+        { kind: "steps_hour_upsert", hourStartUtc: "2026-07-17T09:00:00.000Z", count: 500 }
+      ]
+    })
+  });
+  await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs/${repair.data.repairId}/complete`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ expectedChunkCount: 1 })
+  });
+
+  const sleepRepair = await (
+    await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        installationId,
+        personId: profileId,
+        metric: "sleep",
+        timezoneVersion: 1
+      })
+    })
+  ).json();
+  await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      syncId: "7afbe594-7e1d-4b31-a9a1-420b7fba4202",
+      installationId,
+      personId: profileId,
+      timezoneVersion: 1,
+      repairId: sleepRepair.data.repairId,
+      chunkIndex: 0,
+      operations: [{ kind: "sleep_day_upsert", sleepDay: "2026-07-16", durationMinutes: 480 }]
+    })
+  });
+  await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs/${sleepRepair.data.repairId}/complete`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ expectedChunkCount: 1 })
+  });
+
+  const bpRepair = await (
+    await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        installationId,
+        personId: profileId,
+        metric: "blood_pressure",
+        timezoneVersion: 1
+      })
+    })
+  ).json();
+  await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      syncId: "7afbe594-7e1d-4b31-a9a1-420b7fba4203",
+      installationId,
+      personId: profileId,
+      timezoneVersion: 1,
+      repairId: bpRepair.data.repairId,
+      chunkIndex: 0,
+      operations: [
         {
-          metricType: "steps",
-          sourceSampleKey: "steps-day-1",
-          startDate: "2026-07-15T08:00:00.000Z",
-          endDate: "2026-07-15T09:00:00.000Z",
-          value: 1200,
-          unit: "count"
-        },
-        {
-          metricType: "steps",
-          sourceSampleKey: "steps-day-1b",
-          startDate: "2026-07-15T14:00:00.000Z",
-          endDate: "2026-07-15T15:00:00.000Z",
-          value: 800,
-          unit: "count"
-        },
-        {
-          metricType: "steps",
-          sourceSampleKey: "steps-day-2",
-          startDate: "2026-07-16T10:00:00.000Z",
-          endDate: "2026-07-16T11:00:00.000Z",
-          value: 5000,
-          unit: "count"
-        },
-        {
-          metricType: "sleep",
-          sourceSampleKey: "sleep-1",
-          startDate: "2026-07-15T23:00:00.000Z",
-          endDate: "2026-07-16T07:00:00.000Z",
-          value: 480,
-          unit: "min"
-        },
-        {
-          metricType: "steps",
-          sourceSampleKey: "steps-span",
-          startDate: "2026-07-17T08:30:00.000Z",
-          endDate: "2026-07-17T09:30:00.000Z",
-          value: 1000,
-          unit: "count"
-        },
-        {
-          metricType: "blood_pressure",
-          sourceSampleKey: "bp-1",
-          startDate: "2026-07-16T09:30:00.000Z",
+          kind: "blood_pressure_upsert",
+          sourceSampleKey: "5e1ed621-4a6c-4e09-969e-31c6f0872c24",
+          measuredAtUtc: "2026-07-16T09:30:00.000Z",
           systolic: 120,
           diastolic: 80,
           pulse: 70
         }
       ]
     })
+  });
+  await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs/${bpRepair.data.repairId}/complete`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ expectedChunkCount: 1 })
   });
 
   return { api, token, profileId };

@@ -4,19 +4,26 @@ import type {
   BloodGlucoseReading,
   BloodPressureReading,
   BootstrapResponse,
+  CompleteHealthKitRepairInput,
+  CreateHealthKitRepairInput,
   CreateInviteResponse,
   CurrentFamilyResponse,
   FamilyMember,
   FamilyMembership,
-  HealthKitImportResult,
-  HealthKitMetricType,
-  HealthKitSampleInput,
-  HealthKitSyncStatus,
-  HealthMetricDailySummary,
+  HealthKitMetric,
+  HealthKitRepair,
+  HealthKitRepairCompleteResult,
+  HealthKitSettings,
+  HealthKitSyncInput,
+  HealthKitSyncResult,
+  HealthMetricFreshness,
   HealthProfile,
+  HealthSleepDayRecord,
+  HealthStepHourRecord,
   NotificationDelivery,
   NotificationDevice,
   PublicInviteResponse,
+  PutHealthKitSettingsInput,
   Reminder,
   ReminderRecipient
 } from "@family-os/shared";
@@ -34,7 +41,7 @@ import type {
   UpdateProfileInput,
   UpdateReminderInput
 } from "../families";
-import type { CreateMcpConnectionInput, HealthKitSampleRecord, RecordAuditInput } from "../contracts";
+import type { CreateMcpConnectionInput, RecordAuditInput } from "../contracts";
 import type { McpConnectionGrant } from "@family-os/shared";
 import { PostgresRepositoryContext } from "./context";
 import { PostgresFamilyStore } from "./familyStore";
@@ -165,38 +172,60 @@ export class PostgresFamilyRepository implements FamilyRepository {
     return this.readingStore.deleteBloodGlucose(actorUserId, readingId);
   }
 
-  getHealthKitSyncStatus(actorUserId: string): Promise<HealthKitSyncStatus> {
-    return this.healthKitStore.getHealthKitSyncStatus(actorUserId);
+  getHealthKitSettings(actorUserId: string, personId?: string): Promise<HealthKitSettings> {
+    return this.healthKitStore.getHealthKitSettings(actorUserId, personId);
   }
 
-  getLastHealthKitSyncFinishedAt(actorUserId: string, personId: string): Promise<string | undefined> {
-    return this.healthKitStore.getLastHealthKitSyncFinishedAt(actorUserId, personId);
+  putHealthKitSettings(actorUserId: string, input: PutHealthKitSettingsInput): Promise<HealthKitSettings> {
+    return this.healthKitStore.putHealthKitSettings(actorUserId, input);
   }
 
-  linkHealthKitProfile(actorUserId: string, personId: string): Promise<HealthKitSyncStatus> {
-    return this.healthKitStore.linkHealthKitProfile(actorUserId, personId);
+  syncHealthKit(actorUserId: string, input: HealthKitSyncInput): Promise<HealthKitSyncResult> {
+    return this.healthKitStore.syncHealthKit(actorUserId, input);
   }
 
-  updateHealthKitSyncSettings(actorUserId: string, enabledMetrics: HealthKitMetricType[]): Promise<HealthKitSyncStatus> {
-    return this.healthKitStore.updateHealthKitSyncSettings(actorUserId, enabledMetrics);
+  createHealthKitRepair(actorUserId: string, input: CreateHealthKitRepairInput): Promise<HealthKitRepair> {
+    return this.healthKitStore.createHealthKitRepair(actorUserId, input);
   }
 
-  importHealthKitSamples(actorUserId: string, samples: HealthKitSampleInput[]): Promise<HealthKitImportResult> {
-    return this.healthKitStore.importHealthKitSamples(actorUserId, samples);
+  completeHealthKitRepair(
+    actorUserId: string,
+    repairId: string,
+    input: CompleteHealthKitRepairInput
+  ): Promise<HealthKitRepairCompleteResult> {
+    return this.healthKitStore.completeHealthKitRepair(actorUserId, repairId, input);
   }
 
-  listHealthMetricDailySummaries(actorUserId: string, personId?: string, metricType?: HealthKitMetricType, limit?: number): Promise<HealthMetricDailySummary[]> {
-    return this.healthKitStore.listHealthMetricDailySummaries(actorUserId, personId, metricType, limit);
+  getHealthMetricFreshness(actorUserId: string, personId: string, metric: HealthKitMetric): Promise<HealthMetricFreshness> {
+    return this.healthKitStore.getHealthMetricFreshness(actorUserId, personId, metric);
   }
 
-  listHealthKitSamplesForMetric(
+  listStepHours(
     actorUserId: string,
     personId: string,
-    metricType: HealthKitMetricType,
-    rangeStartDate: string,
-    rangeEndDate: string
-  ): Promise<HealthKitSampleRecord[]> {
-    return this.healthKitStore.listHealthKitSamplesForMetric(actorUserId, personId, metricType, rangeStartDate, rangeEndDate);
+    rangeStartUtc: string,
+    rangeEndUtc: string
+  ): Promise<HealthStepHourRecord[]> {
+    return this.healthKitStore.listStepHours(actorUserId, personId, rangeStartUtc, rangeEndUtc);
+  }
+
+  listSleepDays(
+    actorUserId: string,
+    personId: string,
+    rangeStartDay: string,
+    rangeEndDay: string
+  ): Promise<HealthSleepDayRecord[]> {
+    return this.healthKitStore.listSleepDays(actorUserId, personId, rangeStartDay, rangeEndDay);
+  }
+
+  listHealthKitBloodPressure(
+    actorUserId: string,
+    personId: string,
+    rangeStartUtc: string,
+    rangeEndUtc: string,
+    limit: number
+  ): Promise<BloodPressureReading[]> {
+    return this.healthKitStore.listHealthKitBloodPressure(actorUserId, personId, rangeStartUtc, rangeEndUtc, limit);
   }
 
   createConnection(input: CreateMcpConnectionInput): Promise<McpConnectionGrant> {

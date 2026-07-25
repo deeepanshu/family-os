@@ -135,53 +135,151 @@ export type BloodGlucoseReading = {
   updatedAt: string;
 };
 
-export type HealthKitMetricType = "steps" | "walking_distance" | "sleep" | "weight" | "blood_pressure" | "blood_glucose";
+/** Supported HealthKit background-sync metrics (v1). */
+export type HealthKitMetric = "steps" | "sleep" | "blood_pressure";
 
-export type HealthKitSyncStatus = {
-  linkedProfileId?: string;
-  enabledMetrics: HealthKitMetricType[];
-  lastSync?: {
-    id: string;
-    status: "completed" | "failed";
-    startedAt: string;
-    finishedAt: string;
-    importedCount: number;
-    skippedCount: number;
-    failedCount: number;
-  };
+export type HealthMetricSyncStatusCode =
+  | "never_synced"
+  | "ready"
+  | "repairing"
+  | "repair_needed"
+  | "error"
+  | "disabled";
+
+export type HealthKitMetricSyncState = {
+  metric: HealthKitMetric;
+  enabled: boolean;
+  lastSuccessfulAt?: string;
+  lastAttemptAt?: string;
+  lastErrorCode?: string;
+  coverageStartAt?: string;
+  coverageEndAt?: string;
+  status: HealthMetricSyncStatusCode;
 };
 
-export type HealthKitSampleInput = {
-  metricType: HealthKitMetricType;
-  sourceSampleKey: string;
-  startDate: string;
-  endDate?: string;
-  value?: number;
-  unit?: string;
-  systolic?: number;
-  diastolic?: number;
-  pulse?: number;
-  glucoseContext?: GlucoseContext;
-};
-
-export type HealthKitImportResult = {
-  syncRunId: string;
-  importedCount: number;
-  skippedCount: number;
-  failedCount: number;
-};
-
-export type HealthMetricDailySummary = {
-  id: string;
-  familyId: string;
+export type HealthKitSettings = {
   personId: string;
-  metricType: HealthKitMetricType;
-  date: string;
-  value: number;
-  unit: string;
-  source: "healthkit";
-  sampleCount: number;
-  updatedAt: string;
+  consentVersion?: string;
+  consentedAt?: string;
+  healthTimezone: string;
+  healthTimezoneVersion: number;
+  enabledMetrics: HealthKitMetric[];
+  activeInstallationId?: string;
+  metrics: HealthKitMetricSyncState[];
+};
+
+export type PutHealthKitSettingsInput = {
+  personId: string;
+  consentVersion?: string;
+  enabledMetrics: HealthKitMetric[];
+  healthTimezone: string;
+  installationId: string;
+  replaceActiveInstallation?: boolean;
+};
+
+export type HealthKitStepsHourUpsert = {
+  kind: "steps_hour_upsert";
+  hourStartUtc: string;
+  count: number;
+};
+
+export type HealthKitSleepDayUpsert = {
+  kind: "sleep_day_upsert";
+  sleepDay: string;
+  durationMinutes: number;
+};
+
+export type HealthKitBloodPressureUpsert = {
+  kind: "blood_pressure_upsert";
+  sourceSampleKey: string;
+  measuredAtUtc: string;
+  systolic: number;
+  diastolic: number;
+  pulse?: number;
+};
+
+export type HealthKitBloodPressureDelete = {
+  kind: "blood_pressure_delete";
+  sourceSampleKey: string;
+};
+
+export type HealthKitSyncOperation =
+  | HealthKitStepsHourUpsert
+  | HealthKitSleepDayUpsert
+  | HealthKitBloodPressureUpsert
+  | HealthKitBloodPressureDelete;
+
+export type HealthKitSyncInput = {
+  syncId: string;
+  installationId: string;
+  personId: string;
+  timezoneVersion: number;
+  repairId?: string;
+  chunkIndex?: number;
+  operations: HealthKitSyncOperation[];
+};
+
+/** Redacted acknowledgement for an accepted sync or replayed idempotent request. */
+export type HealthKitSyncResult = {
+  syncId: string;
+  accepted: true;
+  operationCount: number;
+  metricsAffected: HealthKitMetric[];
+  repairId?: string;
+  chunkIndex?: number;
+};
+
+export type CreateHealthKitRepairInput = {
+  installationId: string;
+  personId: string;
+  metric: HealthKitMetric;
+  timezoneVersion: number;
+};
+
+export type HealthKitRepair = {
+  repairId: string;
+  personId: string;
+  metric: HealthKitMetric;
+  installationId: string;
+  timezoneVersion: number;
+  rangeStart: string;
+  rangeEnd: string;
+  expiresAt: string;
+};
+
+export type CompleteHealthKitRepairInput = {
+  expectedChunkCount: number;
+};
+
+export type HealthKitRepairCompleteResult = {
+  repairId: string;
+  metric: HealthKitMetric;
+  completed: true;
+  expectedChunkCount: number;
+  completedChunkCount: number;
+};
+
+export type HealthStepHourRecord = {
+  personId: string;
+  hourStartUtc: string;
+  count: number;
+};
+
+export type HealthSleepDayRecord = {
+  personId: string;
+  sleepDay: string;
+  timezoneVersion: number;
+  durationMinutes: number;
+};
+
+export type HealthMetricFreshness = {
+  metric: HealthKitMetric;
+  healthTimezone: string;
+  healthTimezoneVersion: number;
+  lastSuccessfulAt?: string;
+  status: HealthMetricSyncStatusCode;
+  coverageStartAt?: string;
+  coverageEndAt?: string;
 };
 
 export type ReminderType = "generic" | "blood_glucose" | "blood_pressure";
@@ -295,6 +393,10 @@ export type McpCoverage = {
   rangeStart: string;
   rangeEnd: string;
   daysWithData: number;
+  /** True when stored coverage fully covers the requested range and the metric is not mid-repair. */
+  complete: boolean;
+  availableStart?: string;
+  availableEnd?: string;
 };
 
 export type McpSeriesPoint = {
@@ -315,9 +417,14 @@ export type McpHealthDataBase = {
   healthMetric: McpHealthMetric;
   viewType: McpHealthViewType;
   unit: string;
+  /** Profile health timezone used for sleep-day grouping and calendar presentation. */
+  healthTimezone: string;
+  /** Request timezone used only for local presentation of instants (e.g. BP table). */
   timezone: string;
   coverage: McpCoverage;
   lastSyncedAt?: string;
+  /** Redacted per-metric sync status (never implies device online / permission). */
+  metricSyncStatus: HealthMetricSyncStatusCode;
   disclaimer: string;
 };
 

@@ -5,16 +5,10 @@ import {
   aggregateHourlySteps,
   nextLocalHourBoundaryMs
 } from "../src/mcp/sampleAggregation";
-import type { HealthKitSampleRecord } from "../src/repositories/contracts";
+import type { AggregateSample } from "../src/mcp/sampleAggregation";
 
-function sample(partial: Partial<HealthKitSampleRecord> & Pick<HealthKitSampleRecord, "startDate" | "metricType">): HealthKitSampleRecord {
+function sample(partial: Partial<AggregateSample> & Pick<AggregateSample, "startDate" | "metricType">): AggregateSample {
   return {
-    id: "s1",
-    familyId: "f1",
-    personId: "p1",
-    userId: "u1",
-    syncRunId: "r1",
-    sourceSampleKey: "k1",
     value: 1000,
     ...partial
   };
