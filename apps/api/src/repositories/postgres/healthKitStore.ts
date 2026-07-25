@@ -716,16 +716,35 @@ export class PostgresHealthKitStore {
       repairRange?: HealthKitRepairRange;
     }
   ) {
+    const stepOperations = input.operations.filter(
+      (op): op is Extract<HealthKitSyncOperation, { kind: "steps_hour_upsert" }> => op.kind === "steps_hour_upsert"
+    );
+    if (stepOperations.length > 0) {
+      await tx`
+        insert into health_step_hours (family_id, person_id, hour_start_utc, count, updated_at)
+        ${tx(
+          stepOperations.map((op) => ({
+            family_id: input.familyId,
+            person_id: input.personId,
+            hour_start_utc: op.hourStartUtc,
+            count: op.count,
+            updated_at: input.nowIso
+          })),
+          "family_id",
+          "person_id",
+          "hour_start_utc",
+          "count",
+          "updated_at"
+        )}
+        on conflict (person_id, hour_start_utc) do update set
+          count = excluded.count,
+          updated_at = excluded.updated_at
+      `;
+    }
+
     for (const op of input.operations) {
       switch (op.kind) {
         case "steps_hour_upsert":
-          await tx`
-            insert into health_step_hours (family_id, person_id, hour_start_utc, count, updated_at)
-            values (${input.familyId}, ${input.personId}, ${op.hourStartUtc}, ${op.count}, ${input.nowIso})
-            on conflict (person_id, hour_start_utc) do update set
-              count = excluded.count,
-              updated_at = excluded.updated_at
-          `;
           break;
         case "sleep_day_upsert":
           await tx`
