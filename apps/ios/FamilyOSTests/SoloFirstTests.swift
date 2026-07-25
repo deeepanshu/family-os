@@ -139,6 +139,36 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertEqual(HealthKitSyncMetric.bloodPressure.displayName, "Blood pressure")
     }
 
+    func testConnectionMigratesRetiredPublicAPIURL() {
+        let suiteName = "HealthConnectionMigrationTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("https://api.deepanshujain.me/health/v1", forKey: DefaultsKey.baseURL)
+
+        let environment = AppEnvironment(
+            name: .release,
+            apiBaseURL: "https://familyos.deepanshujain.me/health/api/v1",
+            supabaseURL: ""
+        )
+        let connection = HealthConnectionViewModel(defaults: defaults, environment: environment)
+
+        XCTAssertEqual(connection.baseURL, environment.apiBaseURL)
+        XCTAssertEqual(defaults.string(forKey: DefaultsKey.baseURL), environment.apiBaseURL)
+    }
+
+    func testConnectionPreservesCustomAPIURL() {
+        let suiteName = "HealthConnectionCustomURLTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let customURL = "https://staging.example.com/health/api/v1"
+        defaults.set(customURL, forKey: DefaultsKey.baseURL)
+
+        let environment = AppEnvironment(name: .release, apiBaseURL: "https://familyos.deepanshujain.me/health/api/v1", supabaseURL: "")
+        let connection = HealthConnectionViewModel(defaults: defaults, environment: environment)
+
+        XCTAssertEqual(connection.baseURL, customURL)
+    }
+
     func testStartupAcceptsPendingInviteBeforeBootstrap() async throws {
         let viewModel = makeViewModelWithMock([
             "/invites/invite-token/accept": """
