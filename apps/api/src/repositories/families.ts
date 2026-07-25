@@ -54,15 +54,18 @@ import type {
   RecordAuditInput,
   ReminderStore
 } from "./contracts";
+import { localDateString } from "../mcp/timezone";
 import {
   assertOperationInRepairRange,
   assertSelfProfileMatch,
   buildSyncResult,
   HEALTHKIT_METRICS,
   metricsAffected,
+  profileLocalSleepDayRange,
   REPAIR_TTL_MS,
   REPAIR_WINDOW_MS,
-  toUtcIso
+  toUtcIso,
+  type HealthKitRepairRange
 } from "./healthKitDomain";
 
 export type CreateFamilyInput = {
@@ -872,7 +875,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
           throw new HttpError(400, "healthkit_repair_invalid", "Repair chunks may only include the repair metric.");
         }
         for (const op of input.operations) {
-          assertOperationInRepairRange(op, repair.rangeStart, repair.rangeEnd);
+          assertOperationInRepairRange(op, repairRangeFromMemory(repair));
         }
       }
 
@@ -889,10 +892,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
         timezoneVersion: input.timezoneVersion,
         operations: input.operations,
         nowIso,
-        repairRange:
-          repair !== undefined
-            ? { rangeStart: repair.rangeStart, rangeEnd: repair.rangeEnd }
-            : undefined
+        repairRange: repair !== undefined ? repairRangeFromMemory(repair) : undefined
       });
 
       for (const metric of affected) {
@@ -985,6 +985,8 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       }
     }
 
+    const localEndDay = localDateString(now, settings.healthTimezone);
+    const { rangeStartDay, rangeEndDay } = profileLocalSleepDayRange(localEndDay, 90);
     const repair: HealthKitRepair & { familyId: string } = {
       repairId: crypto.randomUUID(),
       personId: input.personId,
@@ -994,6 +996,8 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       timezoneVersion: input.timezoneVersion,
       rangeStart: toUtcIso(new Date(now.getTime() - REPAIR_WINDOW_MS)),
       rangeEnd: nowIso,
+      rangeStartDay,
+      rangeEndDay,
       expiresAt: toUtcIso(new Date(now.getTime() + REPAIR_TTL_MS))
     };
     this.healthKitRepairs.set(repair.repairId, repair);
@@ -1021,6 +1025,8 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       timezoneVersion: repair.timezoneVersion,
       rangeStart: repair.rangeStart,
       rangeEnd: repair.rangeEnd,
+      rangeStartDay: repair.rangeStartDay,
+      rangeEndDay: repair.rangeEndDay,
       expiresAt: repair.expiresAt
     };
   }
@@ -1078,14 +1084,12 @@ export class InMemoryFamilyRepository implements FamilyRepository {
 
     const nowIso = new Date().toISOString();
     if (repair.metric === "sleep") {
-      const rangeStartDay = repair.rangeStart.slice(0, 10);
-      const rangeEndDay = repair.rangeEnd.slice(0, 10);
       for (const [key, row] of this.healthSleepDays) {
         if (
           row.personId === selfProfile.id &&
           row.timezoneVersion < repair.timezoneVersion &&
-          row.sleepDay >= rangeStartDay &&
-          row.sleepDay <= rangeEndDay
+          row.sleepDay >= repair.rangeStartDay &&
+          row.sleepDay <= repair.rangeEndDay
         ) {
           this.healthSleepDays.delete(key);
         }
@@ -1264,7 +1268,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     timezoneVersion: number;
     operations: HealthKitSyncOperation[];
     nowIso: string;
-    repairRange?: { rangeStart: string; rangeEnd: string };
+    repairRange?: HealthKitRepairRange;
   }) {
     for (const op of input.operations) {
       switch (op.kind) {
@@ -1327,8 +1331,8 @@ export class InMemoryFamilyRepository implements FamilyRepository {
             ) {
               if (input.repairRange) {
                 const t = Date.parse(reading.measuredAt);
-                const start = Date.parse(input.repairRange.rangeStart);
-                const end = Date.parse(input.repairRange.rangeEnd);
+                const start = Date.parse(input.repairRange.rangeStartIso);
+                const end = Date.parse(input.repairRange.rangeEndIso);
                 if (t < start || t > end) {
                   throw new HttpError(
                     400,
@@ -1767,6 +1771,15 @@ function currentInviteStatus(invite: FamilyInvite): FamilyInvite["status"] {
     return "expired";
   }
   return invite.status;
+}
+
+function repairRangeFromMemory(repair: HealthKitRepair): HealthKitRepairRange {
+  return {
+    rangeStartIso: repair.rangeStart,
+    rangeEndIso: repair.rangeEnd,
+    rangeStartDay: repair.rangeStartDay,
+    rangeEndDay: repair.rangeEndDay
+  };
 }
 
 function normalizeMcpCapabilities(capabilities: McpCapability[]): McpCapability[] {

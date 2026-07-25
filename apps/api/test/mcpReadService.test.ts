@@ -394,6 +394,87 @@ describe("HealthMcpReadService", () => {
     }
   });
 
+  it("withholds sleep points after timezone change until repair completes", async () => {
+    const repo = new InMemoryFamilyRepository();
+    const api = createApp({
+      config: {
+        NODE_ENV: "test",
+        PORT: 3001,
+        HEALTH_API_ENABLE_DEV_AUTH: false,
+        SUPABASE_JWT_SECRET: jwtSecret,
+        SUPABASE_URL: supabaseUrl
+      },
+      familyRepository: repo
+    });
+    const token = await jwtFor(userId);
+    await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const profile = await (
+      await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ displayName: "Deepanshu" })
+      })
+    ).json();
+    const profileId = profile.data.id as string;
+    const installationId = "53064303-35cf-4db0-a5d3-8af7d8f747e1";
+    await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        personId: profileId,
+        consentVersion: "2026-07-18",
+        enabledMetrics: ["sleep"],
+        healthTimezone: "UTC",
+        installationId
+      })
+    });
+    await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        syncId: "7afbe594-7e1d-4b31-a9a1-420b7fba42f1",
+        installationId,
+        personId: profileId,
+        timezoneVersion: 1,
+        operations: [{ kind: "sleep_day_upsert", sleepDay: "2026-07-16", durationMinutes: 480 }]
+      })
+    });
+
+    await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        personId: profileId,
+        consentVersion: "2026-07-18",
+        enabledMetrics: ["sleep"],
+        healthTimezone: "Asia/Bangkok",
+        installationId
+      })
+    });
+
+    const repositories = repositoriesFromFamilyRepository(repo);
+    await repositories.mcpConnections.createConnection({
+      userId,
+      oauthClientId,
+      capabilities: ["health_read"],
+      consentVersion: "2026-07-18"
+    });
+    const service = new HealthMcpReadService({ ...repositories, now: fixedNow });
+    const withheld = await service.getHealthData(
+      { userId, oauthClientId },
+      { personId: profileId, healthMetric: "sleep", rangeDays: 30, timezone: "UTC" }
+    );
+    expect(withheld.metricSyncStatus).toBe("repair_needed");
+    expect(withheld.healthTimezone).toBe("Asia/Bangkok");
+    expect(withheld.coverage.complete).toBe(false);
+    if (withheld.viewType === "daily_duration_series") {
+      expect(withheld.points).toEqual([]);
+    }
+  });
+
   it("withholds step points while a metric repair is incomplete", async () => {
     const repo = new InMemoryFamilyRepository();
     const api = createApp({

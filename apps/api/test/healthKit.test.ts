@@ -307,6 +307,62 @@ describe("HealthKit background sync", () => {
     });
   });
 
+  it("stores profile-local sleep day bounds on repairs and validates sleep against them", async () => {
+    const api = app();
+    const { token, profileId } = await setup(api);
+    await putSettings(api, token, profileId, { healthTimezone: "America/Los_Angeles" });
+
+    const created = await (
+      await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          installationId,
+          personId: profileId,
+          metric: "sleep",
+          timezoneVersion: 1
+        })
+      })
+    ).json();
+    expect(created.data.rangeStartDay).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(created.data.rangeEndDay).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(created.data.rangeStartDay <= created.data.rangeEndDay).toBe(true);
+
+    const outside = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        syncId: "b2fbe594-7e1d-4b31-a9a1-420b7fba42b2",
+        installationId,
+        personId: profileId,
+        timezoneVersion: 1,
+        repairId: created.data.repairId,
+        chunkIndex: 0,
+        operations: [{ kind: "sleep_day_upsert", sleepDay: "2019-01-01", durationMinutes: 400 }]
+      })
+    });
+    expect(outside.status).toBe(400);
+    await expect(outside.json()).resolves.toMatchObject({
+      error: { code: "healthkit_operation_invalid" }
+    });
+
+    const insideDay = created.data.rangeEndDay as string;
+    const ok = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        syncId: "b3fbe594-7e1d-4b31-a9a1-420b7fba42b3",
+        installationId,
+        personId: profileId,
+        timezoneVersion: 1,
+        repairId: created.data.repairId,
+        chunkIndex: 0,
+        operations: [{ kind: "sleep_day_upsert", sleepDay: insideDay, durationMinutes: 400 }]
+      })
+    });
+    expect(ok.status).toBe(200);
+  });
+
   it("rejects repair chunks outside the server 90-day range and completion after metric disable", async () => {
     const api = app();
     const { token, profileId } = await setup(api);

@@ -242,8 +242,12 @@ export type HealthKitRepair = {
   metric: HealthKitMetric;
   installationId: string;
   timezoneVersion: number;
+  /** Inclusive UTC instant bounds for steps/BP. */
   rangeStart: string;
   rangeEnd: string;
+  /** Inclusive profile-local sleep days (health timezone calendar). */
+  rangeStartDay: string;
+  rangeEndDay: string;
   expiresAt: string;
 };
 

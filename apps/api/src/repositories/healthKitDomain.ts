@@ -88,22 +88,52 @@ export function dayStringFromUtcIso(iso: string): string {
   return iso.slice(0, 10);
 }
 
+/** Calendar-day arithmetic on YYYY-MM-DD (independent of timezone offset). */
+export function addCalendarDays(day: string, delta: number): string {
+  const date = new Date(`${day}T12:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) {
+    throw new HttpError(400, "healthkit_operation_invalid", "Invalid calendar day.");
+  }
+  date.setUTCDate(date.getUTCDate() + delta);
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Inclusive profile-local sleep-day window ending on `rangeEndDay` (YYYY-MM-DD in health timezone).
+ * `windowDays` counts calendar days (e.g. 90 => end and 89 prior days).
+ */
+export function profileLocalSleepDayRange(rangeEndDay: string, windowDays = 90): {
+  rangeStartDay: string;
+  rangeEndDay: string;
+} {
+  if (windowDays < 1) {
+    throw new HttpError(400, "healthkit_repair_invalid", "Repair window must be at least one day.");
+  }
+  return {
+    rangeStartDay: addCalendarDays(rangeEndDay, -(windowDays - 1)),
+    rangeEndDay
+  };
+}
+
+export type HealthKitRepairRange = {
+  /** Inclusive UTC instant window for steps/BP. */
+  rangeStartIso: string;
+  rangeEndIso: string;
+  /** Inclusive profile-local sleep days (health timezone calendar). */
+  rangeStartDay: string;
+  rangeEndDay: string;
+};
+
 /**
  * Ensures a repair chunk operation falls within the server-issued repair window.
- * Range is inclusive on both ends for instants and calendar days.
+ * Instants use UTC bounds; sleep days use profile-local calendar days.
  */
-export function assertOperationInRepairRange(
-  op: HealthKitSyncOperation,
-  rangeStartIso: string,
-  rangeEndIso: string
-): void {
-  const rangeStartMs = Date.parse(rangeStartIso);
-  const rangeEndMs = Date.parse(rangeEndIso);
+export function assertOperationInRepairRange(op: HealthKitSyncOperation, range: HealthKitRepairRange): void {
+  const rangeStartMs = Date.parse(range.rangeStartIso);
+  const rangeEndMs = Date.parse(range.rangeEndIso);
   if (Number.isNaN(rangeStartMs) || Number.isNaN(rangeEndMs)) {
     throw new HttpError(400, "healthkit_repair_invalid", "Repair range is invalid.");
   }
-  const startDay = dayStringFromUtcIso(rangeStartIso);
-  const endDay = dayStringFromUtcIso(rangeEndIso);
 
   switch (op.kind) {
     case "steps_hour_upsert": {
@@ -114,7 +144,7 @@ export function assertOperationInRepairRange(
       return;
     }
     case "sleep_day_upsert": {
-      if (op.sleepDay < startDay || op.sleepDay > endDay) {
+      if (op.sleepDay < range.rangeStartDay || op.sleepDay > range.rangeEndDay) {
         throw new HttpError(400, "healthkit_operation_invalid", "sleep day is outside the repair range.");
       }
       return;
@@ -136,7 +166,10 @@ export function assertOperationInRepairRange(
   }
 }
 
-/** Incomplete repair windows must not expose partial records via MCP. */
+/**
+ * Incomplete repair and post-timezone-change windows must not expose records via MCP
+ * until the required repair completes under the current health timezone version.
+ */
 export function shouldWithholdMetricRecords(status: HealthMetricSyncStatusCode): boolean {
-  return status === "repairing";
+  return status === "repairing" || status === "repair_needed";
 }

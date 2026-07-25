@@ -95,12 +95,15 @@ CREATE TABLE "healthkit_repairs" (
   "timezone_version" integer NOT NULL,
   "range_start" timestamp with time zone NOT NULL,
   "range_end" timestamp with time zone NOT NULL,
+  "range_start_day" date NOT NULL,
+  "range_end_day" date NOT NULL,
   "expected_chunk_count" integer,
   "completed_at" timestamp with time zone,
   "expires_at" timestamp with time zone NOT NULL,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
   CONSTRAINT "healthkit_repairs_metric_check" CHECK ("metric" in ('steps', 'sleep', 'blood_pressure')),
   CONSTRAINT "healthkit_repairs_tz_version_check" CHECK ("timezone_version" >= 1),
+  CONSTRAINT "healthkit_repairs_day_order_check" CHECK ("range_start_day" <= "range_end_day"),
   CONSTRAINT "healthkit_repairs_expected_chunks_check" CHECK (
     "expected_chunk_count" is null or "expected_chunk_count" >= 0
   )

@@ -16,20 +16,32 @@ import type {
   PutHealthKitSettingsInput
 } from "@family-os/shared";
 import { HttpError } from "../../errors";
+import { localDateString } from "../../mcp/timezone";
 import {
   assertOperationInRepairRange,
   assertSelfProfileMatch,
   buildSyncResult,
   HEALTHKIT_METRICS,
   metricsAffected,
+  profileLocalSleepDayRange,
   REPAIR_TTL_MS,
   REPAIR_WINDOW_MS,
-  toUtcIso
+  toUtcIso,
+  type HealthKitRepairRange
 } from "../healthKitDomain";
 import { PostgresRepositoryContext } from "./context";
-import { toIso, toOptionalIso } from "./dateUtils";
+import { toDateString, toIso } from "./dateUtils";
 import { mapBloodPressure } from "./mappers";
 import type { Row } from "./types";
+
+function repairRangeFromRow(row: Row): HealthKitRepairRange {
+  return {
+    rangeStartIso: toIso(row.range_start),
+    rangeEndIso: toIso(row.range_end),
+    rangeStartDay: toDateString(row.range_start_day) ?? String(row.range_start_day).slice(0, 10),
+    rangeEndDay: toDateString(row.range_end_day) ?? String(row.range_end_day).slice(0, 10)
+  };
+}
 
 export class PostgresHealthKitStore {
   constructor(private readonly context: PostgresRepositoryContext) {}
@@ -231,7 +243,7 @@ export class PostgresHealthKitStore {
             throw new HttpError(400, "healthkit_repair_invalid", "Repair chunks may only include the repair metric.");
           }
           for (const op of input.operations) {
-            assertOperationInRepairRange(op, toIso(row.range_start), toIso(row.range_end));
+            assertOperationInRepairRange(op, repairRangeFromRow(row));
           }
           repair = row;
         }
@@ -249,9 +261,7 @@ export class PostgresHealthKitStore {
           timezoneVersion: input.timezoneVersion,
           operations: input.operations,
           nowIso,
-          repairRange: repair
-            ? { rangeStart: toIso(repair.range_start), rangeEnd: toIso(repair.range_end) }
-            : undefined
+          repairRange: repair ? repairRangeFromRow(repair) : undefined
         });
 
         for (const metric of affected) {
@@ -357,6 +367,10 @@ export class PostgresHealthKitStore {
         throw new HttpError(403, "healthkit_metric_disabled", `Metric ${input.metric} is not enabled.`);
       }
 
+      const healthTimezone = String(authority.settings.health_timezone ?? "UTC");
+      const localEndDay = localDateString(now, healthTimezone);
+      const { rangeStartDay, rangeEndDay } = profileLocalSleepDayRange(localEndDay, 90);
+
       await tx`
         update healthkit_repairs
         set expires_at = ${nowIso}
@@ -369,10 +383,11 @@ export class PostgresHealthKitStore {
       const [row] = await tx`
         insert into healthkit_repairs (
           person_id, family_id, metric, installation_id, timezone_version,
-          range_start, range_end, expires_at
+          range_start, range_end, range_start_day, range_end_day, expires_at
         ) values (
           ${input.personId}, ${current.family.id}, ${input.metric}, ${input.installationId},
-          ${input.timezoneVersion}, ${toUtcIso(rangeStart)}, ${toUtcIso(rangeEnd)}, ${toUtcIso(expiresAt)}
+          ${input.timezoneVersion}, ${toUtcIso(rangeStart)}, ${toUtcIso(rangeEnd)},
+          ${rangeStartDay}::date, ${rangeEndDay}::date, ${toUtcIso(expiresAt)}
         )
         returning *
       `;
@@ -398,14 +413,17 @@ export class PostgresHealthKitStore {
       metadata: { metric: input.metric, status: "created" }
     });
 
+    const range = repairRangeFromRow(repair);
     return {
       repairId: repair.repair_id,
       personId: repair.person_id,
       metric: repair.metric,
       installationId: repair.installation_id,
       timezoneVersion: repair.timezone_version,
-      rangeStart: toIso(repair.range_start),
-      rangeEnd: toIso(repair.range_end),
+      rangeStart: range.rangeStartIso,
+      rangeEnd: range.rangeEndIso,
+      rangeStartDay: range.rangeStartDay,
+      rangeEndDay: range.rangeEndDay,
       expiresAt: toIso(repair.expires_at)
     };
   }
@@ -466,14 +484,13 @@ export class PostgresHealthKitStore {
       }
 
       if (repair.metric === "sleep") {
-        const rangeStartDay = toIso(repair.range_start).slice(0, 10);
-        const rangeEndDay = toIso(repair.range_end).slice(0, 10);
+        const range = repairRangeFromRow(repair);
         await tx`
           delete from health_sleep_days
           where person_id = ${selfId}
             and timezone_version < ${repair.timezone_version}
-            and sleep_day >= ${rangeStartDay}::date
-            and sleep_day <= ${rangeEndDay}::date
+            and sleep_day >= ${range.rangeStartDay}::date
+            and sleep_day <= ${range.rangeEndDay}::date
         `;
       }
 
@@ -696,7 +713,7 @@ export class PostgresHealthKitStore {
       timezoneVersion: number;
       operations: HealthKitSyncOperation[];
       nowIso: string;
-      repairRange?: { rangeStart: string; rangeEnd: string };
+      repairRange?: HealthKitRepairRange;
     }
   ) {
     for (const op of input.operations) {
@@ -756,8 +773,8 @@ export class PostgresHealthKitStore {
             `;
             if (existing) {
               const t = Date.parse(String(existing.measured_at));
-              const start = Date.parse(input.repairRange.rangeStart);
-              const end = Date.parse(input.repairRange.rangeEnd);
+              const start = Date.parse(input.repairRange.rangeStartIso);
+              const end = Date.parse(input.repairRange.rangeEndIso);
               if (t < start || t > end) {
                 throw new HttpError(
                   400,

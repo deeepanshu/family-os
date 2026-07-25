@@ -311,6 +311,8 @@ export const healthkitRepairs = pgTable(
     timezoneVersion: integer("timezone_version").notNull(),
     rangeStart: timestamp("range_start", { withTimezone: true }).notNull(),
     rangeEnd: timestamp("range_end", { withTimezone: true }).notNull(),
+    rangeStartDay: date("range_start_day").notNull(),
+    rangeEndDay: date("range_end_day").notNull(),
     expectedChunkCount: integer("expected_chunk_count"),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
@@ -319,7 +321,8 @@ export const healthkitRepairs = pgTable(
   (table) => [
     index("healthkit_repairs_person_metric_idx").on(table.personId, table.metric, table.createdAt),
     check("healthkit_repairs_metric_check", sql`${table.metric} in ('steps', 'sleep', 'blood_pressure')`),
-    check("healthkit_repairs_tz_version_check", sql`${table.timezoneVersion} >= 1`)
+    check("healthkit_repairs_tz_version_check", sql`${table.timezoneVersion} >= 1`),
+    check("healthkit_repairs_day_order_check", sql`${table.rangeStartDay} <= ${table.rangeEndDay}`)
   ]
 );
 
