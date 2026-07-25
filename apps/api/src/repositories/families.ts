@@ -55,6 +55,7 @@ import type {
   ReminderStore
 } from "./contracts";
 import {
+  assertOperationInRepairRange,
   assertSelfProfileMatch,
   buildSyncResult,
   HEALTHKIT_METRICS,
@@ -490,10 +491,18 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     }
 
     const hasBloodPressure = [...this.bloodPressureReadings.values()].some(
-      (reading) => reading.familyId === familyId && !reading.deletedAt && reading.source === "manual"
+      (reading) => reading.familyId === familyId && !reading.deletedAt
     );
     if (hasBloodPressure) {
-      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has manual blood pressure readings.");
+      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has blood pressure readings.");
+    }
+    const hasSteps = [...this.healthStepHours.values()].some((row) => row.familyId === familyId);
+    if (hasSteps) {
+      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has HealthKit step data.");
+    }
+    const hasSleep = [...this.healthSleepDays.values()].some((row) => row.familyId === familyId);
+    if (hasSleep) {
+      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has HealthKit sleep data.");
     }
 
     const hasBloodGlucose = [...this.bloodGlucoseReadings.values()].some(
@@ -596,44 +605,10 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     return current;
   }
 
-  async createBloodPressure(input: CreateBloodPressureInput): Promise<BloodPressureReading> {
-    const current = this.requireActiveMember(input.actorUserId);
-    const profile = this.profiles.get(input.personId);
-    if (!profile || profile.familyId !== current.family.id || profile.status !== "active") {
-      throw new HttpError(404, "profile_not_found", "Health profile was not found.");
-    }
-    const now = new Date().toISOString();
-    const reading: BloodPressureReading = {
-      id: crypto.randomUUID(),
-      familyId: current.family.id,
-      personId: input.personId,
-      recordedByUserId: input.actorUserId,
-      systolic: input.systolic,
-      diastolic: input.diastolic,
-      pulse: input.pulse,
-      measuredAt: input.measuredAt,
-      context: input.context,
-      notes: input.notes,
-      source: "manual",
-      createdAt: now,
-      updatedAt: now
-    };
-    this.bloodPressureReadings.set(reading.id, reading);
-    this.audit({
-      familyId: current.family.id,
-      actorUserId: input.actorUserId,
-      action: "blood_pressure.created",
-      resourceType: "blood_pressure_reading",
-      resourceId: reading.id,
-      metadata: { personId: input.personId }
-    });
-    return reading;
-  }
-
   async listBloodPressure(actorUserId: string, personId?: string, limit = 50): Promise<BloodPressureReading[]> {
     const current = this.requireActiveMember(actorUserId);
     return [...this.bloodPressureReadings.values()]
-      .filter((reading) => reading.familyId === current.family.id && !reading.deletedAt)
+      .filter((reading) => reading.familyId === current.family.id && !reading.deletedAt && reading.source === "healthkit")
       .filter((reading) => !personId || reading.personId === personId)
       .sort((a, b) => Date.parse(b.measuredAt) - Date.parse(a.measuredAt))
       .slice(0, limit)
@@ -643,54 +618,10 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   async getBloodPressure(actorUserId: string, readingId: string): Promise<BloodPressureReading> {
     const current = this.requireActiveMember(actorUserId);
     const reading = this.bloodPressureReadings.get(readingId);
-    if (!reading || reading.familyId !== current.family.id || reading.deletedAt) {
+    if (!reading || reading.familyId !== current.family.id || reading.deletedAt || reading.source !== "healthkit") {
       throw new HttpError(404, "bp_reading_not_found", "Blood pressure reading was not found.");
     }
     return stripDeleted(reading);
-  }
-
-  async updateBloodPressure(
-    actorUserId: string,
-    readingId: string,
-    input: UpdateBloodPressureInput
-  ): Promise<BloodPressureReading> {
-    const current = this.requireActiveMember(actorUserId);
-    const reading = this.bloodPressureReadings.get(readingId);
-    if (!reading || reading.familyId !== current.family.id || reading.deletedAt) {
-      throw new HttpError(404, "bp_reading_not_found", "Blood pressure reading was not found.");
-    }
-    if (reading.recordedByUserId !== actorUserId && current.membership.role !== "manager") {
-      throw new HttpError(403, "reading_owner_or_manager_required", "Only the recorder or a manager can change this reading.");
-    }
-    const updated = { ...reading, ...defined(input), updatedAt: new Date().toISOString() };
-    this.bloodPressureReadings.set(readingId, updated);
-    this.audit({
-      familyId: current.family.id,
-      actorUserId,
-      action: "blood_pressure.updated",
-      resourceType: "blood_pressure_reading",
-      resourceId: readingId
-    });
-    return stripDeleted(updated);
-  }
-
-  async deleteBloodPressure(actorUserId: string, readingId: string): Promise<void> {
-    const current = this.requireActiveMember(actorUserId);
-    const reading = this.bloodPressureReadings.get(readingId);
-    if (!reading || reading.familyId !== current.family.id || reading.deletedAt) {
-      throw new HttpError(404, "bp_reading_not_found", "Blood pressure reading was not found.");
-    }
-    if (reading.recordedByUserId !== actorUserId && current.membership.role !== "manager") {
-      throw new HttpError(403, "reading_owner_or_manager_required", "Only the recorder or a manager can delete this reading.");
-    }
-    this.bloodPressureReadings.set(readingId, { ...reading, deletedAt: new Date().toISOString() });
-    this.audit({
-      familyId: current.family.id,
-      actorUserId,
-      action: "blood_pressure.deleted",
-      resourceType: "blood_pressure_reading",
-      resourceId: readingId
-    });
   }
 
   async createBloodGlucose(input: CreateBloodGlucoseInput): Promise<BloodGlucoseReading> {
@@ -940,6 +871,9 @@ export class InMemoryFamilyRepository implements FamilyRepository {
         if (affected.length !== 1 || affected[0] !== repair.metric) {
           throw new HttpError(400, "healthkit_repair_invalid", "Repair chunks may only include the repair metric.");
         }
+        for (const op of input.operations) {
+          assertOperationInRepairRange(op, repair.rangeStart, repair.rangeEnd);
+        }
       }
 
       for (const metric of affected) {
@@ -954,7 +888,11 @@ export class InMemoryFamilyRepository implements FamilyRepository {
         actorUserId,
         timezoneVersion: input.timezoneVersion,
         operations: input.operations,
-        nowIso
+        nowIso,
+        repairRange:
+          repair !== undefined
+            ? { rangeStart: repair.rangeStart, rangeEnd: repair.rangeEnd }
+            : undefined
       });
 
       for (const metric of affected) {
@@ -1112,6 +1050,16 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     }
     if (Date.parse(repair.expiresAt) <= Date.now()) {
       throw new HttpError(400, "healthkit_repair_invalid", "Repair session is expired.");
+    }
+    const settings = this.healthKitProfileSettings.get(selfProfile.id);
+    if (!settings?.consentedAt) {
+      throw new HttpError(403, "healthkit_consent_required", "HealthKit upload consent is required.");
+    }
+    if (settings.healthTimezoneVersion !== repair.timezoneVersion) {
+      throw new HttpError(409, "healthkit_timezone_version_invalid", "Timezone version is stale.");
+    }
+    if (!this.healthKitMetricEnabled.get(`${selfProfile.id}:${repair.metric}`)) {
+      throw new HttpError(403, "healthkit_metric_disabled", `Metric ${repair.metric} is not enabled.`);
     }
     const active = this.activeInstallation(selfProfile.id);
     if (!active || active.installationId !== repair.installationId) {
@@ -1316,6 +1264,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     timezoneVersion: number;
     operations: HealthKitSyncOperation[];
     nowIso: string;
+    repairRange?: { rangeStart: string; rangeEnd: string };
   }) {
     for (const op of input.operations) {
       switch (op.kind) {
@@ -1341,13 +1290,15 @@ export class InMemoryFamilyRepository implements FamilyRepository {
             (reading) =>
               reading.personId === input.personId &&
               reading.source === "healthkit" &&
-              (reading as BloodPressureReading & { sourceSampleKey?: string }).sourceSampleKey === op.sourceSampleKey
+              reading.sourceSampleKey === op.sourceSampleKey
           );
-          // Prefer keyed storage by synthetic key for HealthKit correlation UUID.
           const storeKey =
             [...this.bloodPressureReadings.entries()].find(([, reading]) => {
-              const r = reading as BloodPressureReading & { sourceSampleKey?: string };
-              return r.personId === input.personId && r.source === "healthkit" && r.sourceSampleKey === op.sourceSampleKey;
+              return (
+                reading.personId === input.personId &&
+                reading.source === "healthkit" &&
+                reading.sourceSampleKey === op.sourceSampleKey
+              );
             })?.[0] ?? crypto.randomUUID();
           const reading: BloodPressureReading & { sourceSampleKey?: string; deletedAt?: string } = {
             id: existing?.id ?? storeKey,
@@ -1369,8 +1320,23 @@ export class InMemoryFamilyRepository implements FamilyRepository {
         }
         case "blood_pressure_delete": {
           for (const [key, reading] of this.bloodPressureReadings) {
-            const r = reading as BloodPressureReading & { sourceSampleKey?: string };
-            if (r.personId === input.personId && r.source === "healthkit" && r.sourceSampleKey === op.sourceSampleKey) {
+            if (
+              reading.personId === input.personId &&
+              reading.source === "healthkit" &&
+              reading.sourceSampleKey === op.sourceSampleKey
+            ) {
+              if (input.repairRange) {
+                const t = Date.parse(reading.measuredAt);
+                const start = Date.parse(input.repairRange.rangeStart);
+                const end = Date.parse(input.repairRange.rangeEnd);
+                if (t < start || t > end) {
+                  throw new HttpError(
+                    400,
+                    "healthkit_operation_invalid",
+                    "blood pressure deletion is outside the repair range."
+                  );
+                }
+              }
               this.bloodPressureReadings.delete(key);
             }
           }

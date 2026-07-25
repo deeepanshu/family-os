@@ -29,7 +29,6 @@ import type {
 } from "@family-os/shared";
 import type {
   CreateBloodGlucoseInput,
-  CreateBloodPressureInput,
   CreateFamilyInput,
   CreateInviteInput,
   CreateProfileInput,
@@ -37,7 +36,6 @@ import type {
   FamilyRepository,
   RegisterDeviceInput,
   UpdateBloodGlucoseInput,
-  UpdateBloodPressureInput,
   UpdateProfileInput,
   UpdateReminderInput
 } from "../families";
@@ -132,24 +130,12 @@ export class PostgresFamilyRepository implements FamilyRepository {
     return this.familyStore.deleteProfile(actorUserId, profileId);
   }
 
-  createBloodPressure(input: CreateBloodPressureInput): Promise<BloodPressureReading> {
-    return this.readingStore.createBloodPressure(input);
-  }
-
   listBloodPressure(actorUserId: string, personId?: string, limit?: number): Promise<BloodPressureReading[]> {
     return this.readingStore.listBloodPressure(actorUserId, personId, limit);
   }
 
   getBloodPressure(actorUserId: string, readingId: string): Promise<BloodPressureReading> {
     return this.readingStore.getBloodPressure(actorUserId, readingId);
-  }
-
-  updateBloodPressure(actorUserId: string, readingId: string, input: UpdateBloodPressureInput): Promise<BloodPressureReading> {
-    return this.readingStore.updateBloodPressure(actorUserId, readingId, input);
-  }
-
-  deleteBloodPressure(actorUserId: string, readingId: string): Promise<void> {
-    return this.readingStore.deleteBloodPressure(actorUserId, readingId);
   }
 
   createBloodGlucose(input: CreateBloodGlucoseInput): Promise<BloodGlucoseReading> {

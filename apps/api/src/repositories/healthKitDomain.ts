@@ -87,3 +87,56 @@ export function toUtcIso(date: Date): string {
 export function dayStringFromUtcIso(iso: string): string {
   return iso.slice(0, 10);
 }
+
+/**
+ * Ensures a repair chunk operation falls within the server-issued repair window.
+ * Range is inclusive on both ends for instants and calendar days.
+ */
+export function assertOperationInRepairRange(
+  op: HealthKitSyncOperation,
+  rangeStartIso: string,
+  rangeEndIso: string
+): void {
+  const rangeStartMs = Date.parse(rangeStartIso);
+  const rangeEndMs = Date.parse(rangeEndIso);
+  if (Number.isNaN(rangeStartMs) || Number.isNaN(rangeEndMs)) {
+    throw new HttpError(400, "healthkit_repair_invalid", "Repair range is invalid.");
+  }
+  const startDay = dayStringFromUtcIso(rangeStartIso);
+  const endDay = dayStringFromUtcIso(rangeEndIso);
+
+  switch (op.kind) {
+    case "steps_hour_upsert": {
+      const t = Date.parse(op.hourStartUtc);
+      if (Number.isNaN(t) || t < rangeStartMs || t > rangeEndMs) {
+        throw new HttpError(400, "healthkit_operation_invalid", "steps hour is outside the repair range.");
+      }
+      return;
+    }
+    case "sleep_day_upsert": {
+      if (op.sleepDay < startDay || op.sleepDay > endDay) {
+        throw new HttpError(400, "healthkit_operation_invalid", "sleep day is outside the repair range.");
+      }
+      return;
+    }
+    case "blood_pressure_upsert": {
+      const t = Date.parse(op.measuredAtUtc);
+      if (Number.isNaN(t) || t < rangeStartMs || t > rangeEndMs) {
+        throw new HttpError(400, "healthkit_operation_invalid", "blood pressure measurement is outside the repair range.");
+      }
+      return;
+    }
+    case "blood_pressure_delete":
+      // Delete is keyed by correlation UUID; range is enforced against stored rows at apply time when available.
+      return;
+    default: {
+      const _exhaustive: never = op;
+      throw new HttpError(400, "healthkit_operation_invalid", `Unknown operation ${(_exhaustive as HealthKitSyncOperation).kind}`);
+    }
+  }
+}
+
+/** Incomplete repair windows must not expose partial records via MCP. */
+export function shouldWithholdMetricRecords(status: HealthMetricSyncStatusCode): boolean {
+  return status === "repairing";
+}

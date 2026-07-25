@@ -17,7 +17,7 @@ import type {
   ProfileStore,
   RecordAuditInput
 } from "../repositories/contracts";
-import { coverageComplete } from "../repositories/healthKitDomain";
+import { coverageComplete, shouldWithholdMetricRecords } from "../repositories/healthKitDomain";
 import { resolveMetricQuery } from "./metricRegistry";
 import { McpRateLimiter } from "./rateLimit";
 import {
@@ -108,9 +108,13 @@ export class HealthMcpReadService {
         rangeStart: `${rangeStart}T00:00:00.000Z`,
         rangeEnd: `${rangeEnd}T23:59:59.999Z`
       });
+      // Incomplete repairs write canonical rows early; withhold them from MCP until completion.
+      const withhold = shouldWithholdMetricRecords(freshness.status);
 
       if (query.metric === "steps" && query.granularity === "hourly") {
-        const points = await this.loadHourlySteps(caller.userId, input.personId, rangeStart, rangeEnd, presentationTimezone);
+        const points = withhold
+          ? []
+          : await this.loadHourlySteps(caller.userId, input.personId, rangeStart, rangeEnd, presentationTimezone);
         return {
           personId: input.personId,
           healthMetric: "steps",
@@ -124,8 +128,8 @@ export class HealthMcpReadService {
             rangeEnd,
             daysWithData: countDistinctDaysFromBuckets(points.map((p) => p.bucket.slice(0, 10))),
             complete,
-            availableStart: freshness.coverageStartAt,
-            availableEnd: freshness.coverageEndAt
+            availableStart: withhold ? undefined : freshness.coverageStartAt,
+            availableEnd: withhold ? undefined : freshness.coverageEndAt
           },
           lastSyncedAt: freshness.lastSuccessfulAt,
           metricSyncStatus: freshness.status,
@@ -135,7 +139,9 @@ export class HealthMcpReadService {
       }
 
       if (query.metric === "steps") {
-        const points = await this.loadDailySteps(caller.userId, input.personId, rangeStart, rangeEnd, presentationTimezone);
+        const points = withhold
+          ? []
+          : await this.loadDailySteps(caller.userId, input.personId, rangeStart, rangeEnd, presentationTimezone);
         return {
           personId: input.personId,
           healthMetric: "steps",
@@ -149,8 +155,8 @@ export class HealthMcpReadService {
             rangeEnd,
             daysWithData: points.length,
             complete,
-            availableStart: freshness.coverageStartAt,
-            availableEnd: freshness.coverageEndAt
+            availableStart: withhold ? undefined : freshness.coverageStartAt,
+            availableEnd: withhold ? undefined : freshness.coverageEndAt
           },
           lastSyncedAt: freshness.lastSuccessfulAt,
           metricSyncStatus: freshness.status,
@@ -160,7 +166,9 @@ export class HealthMcpReadService {
       }
 
       if (query.metric === "sleep") {
-        const points = await this.loadDailySleepHours(caller.userId, input.personId, rangeStart, rangeEnd);
+        const points = withhold
+          ? []
+          : await this.loadDailySleepHours(caller.userId, input.personId, rangeStart, rangeEnd);
         return {
           personId: input.personId,
           healthMetric: "sleep",
@@ -174,8 +182,8 @@ export class HealthMcpReadService {
             rangeEnd,
             daysWithData: points.length,
             complete,
-            availableStart: freshness.coverageStartAt,
-            availableEnd: freshness.coverageEndAt
+            availableStart: withhold ? undefined : freshness.coverageStartAt,
+            availableEnd: withhold ? undefined : freshness.coverageEndAt
           },
           lastSyncedAt: freshness.lastSuccessfulAt,
           metricSyncStatus: freshness.status,
@@ -185,14 +193,16 @@ export class HealthMcpReadService {
       }
 
       const maxReadings = query.maxReadings ?? 200;
-      const { readings, truncated } = await this.loadBloodPressureTable(
-        caller.userId,
-        input.personId,
-        rangeStart,
-        rangeEnd,
-        presentationTimezone,
-        maxReadings
-      );
+      const { readings, truncated } = withhold
+        ? { readings: [], truncated: false }
+        : await this.loadBloodPressureTable(
+            caller.userId,
+            input.personId,
+            rangeStart,
+            rangeEnd,
+            presentationTimezone,
+            maxReadings
+          );
       return {
         personId: input.personId,
         healthMetric: "blood_pressure",
@@ -206,8 +216,8 @@ export class HealthMcpReadService {
           rangeEnd,
           daysWithData: countDistinctDaysFromBuckets(readings.map((r) => r.localDate)),
           complete,
-          availableStart: freshness.coverageStartAt,
-          availableEnd: freshness.coverageEndAt
+          availableStart: withhold ? undefined : freshness.coverageStartAt,
+          availableEnd: withhold ? undefined : freshness.coverageEndAt
         },
         lastSyncedAt: freshness.lastSuccessfulAt,
         metricSyncStatus: freshness.status,

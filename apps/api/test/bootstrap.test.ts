@@ -319,12 +319,13 @@ describe("solo-first bootstrap", () => {
     expect(body.data.family.kind).toBe("family");
   });
 
-  it("rejects switching an unsafe personal workspace with manual readings", async () => {
+  it("rejects switching an unsafe personal workspace with HealthKit BP data", async () => {
     const api = app();
     const firstUserId = "00000000-0000-4000-8000-000000000508";
     const secondUserId = "00000000-0000-4000-8000-000000000509";
     const firstToken = await jwtFor(firstUserId, "first@example.com");
     const secondToken = await jwtFor(secondUserId, "second@example.com");
+    const installationId = "53064303-35cf-4db0-a5d3-8af7d8f747e1";
 
     await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
       method: "POST",
@@ -345,14 +346,34 @@ describe("solo-first bootstrap", () => {
       headers: { authorization: `Bearer ${secondToken}`, "content-type": "application/json" },
       body: JSON.stringify({ displayName: "Second" })
     })).json();
-    await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure`, {
-      method: "POST",
+    await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
+      method: "PUT",
       headers: { authorization: `Bearer ${secondToken}`, "content-type": "application/json" },
       body: JSON.stringify({
         personId: secondSelfProfile.data.id,
-        systolic: 120,
-        diastolic: 80,
-        measuredAt: "2026-06-21T10:00:00.000Z"
+        consentVersion: "1",
+        enabledMetrics: ["blood_pressure"],
+        healthTimezone: "UTC",
+        installationId
+      })
+    });
+    await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${secondToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        syncId: "7afbe594-7e1d-4b31-a9a1-420b7fba42d1",
+        installationId,
+        personId: secondSelfProfile.data.id,
+        timezoneVersion: 1,
+        operations: [
+          {
+            kind: "blood_pressure_upsert",
+            sourceSampleKey: "5e1ed621-4a6c-4e09-969e-31c6f0872c24",
+            measuredAtUtc: "2026-06-21T10:00:00.000Z",
+            systolic: 120,
+            diastolic: 80
+          }
+        ]
       })
     });
 

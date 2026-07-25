@@ -30,14 +30,12 @@ import type {
 } from "@family-os/shared";
 import type {
   CreateBloodGlucoseInput,
-  CreateBloodPressureInput,
   CreateFamilyInput,
   CreateInviteInput,
   CreateProfileInput,
   CreateReminderInput,
   RegisterDeviceInput,
   UpdateBloodGlucoseInput,
-  UpdateBloodPressureInput,
   UpdateProfileInput,
   UpdateReminderInput
 } from "./families";
@@ -75,11 +73,9 @@ export interface ProfileStore {
 }
 
 export interface ReadingStore {
-  createBloodPressure(input: CreateBloodPressureInput): Promise<BloodPressureReading>;
+  /** HealthKit-synced BP only (manual BP write paths are removed). */
   listBloodPressure(actorUserId: string, personId?: string, limit?: number): Promise<BloodPressureReading[]>;
   getBloodPressure(actorUserId: string, readingId: string): Promise<BloodPressureReading>;
-  updateBloodPressure(actorUserId: string, readingId: string, input: UpdateBloodPressureInput): Promise<BloodPressureReading>;
-  deleteBloodPressure(actorUserId: string, readingId: string): Promise<void>;
   createBloodGlucose(input: CreateBloodGlucoseInput): Promise<BloodGlucoseReading>;
   listBloodGlucose(actorUserId: string, personId?: string, limit?: number): Promise<BloodGlucoseReading[]>;
   getBloodGlucose(actorUserId: string, readingId: string): Promise<BloodGlucoseReading>;

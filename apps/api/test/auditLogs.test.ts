@@ -67,16 +67,6 @@ describe("audit logs", () => {
         body: JSON.stringify({ displayName: "Mom" })
       })
     ).json();
-    await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${memberToken}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        personId: profile.data.id,
-        systolic: 121,
-        diastolic: 79,
-        measuredAt: "2026-06-21T10:00:00.000Z"
-      })
-    });
     await api.request(`${HEALTH_API_PREFIX}/reminders`, {
       method: "POST",
       headers: { authorization: `Bearer ${memberToken}`, "content-type": "application/json" },
@@ -110,7 +100,6 @@ describe("audit logs", () => {
         "invite.created",
         "invite.accepted",
         "profile.created",
-        "blood_pressure.created",
         "reminder.created",
         "device.registered"
       ])

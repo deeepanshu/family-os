@@ -284,10 +284,23 @@ export class PostgresFamilyStore {
       from blood_pressure_readings
       where family_id = ${familyId}
         and deleted_at is null
-        and source = 'manual'
     `;
     if (bpCount && Number(bpCount.count) > 0) {
-      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has manual blood pressure readings.");
+      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has blood pressure readings.");
+    }
+
+    const [stepCount] = await tx`
+      select count(*) as count from health_step_hours where family_id = ${familyId}
+    `;
+    if (stepCount && Number(stepCount.count) > 0) {
+      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has HealthKit step data.");
+    }
+
+    const [sleepCount] = await tx`
+      select count(*) as count from health_sleep_days where family_id = ${familyId}
+    `;
+    if (sleepCount && Number(sleepCount.count) > 0) {
+      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has HealthKit sleep data.");
     }
 
     const [glucoseCount] = await tx`

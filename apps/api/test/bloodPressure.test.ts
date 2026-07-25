@@ -6,9 +6,8 @@ import { InMemoryFamilyRepository } from "../src/repositories/families";
 
 const jwtSecret = "test-supabase-jwt-secret-with-enough-length";
 const supabaseUrl = "https://project.supabase.co";
-const managerId = "00000000-0000-4000-8000-000000000401";
-const memberId = "00000000-0000-4000-8000-000000000402";
-const strangerId = "00000000-0000-4000-8000-000000000403";
+const userId = "00000000-0000-4000-8000-000000000401";
+const installationId = "53064303-35cf-4db0-a5d3-8af7d8f747e1";
 
 function app() {
   return createApp({
@@ -34,162 +33,98 @@ async function jwtFor(subject: string, email = `${subject}@example.com`) {
     .sign(new TextEncoder().encode(jwtSecret));
 }
 
-async function setup(api: ReturnType<typeof app>) {
-  const managerToken = await jwtFor(managerId);
-  const memberToken = await jwtFor(memberId, "member@example.com");
-  await api.request(`${HEALTH_API_PREFIX}/families`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ name: "Jain Family" })
-  });
-  const invite = await (
-    await api.request(`${HEALTH_API_PREFIX}/invites`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ email: "member@example.com", role: "member" })
-    })
-  ).json();
-  await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${memberToken}` }
-  });
-  const profile = await (
-    await api.request(`${HEALTH_API_PREFIX}/people`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ displayName: "Mom" })
-    })
-  ).json();
-  return { managerToken, memberToken, profileId: profile.data.id };
-}
-
-async function addMember(api: ReturnType<typeof app>, managerToken: string, userId: string, email: string) {
-  const token = await jwtFor(userId, email);
-  const invite = await (
-    await api.request(`${HEALTH_API_PREFIX}/invites`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ email, role: "member" })
-    })
-  ).json();
-  await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {
+async function setupHealthKitBp(api: ReturnType<typeof app>) {
+  const token = await jwtFor(userId);
+  await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}` }
   });
-  return token;
-}
-
-async function createReading(api: ReturnType<typeof app>, token: string, personId: string) {
-  return api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure`, {
+  const profile = await (
+    await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "Deepanshu" })
+    })
+  ).json();
+  const profileId = profile.data.id as string;
+  await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
+    method: "PUT",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      personId: profileId,
+      consentVersion: "1",
+      enabledMetrics: ["blood_pressure"],
+      healthTimezone: "UTC",
+      installationId
+    })
+  });
+  await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({
-      personId,
-      systolic: 121,
-      diastolic: 79,
-      pulse: 72,
-      measuredAt: "2026-06-21T10:00:00.000Z",
-      context: "morning",
-      notes: "after walk"
+      syncId: "7afbe594-7e1d-4b31-a9a1-420b7fba42c1",
+      installationId,
+      personId: profileId,
+      timezoneVersion: 1,
+      operations: [
+        {
+          kind: "blood_pressure_upsert",
+          sourceSampleKey: "5e1ed621-4a6c-4e09-969e-31c6f0872c24",
+          measuredAtUtc: "2026-07-25T01:10:00.000Z",
+          systolic: 118,
+          diastolic: 76
+        }
+      ]
     })
   });
+  return { token, profileId };
 }
 
 describe("blood pressure readings", () => {
-  it("lets active members create and list BP readings for a family profile", async () => {
+  it("is read-only over HealthKit-synced BP and rejects manual create/update/delete", async () => {
     const api = app();
-    const { memberToken, profileId } = await setup(api);
-
-    const created = await createReading(api, memberToken, profileId);
-
-    expect(created.status).toBe(201);
-    const body = await created.json();
-    expect(body.data).toMatchObject({
-      personId: profileId,
-      recordedByUserId: memberId,
-      systolic: 121,
-      diastolic: 79
-    });
+    const { token, profileId } = await setupHealthKitBp(api);
 
     const list = await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure?personId=${profileId}`, {
-      headers: { authorization: `Bearer ${memberToken}` }
+      headers: { authorization: `Bearer ${token}` }
     });
-    await expect(list.json()).resolves.toMatchObject({ data: [{ id: body.data.id }] });
-  });
+    expect(list.status).toBe(200);
+    const body = await list.json();
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]).toMatchObject({ systolic: 118, diastolic: 76, source: "healthkit" });
+    const readingId = body.data[0].id as string;
 
-  it("validates BP ranges", async () => {
-    const api = app();
-    const { memberToken, profileId } = await setup(api);
-    const response = await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure`, {
+    const create = await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure`, {
       method: "POST",
-      headers: { authorization: `Bearer ${memberToken}`, "content-type": "application/json" },
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({
         personId: profileId,
-        systolic: 20,
-        diastolic: 79,
-        measuredAt: "2026-06-21T10:00:00.000Z"
+        systolic: 120,
+        diastolic: 80,
+        measuredAt: "2026-07-25T02:00:00.000Z"
       })
     });
+    expect(create.status).toBe(404);
 
-    expect(response.status).toBe(400);
-  });
-
-  it("allows recorders and managers, but not other members, to update/delete readings", async () => {
-    const api = app();
-    const { managerToken, memberToken, profileId } = await setup(api);
-    const created = await (await createReading(api, memberToken, profileId)).json();
-
-    const managerPatch = await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure/${created.data.id}`, {
+    const patch = await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure/${readingId}`, {
       method: "PATCH",
-      headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ systolic: 122 })
-    });
-    expect(managerPatch.status).toBe(200);
-
-    const sameFamilyOtherToken = await addMember(api, managerToken, strangerId, "other@example.com");
-    const forbidden = await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure/${created.data.id}`, {
-      method: "PATCH",
-      headers: { authorization: `Bearer ${sameFamilyOtherToken}`, "content-type": "application/json" },
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ systolic: 130 })
     });
-    expect(forbidden.status).toBe(403);
+    expect(patch.status).toBe(404);
 
-    const deleted = await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure/${created.data.id}`, {
+    const del = await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure/${readingId}`, {
       method: "DELETE",
-      headers: { authorization: `Bearer ${memberToken}` }
+      headers: { authorization: `Bearer ${token}` }
     });
-    expect(deleted.status).toBe(204);
+    expect(del.status).toBe(404);
 
-    const detail = await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure/${created.data.id}`, {
-      headers: { authorization: `Bearer ${memberToken}` }
-    });
-    expect(detail.status).toBe(404);
-
-    const list = await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure?personId=${profileId}`, {
-      headers: { authorization: `Bearer ${memberToken}` }
-    });
-    await expect(list.json()).resolves.toEqual({ data: [] });
-  });
-
-  it("does not allow creating BP readings for another family's profile", async () => {
-    const api = app();
-    const { memberToken } = await setup(api);
-    const otherToken = await jwtFor(strangerId);
-    await api.request(`${HEALTH_API_PREFIX}/families`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${otherToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ name: "Other Family" })
-    });
-    const otherProfile = await (
-      await api.request(`${HEALTH_API_PREFIX}/people`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${otherToken}`, "content-type": "application/json" },
-        body: JSON.stringify({ displayName: "Other" })
+    const stillThere = await (
+      await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure?personId=${profileId}`, {
+        headers: { authorization: `Bearer ${token}` }
       })
     ).json();
-
-    const response = await createReading(api, memberToken, otherProfile.data.id);
-
-    expect(response.status).toBe(404);
+    expect(stillThere.data).toHaveLength(1);
+    expect(stillThere.data[0].systolic).toBe(118);
   });
 });

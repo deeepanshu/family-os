@@ -307,6 +307,70 @@ describe("HealthKit background sync", () => {
     });
   });
 
+  it("rejects repair chunks outside the server 90-day range and completion after metric disable", async () => {
+    const api = app();
+    const { token, profileId } = await setup(api);
+    await putSettings(api, token, profileId);
+
+    const created = await (
+      await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          installationId,
+          personId: profileId,
+          metric: "steps",
+          timezoneVersion: 1
+        })
+      })
+    ).json();
+    const repairId = created.data.repairId as string;
+
+    const tooOld = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        syncId: "b0fbe594-7e1d-4b31-a9a1-420b7fba42b0",
+        installationId,
+        personId: profileId,
+        timezoneVersion: 1,
+        repairId,
+        chunkIndex: 0,
+        operations: [{ kind: "steps_hour_upsert", hourStartUtc: "2020-01-01T00:00:00.000Z", count: 100 }]
+      })
+    });
+    expect(tooOld.status).toBe(400);
+    await expect(tooOld.json()).resolves.toMatchObject({
+      error: { code: "healthkit_operation_invalid" }
+    });
+
+    const okChunk = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        syncId: "b1fbe594-7e1d-4b31-a9a1-420b7fba42b1",
+        installationId,
+        personId: profileId,
+        timezoneVersion: 1,
+        repairId,
+        chunkIndex: 0,
+        operations: [{ kind: "steps_hour_upsert", hourStartUtc: "2026-07-20T02:00:00.000Z", count: 100 }]
+      })
+    });
+    expect(okChunk.status).toBe(200);
+
+    await putSettings(api, token, profileId, { enabledMetrics: ["sleep"] });
+    const completeAfterDisable = await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs/${repairId}/complete`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ expectedChunkCount: 1 })
+    });
+    expect(completeAfterDisable.status).toBe(403);
+    await expect(completeAfterDisable.json()).resolves.toMatchObject({
+      error: { code: "healthkit_metric_disabled" }
+    });
+  });
+
   it("upserts and hard-deletes HealthKit blood pressure by correlation UUID", async () => {
     const api = app();
     const { token, profileId } = await setup(api);

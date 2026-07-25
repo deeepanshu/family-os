@@ -1,7 +1,8 @@
 -- HealthKit background sync: canonical tables, authority, repair metadata.
--- Clean cutover: drop legacy sample feed and imported HealthKit clinical rows.
+-- Clean cutover: drop legacy sample feed, all BP history (manual + HealthKit),
+-- and imported HealthKit glucose. BP is HealthKit-only after this migration.
 
-DELETE FROM blood_pressure_readings WHERE source = 'healthkit';
+DELETE FROM blood_pressure_readings;
 --> statement-breakpoint
 DELETE FROM blood_glucose_readings WHERE source = 'healthkit';
 --> statement-breakpoint

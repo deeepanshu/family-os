@@ -17,10 +17,10 @@ import type {
 } from "@family-os/shared";
 import { HttpError } from "../../errors";
 import {
+  assertOperationInRepairRange,
   assertSelfProfileMatch,
   buildSyncResult,
   HEALTHKIT_METRICS,
-  metricForOperation,
   metricsAffected,
   REPAIR_TTL_MS,
   REPAIR_WINDOW_MS,
@@ -230,6 +230,9 @@ export class PostgresHealthKitStore {
           if (affected.length !== 1 || affected[0] !== row.metric) {
             throw new HttpError(400, "healthkit_repair_invalid", "Repair chunks may only include the repair metric.");
           }
+          for (const op of input.operations) {
+            assertOperationInRepairRange(op, toIso(row.range_start), toIso(row.range_end));
+          }
           repair = row;
         }
 
@@ -245,7 +248,10 @@ export class PostgresHealthKitStore {
           actorUserId,
           timezoneVersion: input.timezoneVersion,
           operations: input.operations,
-          nowIso
+          nowIso,
+          repairRange: repair
+            ? { rangeStart: toIso(repair.range_start), rangeEnd: toIso(repair.range_end) }
+            : undefined
         });
 
         for (const metric of affected) {
@@ -432,8 +438,17 @@ export class PostgresHealthKitStore {
       }
 
       const authority = await this.loadWriteAuthority(tx, actorUserId, current.family.id, selfId);
+      if (!authority.settings?.consented_at) {
+        throw new HttpError(403, "healthkit_consent_required", "HealthKit upload consent is required.");
+      }
       if (authority.activeInstallationId !== repair.installation_id) {
         throw new HttpError(403, "healthkit_installation_inactive", "Installation is not the active HealthKit installation.");
+      }
+      if (authority.settings.health_timezone_version !== repair.timezone_version) {
+        throw new HttpError(409, "healthkit_timezone_version_invalid", "Timezone version is stale.");
+      }
+      if (!authority.enabledMetrics.has(repair.metric as HealthKitMetric)) {
+        throw new HttpError(403, "healthkit_metric_disabled", `Metric ${repair.metric} is not enabled.`);
       }
 
       const chunks = await tx`
@@ -681,6 +696,7 @@ export class PostgresHealthKitStore {
       timezoneVersion: number;
       operations: HealthKitSyncOperation[];
       nowIso: string;
+      repairRange?: { rangeStart: string; rangeEnd: string };
     }
   ) {
     for (const op of input.operations) {
@@ -729,6 +745,28 @@ export class PostgresHealthKitStore {
           `;
           break;
         case "blood_pressure_delete":
+          if (input.repairRange) {
+            const [existing] = await tx`
+              select measured_at
+              from blood_pressure_readings
+              where person_id = ${input.personId}
+                and source = 'healthkit'
+                and source_sample_key = ${op.sourceSampleKey}
+                and deleted_at is null
+            `;
+            if (existing) {
+              const t = Date.parse(String(existing.measured_at));
+              const start = Date.parse(input.repairRange.rangeStart);
+              const end = Date.parse(input.repairRange.rangeEnd);
+              if (t < start || t > end) {
+                throw new HttpError(
+                  400,
+                  "healthkit_operation_invalid",
+                  "blood pressure deletion is outside the repair range."
+                );
+              }
+            }
+          }
           await tx`
             delete from blood_pressure_readings
             where person_id = ${input.personId}

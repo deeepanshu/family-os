@@ -394,6 +394,102 @@ describe("HealthMcpReadService", () => {
     }
   });
 
+  it("withholds step points while a metric repair is incomplete", async () => {
+    const repo = new InMemoryFamilyRepository();
+    const api = createApp({
+      config: {
+        NODE_ENV: "test",
+        PORT: 3001,
+        HEALTH_API_ENABLE_DEV_AUTH: false,
+        SUPABASE_JWT_SECRET: jwtSecret,
+        SUPABASE_URL: supabaseUrl
+      },
+      familyRepository: repo
+    });
+    const token = await jwtFor(userId);
+    await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const profile = await (
+      await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ displayName: "Deepanshu" })
+      })
+    ).json();
+    const profileId = profile.data.id as string;
+    const installationId = "53064303-35cf-4db0-a5d3-8af7d8f747e1";
+    await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        personId: profileId,
+        consentVersion: "2026-07-18",
+        enabledMetrics: ["steps"],
+        healthTimezone: "UTC",
+        installationId
+      })
+    });
+    const repair = await (
+      await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          installationId,
+          personId: profileId,
+          metric: "steps",
+          timezoneVersion: 1
+        })
+      })
+    ).json();
+    await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        syncId: "7afbe594-7e1d-4b31-a9a1-420b7fba42e1",
+        installationId,
+        personId: profileId,
+        timezoneVersion: 1,
+        repairId: repair.data.repairId,
+        chunkIndex: 0,
+        operations: [{ kind: "steps_hour_upsert", hourStartUtc: "2026-07-15T08:00:00.000Z", count: 9999 }]
+      })
+    });
+
+    const repositories = repositoriesFromFamilyRepository(repo);
+    await repositories.mcpConnections.createConnection({
+      userId,
+      oauthClientId,
+      capabilities: ["health_read"],
+      consentVersion: "2026-07-18"
+    });
+    const service = new HealthMcpReadService({ ...repositories, now: fixedNow });
+    const partial = await service.getHealthData(
+      { userId, oauthClientId },
+      { personId: profileId, healthMetric: "steps", rangeDays: 30, timezone: "UTC" }
+    );
+    expect(partial.metricSyncStatus).toBe("repairing");
+    expect(partial.coverage.complete).toBe(false);
+    if (partial.viewType === "daily_series") {
+      expect(partial.points).toEqual([]);
+    }
+
+    await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs/${repair.data.repairId}/complete`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ expectedChunkCount: 1 })
+    });
+    const ready = await service.getHealthData(
+      { userId, oauthClientId },
+      { personId: profileId, healthMetric: "steps", rangeDays: 30, timezone: "UTC" }
+    );
+    expect(ready.metricSyncStatus).toBe("ready");
+    if (ready.viewType === "daily_series") {
+      expect(ready.points.find((p) => p.bucket === "2026-07-15")?.value).toBe(9999);
+    }
+  });
+
   it("aggregates hourly steps within a 7-day window and splits spanning samples", async () => {
     const repo = new InMemoryFamilyRepository();
     const { profileId } = await seedUserWithSteps(repo, userId);

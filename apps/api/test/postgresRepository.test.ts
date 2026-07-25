@@ -194,23 +194,23 @@ describe("Postgres repository wiring", () => {
       body: JSON.stringify({ displayName: "Mom", relationshipLabel: "Mother" })
     })).json();
 
-    const bp = await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure`, {
+    const glucose = await api.request(`${HEALTH_API_PREFIX}/readings/blood-glucose`, {
       method: "POST",
       headers: { authorization: `Bearer ${memberToken}`, "content-type": "application/json" },
       body: JSON.stringify({
         personId: profile.data.id,
-        systolic: 121,
-        diastolic: 79,
+        value: 104,
+        context: "fasting",
         measuredAt: "2026-06-21T10:00:00.000Z"
       })
     });
-    expect(bp.status).toBe(201);
+    expect(glucose.status).toBe(201);
 
-    const history = await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure?personId=${profile.data.id}`, {
+    const history = await api.request(`${HEALTH_API_PREFIX}/readings/blood-glucose?personId=${profile.data.id}`, {
       headers: { authorization: `Bearer ${managerToken}` }
     });
     await expect(history.json()).resolves.toMatchObject({
-      data: [{ systolic: 121, diastolic: 79, personId: profile.data.id }]
+      data: [{ value: 104, personId: profile.data.id }]
     });
   });
 
