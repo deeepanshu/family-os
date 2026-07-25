@@ -422,7 +422,7 @@ export class PostgresHealthKitStore {
     return {
       repairId: repair.repair_id,
       personId: repair.person_id,
-      group: repair.group_key as HealthKitMetric,
+      group: input.group,
       installationId: repair.installation_id,
       timezoneVersion: repair.timezone_version,
       rangeStart: range.rangeStartIso,
