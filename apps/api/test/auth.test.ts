@@ -1,6 +1,6 @@
 import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
-import { HEALTH_API_PREFIX, LEGACY_HEALTH_API_PREFIX } from "@family-os/shared";
+import { HEALTH_API_PREFIX } from "@family-os/shared";
 import { createApp } from "../src/app";
 import { InMemoryFamilyRepository } from "../src/repositories/families";
 
@@ -39,18 +39,6 @@ async function jwtFor(
 describe("health API bootstrap", () => {
   it("serves a public healthcheck under the health prefix", async () => {
     const response = await app().request(`${HEALTH_API_PREFIX}/healthcheck`);
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      data: {
-        service: "family-os-health-api",
-        status: "ok"
-      }
-    });
-  });
-
-  it("keeps the legacy health prefix available for already-released apps", async () => {
-    const response = await app().request(`${LEGACY_HEALTH_API_PREFIX}/healthcheck`);
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
