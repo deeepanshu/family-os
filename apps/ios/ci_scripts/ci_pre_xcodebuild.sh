@@ -12,7 +12,8 @@ if [ -z "${FIREBASE_GOOGLE_SERVICE_INFO_PLIST_BASE64:-}" ]; then
   exit 1
 fi
 
-config_path="${CI_WORKSPACE_PATH}/apps/ios/FamilyOS/Resources/GoogleService-Info.plist"
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+config_path="${script_dir}/../FamilyOS/Resources/GoogleService-Info.plist"
 temp_path="$(mktemp)"
 trap 'rm -f "$temp_path"' EXIT
 umask 077
