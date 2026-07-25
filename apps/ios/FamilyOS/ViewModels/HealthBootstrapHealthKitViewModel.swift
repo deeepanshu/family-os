@@ -89,6 +89,11 @@ extension HealthBootstrapViewModel {
             return
         }
 
+        if healthKit.status == nil {
+            await loadHealthKitStatus()
+            if isError { return }
+        }
+
         if healthKit.status?.consentActive != true {
             healthKit.consentGranted = true
             if healthKit.enabledMetrics.isEmpty {
