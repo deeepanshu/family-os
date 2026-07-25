@@ -1,0 +1,17 @@
+services:
+  family-os-mcp:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: family-os-health-api:local
+    container_name: family-os-mcp
+    env_file:
+      - ../../.env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3002
+    ports:
+      - "127.0.0.1:3002:3002"
+    restart: unless-stopped
+    volumes:
+      - ${FAMILY_OS_SECRETS_DIR:?set FAMILY_OS_SECRETS_DIR in .env}:/run/secrets/family-os:ro

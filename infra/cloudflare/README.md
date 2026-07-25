@@ -31,9 +31,11 @@ https://familyos.deepanshujain.me/.well-known/oauth-protected-resource/api/mcp
 https://familyos.deepanshujain.me/api/oauth/consent
 ```
 
-Tunnel or reverse-proxy that origin to the same API process (`localhost:3001`)
-**without stripping** `/api`. The app serves MCP at `/api/mcp` and well-known
-metadata at `/.well-known/oauth-protected-resource/api/mcp`.
+Tunnel or reverse-proxy this hostname to the dedicated MCP API process at
+`localhost:3002`, **without stripping** `/api`. The app serves MCP at
+`/api/mcp` and well-known metadata at
+`/.well-known/oauth-protected-resource/api/mcp`. Keep the existing iOS Health
+API on `localhost:3001`.
 
 Smoke checks after deploy:
 
