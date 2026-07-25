@@ -5,15 +5,6 @@ struct HealthKitSyncView: View {
 
     var body: some View {
         Section("HealthKit Sync") {
-            LabeledContent("Availability", value: viewModel.healthKit.isAvailable ? "Available" : "Unavailable")
-
-            if let profile = viewModel.selfProfile {
-                LabeledContent("Linked profile", value: profile.displayName)
-            } else {
-                Text("Create your profile to enable HealthKit sync.")
-                    .foregroundStyle(.secondary)
-            }
-
             Toggle(isOn: $viewModel.healthKit.consentGranted) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Upload HealthKit data")

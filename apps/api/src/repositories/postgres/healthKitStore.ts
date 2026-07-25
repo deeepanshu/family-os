@@ -610,7 +610,7 @@ export class PostgresHealthKitStore {
     `;
     return rows.map((row: Row) => ({
       personId: row.person_id,
-      sleepDay: String(row.sleep_day).slice(0, 10),
+      sleepDay: toDateString(row.sleep_day) ?? String(row.sleep_day).slice(0, 10),
       timezoneVersion: row.timezone_version ?? currentVersion,
       durationMinutes: row.duration_minutes
     }));

@@ -3,6 +3,7 @@ import { SignJWT } from "jose";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { HEALTH_API_PREFIX } from "@family-os/shared";
 import { createApp } from "../src/app";
+import { PostgresFamilyRepository } from "../src/repositories/postgres";
 
 const databaseUrl = process.env.DATABASE_URL ?? "postgres://family_os:family_os@localhost:5432/family_os";
 const jwtSecret = "test-supabase-jwt-secret-with-enough-length";
@@ -214,5 +215,32 @@ describe("Postgres repository wiring", () => {
     });
   });
 
-});
+  it("returns canonical ISO sleep days from Postgres", async () => {
+    const familyId = "00000000-0000-4000-8000-000000000003";
+    const profileId = "00000000-0000-4000-8000-000000000004";
+    await sql`insert into auth.users (id) values (${managerId})`;
+    await sql`
+      insert into families (id, name, kind, created_by_user_id)
+      values (${familyId}, 'My Health', 'personal', ${managerId})
+    `;
+    await sql`
+      insert into family_memberships (id, family_id, user_id, role, status)
+      values (gen_random_uuid(), ${familyId}, ${managerId}, 'manager', 'active')
+    `;
+    await sql`
+      insert into people (id, family_id, linked_user_id, created_by_user_id, display_name, relationship_label, status)
+      values (${profileId}, ${familyId}, ${managerId}, ${managerId}, 'Me', 'Self', 'active')
+    `;
+    await sql`
+      insert into health_sleep_days (family_id, person_id, sleep_day, timezone_version, duration_minutes)
+      values (${familyId}, ${profileId}, '2026-07-25'::date, 1, 480)
+    `;
 
+    const repository = PostgresFamilyRepository.fromDatabaseUrl(databaseUrl, { syncLocalAuthUsers: true });
+    const rows = await repository.listSleepDays(managerId, profileId, "2026-07-19", "2026-07-25");
+    expect(rows).toEqual([
+      expect.objectContaining({ sleepDay: "2026-07-25", durationMinutes: 480, timezoneVersion: 1 })
+    ]);
+  });
+
+});
