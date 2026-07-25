@@ -221,7 +221,8 @@ SUPABASE_ANON_KEY=...
 
 - `MCP_PUBLIC_ORIGIN` is **origin only** (scheme + host). Paths, queries, and
   fragments are rejected so they are not silently combined into
-  `.../api/api/mcp`.
+  `.../api/api/mcp`. Production requires `https:`. Non-production may use
+  `http:` only on loopback (`localhost`, `127.0.0.1`, `::1`).
 - `MCP_ALLOWED_OAUTH_CLIENT_IDS` is required in production: comma-separated
   Supabase OAuth client IDs eligible for MCP health grants. Outside production,
   an empty list allows any registered client (local/dev only). Prefer keeping

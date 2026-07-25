@@ -71,11 +71,25 @@ function normalizePublicPath(path: string): string {
   return withSlash.replace(/\/$/, "") || DEFAULT_MCP_PUBLIC_PATH;
 }
 
+function isLoopbackHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+}
+
 /**
  * Parse and validate a public origin: scheme + host (+ optional port) only.
  * Rejects path, query, and fragment so MCP_PUBLIC_PATH is not double-applied.
+ *
+ * Scheme policy:
+ * - https: always allowed
+ * - http: only loopback (localhost / 127.0.0.1 / ::1), and never in production
+ * - other schemes: rejected
  */
-export function parsePublicOrigin(value: string, envName: string): string {
+export function parsePublicOrigin(
+  value: string,
+  envName: string,
+  options: { nodeEnv?: string } = {}
+): string {
   let url: URL;
   try {
     url = new URL(value);
@@ -97,6 +111,23 @@ export function parsePublicOrigin(value: string, envName: string): string {
   if (url.hash) {
     throw new Error(`${envName} must be an origin only and must not include a fragment.`);
   }
+
+  const isProduction = options.nodeEnv === "production";
+  if (url.protocol === "https:") {
+    // always ok
+  } else if (url.protocol === "http:") {
+    if (isProduction) {
+      throw new Error(`${envName} must use https: in production (HTTP would expose bearer tokens in transit).`);
+    }
+    if (!isLoopbackHostname(url.hostname)) {
+      throw new Error(
+        `${envName} may use http: only for loopback hosts (localhost, 127.0.0.1, ::1). Use https: for non-local origins.`
+      );
+    }
+  } else {
+    throw new Error(`${envName} must use https: (or http: on loopback for local development only).`);
+  }
+
   return url.origin;
 }
 
@@ -127,7 +158,9 @@ export function loadConfig(env: Record<string, unknown> = process.env): AppConfi
 
   const originRaw = config.MCP_PUBLIC_ORIGIN ?? config.MCP_PUBLIC_BASE_URL;
   const mcpPublicOrigin = originRaw
-    ? parsePublicOrigin(originRaw, config.MCP_PUBLIC_ORIGIN ? "MCP_PUBLIC_ORIGIN" : "MCP_PUBLIC_BASE_URL")
+    ? parsePublicOrigin(originRaw, config.MCP_PUBLIC_ORIGIN ? "MCP_PUBLIC_ORIGIN" : "MCP_PUBLIC_BASE_URL", {
+        nodeEnv: config.NODE_ENV
+      })
     : undefined;
   const mcpPublicPath = normalizePublicPath(config.MCP_PUBLIC_PATH);
   const allowedOAuthClientIds = parseOAuthClientAllowlist(config.MCP_ALLOWED_OAUTH_CLIENT_IDS);

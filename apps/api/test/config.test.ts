@@ -140,6 +140,54 @@ describe("configuration", () => {
     ).toThrow(/fragment/);
   });
 
+  it("requires https for MCP_PUBLIC_ORIGIN in production and restricts http to loopback outside production", () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
+        DATABASE_URL: "postgres://family_os:family_os@localhost:5432/family_os",
+        MCP_PUBLIC_ORIGIN: "http://familyos.deepanshujain.me",
+        SUPABASE_URL: "https://project.supabase.co",
+        SUPABASE_ANON_KEY: "anon-key",
+        MCP_ALLOWED_OAUTH_CLIENT_IDS: "chatgpt-prod"
+      })
+    ).toThrow(/must use https: in production/);
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "development",
+        HEALTH_API_REPOSITORY: "memory",
+        MCP_PUBLIC_ORIGIN: "http://familyos.deepanshujain.me"
+      })
+    ).toThrow(/loopback/);
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "development",
+        HEALTH_API_REPOSITORY: "memory",
+        MCP_PUBLIC_ORIGIN: "ftp://familyos.deepanshujain.me"
+      })
+    ).toThrow(/must use https/);
+
+    const loopback = loadConfig({
+      NODE_ENV: "development",
+      HEALTH_API_REPOSITORY: "memory",
+      MCP_PUBLIC_ORIGIN: "http://127.0.0.1:3001"
+    });
+    expect(loopback.MCP_PUBLIC_ORIGIN).toBe("http://127.0.0.1:3001");
+
+    const secure = loadConfig({
+      NODE_ENV: "production",
+      HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
+      DATABASE_URL: "postgres://family_os:family_os@localhost:5432/family_os",
+      MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
+      SUPABASE_URL: "https://project.supabase.co",
+      SUPABASE_ANON_KEY: "anon-key",
+      MCP_ALLOWED_OAUTH_CLIENT_IDS: "chatgpt-prod"
+    });
+    expect(secure.MCP_PUBLIC_ORIGIN).toBe("https://familyos.deepanshujain.me");
+  });
+
   it("parses MCP OAuth client allowlist", () => {
     const config = loadConfig({
       NODE_ENV: "test",

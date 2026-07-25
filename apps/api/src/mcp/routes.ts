@@ -145,11 +145,14 @@ export function createMcpRoutes(deps: McpRouteDeps) {
 function buildProtectedResourceMetadata(config: AppConfig) {
   const authorizationServers = config.SUPABASE_URL ? [`${config.SUPABASE_URL.replace(/\/$/, "")}/auth/v1`] : [];
 
+  // Do not advertise offline_access: refresh tokens are an authorization-server
+  // concern. MCP resource servers SHOULD NOT list offline_access in
+  // scopes_supported (MCP authorization draft).
   return {
     resource: mcpResourceUrl(config),
     authorization_servers: authorizationServers,
     bearer_methods_supported: ["header"],
-    scopes_supported: ["openid", "offline_access"],
+    scopes_supported: ["openid"],
     resource_name: config.MCP_RESOURCE_NAME
   };
 }

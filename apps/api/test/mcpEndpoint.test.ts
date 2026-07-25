@@ -147,6 +147,8 @@ describe("MCP endpoint", () => {
     expect(body.resource).toBe(mcpResource);
     expect(body.authorization_servers).toEqual([`${supabaseUrl}/auth/v1`]);
     expect(body.bearer_methods_supported).toEqual(["header"]);
+    expect(body.scopes_supported).toEqual(["openid"]);
+    expect(body.scopes_supported).not.toContain("offline_access");
 
     const root = await api.request("/.well-known/oauth-protected-resource");
     expect(root.status).toBe(200);
