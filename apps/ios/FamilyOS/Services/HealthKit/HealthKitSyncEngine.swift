@@ -48,11 +48,19 @@ actor HealthKitSyncEngine {
     }
 
     func enableAndRepair(context: SessionContext) async throws {
-        try await healthKit.requestAuthorization()
-        try await healthKit.enableBackgroundDelivery()
+        let metricSummary = context.enabledMetrics.map(\.rawValue).sorted().joined(separator: ",")
+        CrashReporting.setCustomValues([
+            "healthkit_stage": "sync_started",
+            "healthkit_metrics": metricSummary
+        ])
+        CrashReporting.log("healthkit.sync_started metrics=\(metricSummary)")
+        try await healthKit.requestAuthorization(for: Set(context.enabledMetrics))
+        try await healthKit.enableBackgroundDelivery(for: Set(context.enabledMetrics))
         for metric in context.enabledMetrics {
             try await processMetric(metric, context: context)
         }
+        CrashReporting.setCustomValues(["healthkit_stage": "sync_completed"])
+        CrashReporting.log("healthkit.sync_completed")
     }
 
     func processPendingWork(context: SessionContext) async throws {
@@ -481,8 +489,12 @@ actor HealthKitSyncEngine {
     ) async throws -> [HealthKitSyncOperation] {
         switch metric {
         case .steps:
-            let hours = try await healthKit.hourlyStepCounts(from: rangeStart, to: rangeEnd)
-            return hours.map { .stepsHourUpsert(hourStartUtc: isoHour($0.hourStartUtc), count: $0.count) }
+            let firstHour = firstStepHourInsideRepairRange(rangeStart)
+            guard firstHour <= rangeEnd else { return [] }
+            let hours = try await healthKit.hourlyStepCounts(from: firstHour, to: rangeEnd)
+            return hours
+                .filter { $0.hourStartUtc >= firstHour && $0.hourStartUtc <= rangeEnd }
+                .map { .stepsHourUpsert(hourStartUtc: isoHour($0.hourStartUtc), count: $0.count) }
         case .sleep:
             let samples = try await sleepSamplesForRepair(
                 rangeStartDay: rangeStartDay,
@@ -520,13 +532,15 @@ actor HealthKitSyncEngine {
         let expiry = Date().addingTimeInterval(90 * 24 * 3600)
         switch metric {
         case .steps:
-            let samples = try await healthKit.stepQuantitySamples(from: rangeStart, to: rangeEnd)
+            let firstHour = firstStepHourInsideRepairRange(rangeStart)
+            guard firstHour <= rangeEnd else { break }
+            let samples = try await healthKit.stepQuantitySamples(from: firstHour, to: rangeEnd)
             for sample in samples {
                 let hours = try await healthKit.hourlyStepCounts(from: sample.startDate, to: sample.endDate)
-                var bucketKeys = hours.map { isoHour($0.hourStartUtc) }
-                if bucketKeys.isEmpty {
-                    bucketKeys = [isoHour(sample.startDate)]
-                }
+                let bucketKeys = hours
+                    .filter { $0.hourStartUtc >= firstHour && $0.hourStartUtc <= rangeEnd }
+                    .map { isoHour($0.hourStartUtc) }
+                guard !bucketKeys.isEmpty else { continue }
                 ledger[sample.uuid.uuidString] = HealthKitLedgerEntry(
                     sourceUUID: sample.uuid.uuidString,
                     metric: metric.rawValue,
@@ -567,6 +581,14 @@ actor HealthKitSyncEngine {
             }
         }
         await stateStore.saveLedger(ledger, userId: context.userId, personId: context.personId, metric: metric)
+    }
+
+    private func firstStepHourInsideRepairRange(_ rangeStart: Date) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let hour = calendar.dateComponents([.year, .month, .day, .hour], from: rangeStart)
+        guard let roundedDown = calendar.date(from: hour) else { return rangeStart }
+        return roundedDown < rangeStart ? roundedDown.addingTimeInterval(3600) : roundedDown
     }
 
     private func sleepSamplesForRepair(

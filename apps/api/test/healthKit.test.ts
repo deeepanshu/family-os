@@ -1,5 +1,5 @@
 import { SignJWT } from "jose";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { HEALTH_API_PREFIX } from "@family-os/shared";
 import { createApp } from "../src/app";
 import { InMemoryFamilyRepository } from "../src/repositories/families";
@@ -72,6 +72,36 @@ async function putSettings(
 }
 
 describe("HealthKit background sync", () => {
+  it("aligns step repair starts to a UTC hour without extending the 90-day window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-25T10:34:56.789Z"));
+    try {
+      const api = app();
+      const { token, profileId } = await setup(api);
+      await putSettings(api, token, profileId);
+
+      const response = await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          installationId,
+          personId: profileId,
+          metric: "steps",
+          timezoneVersion: 1
+        })
+      });
+      expect(response.status).toBe(201);
+      await expect(response.json()).resolves.toMatchObject({
+        data: {
+          rangeStart: "2026-04-26T11:00:00.000Z",
+          rangeEnd: "2026-07-25T10:34:56.789Z"
+        }
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("requires a self profile before settings", async () => {
     const api = app();
     const token = await jwtFor(userId);

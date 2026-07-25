@@ -24,8 +24,8 @@ import {
   HEALTHKIT_METRICS,
   metricsAffected,
   profileLocalSleepDayRange,
+  repairRangeStart,
   REPAIR_TTL_MS,
-  REPAIR_WINDOW_MS,
   toUtcIso,
   type HealthKitRepairRange
 } from "../healthKitDomain";
@@ -349,7 +349,7 @@ export class PostgresHealthKitStore {
     const now = new Date();
     const nowIso = toUtcIso(now);
     const rangeEnd = now;
-    const rangeStart = new Date(now.getTime() - REPAIR_WINDOW_MS);
+    const rangeStart = repairRangeStart(input.metric, now);
     const expiresAt = new Date(now.getTime() + REPAIR_TTL_MS);
 
     const repair = await this.context.sql.begin(async (tx: any) => {

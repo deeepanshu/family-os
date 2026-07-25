@@ -84,6 +84,23 @@ export function toUtcIso(date: Date): string {
   return date.toISOString();
 }
 
+/**
+ * Steps are stored as UTC hour buckets. Start their repair window at the next
+ * whole UTC hour so every permitted bucket is fully inside the 90-day window.
+ */
+export function repairRangeStart(metric: HealthKitMetric, now: Date): Date {
+  const start = new Date(now.getTime() - REPAIR_WINDOW_MS);
+  if (metric !== "steps") {
+    return start;
+  }
+
+  start.setUTCMinutes(0, 0, 0);
+  if (start.getTime() < now.getTime() - REPAIR_WINDOW_MS) {
+    start.setUTCHours(start.getUTCHours() + 1);
+  }
+  return start;
+}
+
 export function dayStringFromUtcIso(iso: string): string {
   return iso.slice(0, 10);
 }

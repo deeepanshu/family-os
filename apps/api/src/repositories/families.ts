@@ -62,8 +62,8 @@ import {
   HEALTHKIT_METRICS,
   metricsAffected,
   profileLocalSleepDayRange,
+  repairRangeStart,
   REPAIR_TTL_MS,
-  REPAIR_WINDOW_MS,
   toUtcIso,
   type HealthKitRepairRange
 } from "./healthKitDomain";
@@ -994,7 +994,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       metric: input.metric,
       installationId: input.installationId,
       timezoneVersion: input.timezoneVersion,
-      rangeStart: toUtcIso(new Date(now.getTime() - REPAIR_WINDOW_MS)),
+      rangeStart: toUtcIso(repairRangeStart(input.metric, now)),
       rangeEnd: nowIso,
       rangeStartDay,
       rangeEndDay,
