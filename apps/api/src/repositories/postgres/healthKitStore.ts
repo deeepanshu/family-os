@@ -347,6 +347,7 @@ export class PostgresHealthKitStore {
   }
 
   async createHealthKitRepair(actorUserId: string, input: CreateHealthKitRepairInput): Promise<HealthKitRepair> {
+    const group = input.group;
     const current = await this.context.requireActiveMember(actorUserId);
     const selfId = await this.requireLinkedSelfProfileId(actorUserId, current.family.id);
     assertSelfProfileMatch({ selfProfileId: selfId, requestedPersonId: input.personId });
@@ -354,7 +355,7 @@ export class PostgresHealthKitStore {
     const now = new Date();
     const nowIso = toUtcIso(now);
     const rangeEnd = now;
-    const rangeStart = repairRangeStart(input.group, now);
+    const rangeStart = repairRangeStart(group, now);
     const expiresAt = new Date(now.getTime() + REPAIR_TTL_MS);
 
     const repair = await this.context.sql.begin(async (tx: any) => {
@@ -368,8 +369,8 @@ export class PostgresHealthKitStore {
       if (authority.settings.health_timezone_version !== input.timezoneVersion) {
         throw new HttpError(409, "healthkit_timezone_version_invalid", "Timezone version is stale.");
       }
-      if (!authority.enabledGroups.has(input.group)) {
-        throw new HttpError(403, "healthkit_metric_disabled", `Metric ${input.group} is not enabled.`);
+      if (!authority.enabledGroups.has(group)) {
+        throw new HttpError(403, "healthkit_metric_disabled", `Metric ${group} is not enabled.`);
       }
 
       const healthTimezone = String(authority.settings.health_timezone ?? "UTC");
@@ -380,7 +381,7 @@ export class PostgresHealthKitStore {
         update healthkit_repairs
         set expires_at = ${nowIso}
         where person_id = ${input.personId}
-          and group_key = ${input.group}
+          and group_key = ${group}
           and completed_at is null
           and expires_at > ${nowIso}
       `;
@@ -390,7 +391,7 @@ export class PostgresHealthKitStore {
           person_id, family_id, group_key, installation_id, timezone_version,
           range_start, range_end, range_start_day, range_end_day, expires_at
         ) values (
-          ${input.personId}, ${current.family.id}, ${input.group}, ${input.installationId},
+          ${input.personId}, ${current.family.id}, ${group}, ${input.installationId},
           ${input.timezoneVersion}, ${toUtcIso(rangeStart)}, ${toUtcIso(rangeEnd)},
           ${rangeStartDay}::date, ${rangeEndDay}::date, ${toUtcIso(expiresAt)}
         )
@@ -400,7 +401,7 @@ export class PostgresHealthKitStore {
       await this.touchMetricState(tx, {
         familyId: current.family.id,
         personId: input.personId,
-        group: input.group,
+        group,
         nowIso,
         success: false,
         repairing: true
@@ -415,14 +416,14 @@ export class PostgresHealthKitStore {
       action: "healthkit.repair_created",
       resourceType: "healthkit_repair",
       resourceId: repair.repair_id,
-      metadata: { group: input.group, status: "created" }
+      metadata: { group, status: "created" }
     });
 
     const range = repairRangeFromRow(repair);
     return {
       repairId: repair.repair_id,
       personId: repair.person_id,
-      group: input.group,
+      group,
       installationId: repair.installation_id,
       timezoneVersion: repair.timezone_version,
       rangeStart: range.rangeStartIso,

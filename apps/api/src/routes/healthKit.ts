@@ -261,8 +261,9 @@ export function createHealthKitRoutes(repository: HealthKitStore) {
 
   healthKit.post("/repairs", zValidator("json", repairBody), async (c) => {
     const body = c.req.valid("json");
+    const group = body.group;
     const data = await repository.createHealthKitRepair(c.get("user").id, body);
-    return c.json({ data: { ...data, group: body.group } }, 201);
+    return c.json({ data: { ...data, group } }, 201);
   });
 
   healthKit.post("/repairs/:repairId/complete", zValidator("json", completeRepairBody), async (c) => {
