@@ -89,7 +89,7 @@ The route, repository, and RLS enforce the same self-profile boundary. Direct ta
 
 ### 3.1 Settings and installation activation
 
-PUT /health/v1/healthkit/settings is the only setup/settings write. It accepts the linked Self profile, explicit consent version, enabled metric set, selected IANA health timezone, and the Keychain installation ID. The server resolves the profile and family from the bearer token, persists the settings, and returns the trusted timezone version and active installation configuration.
+PUT /health/api/v1/healthkit/settings is the only setup/settings write. It accepts the linked Self profile, explicit consent version, enabled metric set, selected IANA health timezone, and the Keychain installation ID. The server resolves the profile and family from the bearer token, persists the settings, and returns the trusted timezone version and active installation configuration.
 
 Replacing an active installation requires an explicit confirmation flag in this request. The server revokes the previous installation in the same transaction. Disabling a metric or withdrawing consent makes later uploads fail immediately; the iPhone then clears its local anchor and ledger for that metric.
 
@@ -97,7 +97,7 @@ Replacing an active installation requires an explicit confirmation flag in this 
 
 ### 4.1 Normal upload
 
-POST /health/v1/healthkit/sync
+POST /health/api/v1/healthkit/sync
 
 The request includes syncId, installationId, personId, timezoneVersion, and no more than 500 final operations. A request is transactional. A unique (user_id, person_id, sync_id) makes it idempotent: replay returns the original redacted result and does not write again.
 
@@ -138,10 +138,10 @@ The route validates operation shape, bounds, UUIDs, UTC hour boundaries, timezon
 
 The first import and explicit timezone change repair exactly the most recent 90 days. They use a small repair protocol:
 
-1. POST /health/v1/healthkit/repairs creates a short-lived repairId for one metric and its 90-day range.
+1. POST /health/api/v1/healthkit/repairs creates a short-lived repairId for one metric and its 90-day range.
 2. /sync accepts chunks of at most 500 final records with repairId and chunkIndex.
 3. Replaying a chunk index returns its existing result.
-4. POST /health/v1/healthkit/repairs/{repairId}/complete provides the expected chunk count.
+4. POST /health/api/v1/healthkit/repairs/{repairId}/complete provides the expected chunk count.
 5. The API marks the requested metric's coverage ready only after every chunk is complete.
 
 Chunks write the real tables directly. There are no raw-sample staging rows or content-hash protocol. While status is repairing, MCP must not present that window as complete. Expired, incomplete repair metadata is cleaned up; it does not create visible health coverage.

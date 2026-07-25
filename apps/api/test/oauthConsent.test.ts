@@ -99,13 +99,13 @@ describe("OAuth consent", () => {
       },
       familyRepository: new InMemoryFamilyRepository()
     });
-    const response = await api.request(`/api/oauth/consent?authorization_id=${authorizationId}`);
+    const response = await api.request(`/health/api/oauth/consent?authorization_id=${authorizationId}`);
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type") ?? "").toMatch(/text\/html/);
     const html = await response.text();
     expect(html).toContain("authorization_id");
     expect(html).toContain("SUPABASE_URL");
-    expect(html).toContain("/api/oauth/consent/decision");
+    expect(html).toContain('const OAUTH_PATH = "/health/api/oauth"');
   });
 
   it("returns authorization details from Supabase, not from the browser body", async () => {

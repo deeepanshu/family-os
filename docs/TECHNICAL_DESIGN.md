@@ -16,7 +16,7 @@
 - Notifications: APNs.
 - Backend host: Raspberry Pi.
 - Public ingress: Cloudflare Tunnel via `cloudflared`.
-- API base URL: `https://api.deepanshujain.me/health/v1`.
+- API base URL: `https://familyos.deepanshujain.me/health/api/v1`.
 - Distribution: TestFlight.
 
 ## Repository Structure
@@ -86,54 +86,54 @@ Reverse proxy / Bun service
 Public API hostname:
 
 ```text
-https://api.deepanshujain.me
+https://familyos.deepanshujain.me
 ```
 
 Health facet API prefix:
 
 ```text
-/health/v1
+/health/api/v1
 ```
 
 Example endpoints:
 
 ```text
-GET    /health/v1/healthcheck
+GET    /health/api/v1/healthcheck
 
-POST   /health/v1/families
-GET    /health/v1/families/current
+POST   /health/api/v1/families
+GET    /health/api/v1/families/current
 
-POST   /health/v1/invites
-GET    /health/v1/invites/:token
-POST   /health/v1/invites/:token/accept
+POST   /health/api/v1/invites
+GET    /health/api/v1/invites/:token
+POST   /health/api/v1/invites/:token/accept
 
-POST   /health/v1/people
-GET    /health/v1/people
-GET    /health/v1/people/:id
-PATCH  /health/v1/people/:id
-DELETE /health/v1/people/:id
+POST   /health/api/v1/people
+GET    /health/api/v1/people
+GET    /health/api/v1/people/:id
+PATCH  /health/api/v1/people/:id
+DELETE /health/api/v1/people/:id
 
-POST   /health/v1/readings/blood-pressure
-GET    /health/v1/readings/blood-pressure
-GET    /health/v1/readings/blood-pressure/:id
-PATCH  /health/v1/readings/blood-pressure/:id
-DELETE /health/v1/readings/blood-pressure/:id
+POST   /health/api/v1/readings/blood-pressure
+GET    /health/api/v1/readings/blood-pressure
+GET    /health/api/v1/readings/blood-pressure/:id
+PATCH  /health/api/v1/readings/blood-pressure/:id
+DELETE /health/api/v1/readings/blood-pressure/:id
 
-POST   /health/v1/readings/blood-glucose
-GET    /health/v1/readings/blood-glucose
-GET    /health/v1/readings/blood-glucose/:id
-PATCH  /health/v1/readings/blood-glucose/:id
-DELETE /health/v1/readings/blood-glucose/:id
+POST   /health/api/v1/readings/blood-glucose
+GET    /health/api/v1/readings/blood-glucose
+GET    /health/api/v1/readings/blood-glucose/:id
+PATCH  /health/api/v1/readings/blood-glucose/:id
+DELETE /health/api/v1/readings/blood-glucose/:id
 
-POST   /health/v1/devices
-DELETE /health/v1/devices/:id
+POST   /health/api/v1/devices
+DELETE /health/api/v1/devices/:id
 
-POST   /health/v1/reminders
-GET    /health/v1/reminders
-GET    /health/v1/reminders/:id
-PATCH  /health/v1/reminders/:id
-DELETE /health/v1/reminders/:id
-POST   /health/v1/reminders/:id/test
+POST   /health/api/v1/reminders
+GET    /health/api/v1/reminders
+GET    /health/api/v1/reminders/:id
+PATCH  /health/api/v1/reminders/:id
+DELETE /health/api/v1/reminders/:id
+POST   /health/api/v1/reminders/:id/test
 ```
 
 ## Auth Flow
@@ -477,7 +477,7 @@ The backend still performs explicit authorization checks before writing. RLS is 
 The iOS app registers for remote notifications and sends the APNs device token to:
 
 ```text
-POST /health/v1/devices
+POST /health/api/v1/devices
 ```
 
 Reminder scheduler:
@@ -527,12 +527,12 @@ family-os-health-api: localhost:3001
 Cloudflare/Caddy style routing:
 
 ```text
-api.deepanshujain.me/health/* -> localhost:3001
+familyos.deepanshujain.me/health/* -> localhost:3001
 ```
 
 Operational requirements:
 
-- `GET /health/v1/healthcheck`.
+- `GET /health/api/v1/healthcheck`.
 - Process restart via systemd or Docker Compose.
 - `cloudflared` already running.
 - Uptime monitoring for the healthcheck endpoint.

@@ -10,7 +10,7 @@ const userId = "00000000-0000-4000-8000-000000003001";
 const otherUserId = "00000000-0000-4000-8000-000000003002";
 const oauthClientId = "chatgpt-staging";
 const mcpOrigin = "https://familyos.test.example";
-const mcpPath = "/api/mcp";
+const mcpPath = "/health/api/mcp";
 const mcpResource = `${mcpOrigin}${mcpPath}`;
 const mcpMetadata = `${mcpOrigin}/.well-known/oauth-protected-resource${mcpPath}`;
 

@@ -1,4 +1,5 @@
 import type { AppConfig } from "../config";
+import { mcpOAuthPath } from "../mcp/publicUrl";
 
 /**
  * Server-rendered OAuth consent UI for Supabase OAuth 2.1.
@@ -9,6 +10,7 @@ export function renderOAuthConsentPage(config: AppConfig): string {
   const supabaseUrl = config.SUPABASE_URL ?? "";
   const supabaseAnonKey = config.SUPABASE_ANON_KEY ?? "";
   const resourceName = config.MCP_RESOURCE_NAME;
+  const oauthPath = mcpOAuthPath(config);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -98,6 +100,7 @@ export function renderOAuthConsentPage(config: AppConfig): string {
     const SUPABASE_URL = ${JSON.stringify(supabaseUrl)};
     const SUPABASE_ANON_KEY = ${JSON.stringify(supabaseAnonKey)};
     const RESOURCE_NAME = ${JSON.stringify(resourceName)};
+    const OAUTH_PATH = ${JSON.stringify(oauthPath)};
 
     const statusEl = document.getElementById("status");
     const contentEl = document.getElementById("content");
@@ -240,7 +243,7 @@ export function renderOAuthConsentPage(config: AppConfig): string {
         document.getElementById("deny").disabled = true;
         setStatus(decision === "approve" ? "Approving…" : "Denying…");
         try {
-          const body = await api("/api/oauth/consent/decision", {
+          const body = await api(OAUTH_PATH + "/consent/decision", {
             method: "POST",
             body: JSON.stringify({ authorizationId, decision })
           });
@@ -271,7 +274,7 @@ export function renderOAuthConsentPage(config: AppConfig): string {
       setStatus("Loading authorization request…");
       try {
         const body = await api(
-          "/api/oauth/consent/details?authorization_id=" + encodeURIComponent(authorizationId)
+          OAUTH_PATH + "/consent/details?authorization_id=" + encodeURIComponent(authorizationId)
         );
         const details = body.data;
         if (details.redirectUrl && !details.client?.clientId) {

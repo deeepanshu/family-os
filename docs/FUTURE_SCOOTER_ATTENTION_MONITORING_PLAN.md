@@ -192,7 +192,7 @@ verification is not enough for haptic behavior.
 No backend is required for MVP.
 
 If session summaries are added later, create a separate safety facet API prefix
-instead of mixing this into `/health/v1`:
+instead of mixing this into `/health/api/v1`:
 
 ```text
 /safety/v1/rides

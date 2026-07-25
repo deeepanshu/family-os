@@ -1,4 +1,11 @@
-export const HEALTH_API_PREFIX = "/health/v1" as const;
+/** Canonical public prefix for the Family OS health API. */
+export const HEALTH_API_PREFIX = "/health/api/v1" as const;
+
+/**
+ * Temporary compatibility path for clients released before the public-route
+ * consolidation. New clients must use HEALTH_API_PREFIX.
+ */
+export const LEGACY_HEALTH_API_PREFIX = "/health/v1" as const;
 
 export type ApiEnvelope<T> = {
   data: T;

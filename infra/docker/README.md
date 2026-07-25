@@ -21,7 +21,7 @@ docker compose --env-file .env -f infra/docker/compose.prod.yml logs -f health-a
 Smoke test on the Pi:
 
 ```sh
-curl http://localhost:3001/health/v1/healthcheck
+curl http://localhost:3001/health/api/v1/healthcheck
 ```
 
 ## Dedicated MCP process

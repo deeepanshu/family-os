@@ -13,7 +13,7 @@ export function mcpPublicOrigin(config: AppConfig): string {
 
 /**
  * Public path of the MCP endpoint, always starting with `/`.
- * Example: /api/mcp
+ * Example: /health/api/mcp
  */
 export function mcpPublicPath(config: AppConfig): string {
   const path = config.MCP_PUBLIC_PATH || DEFAULT_MCP_PUBLIC_PATH;
@@ -23,7 +23,7 @@ export function mcpPublicPath(config: AppConfig): string {
 
 /**
  * Canonical MCP resource URL used as the OAuth resource indicator / JWT audience.
- * Example: https://familyos.deepanshujain.me/api/mcp
+ * Example: https://familyos.deepanshujain.me/health/api/mcp
  */
 export function mcpResourceUrl(config: AppConfig): string {
   return `${mcpPublicOrigin(config)}${mcpPublicPath(config)}`;
@@ -31,11 +31,20 @@ export function mcpResourceUrl(config: AppConfig): string {
 
 /**
  * Protected Resource Metadata URL per RFC 9728 path insertion.
- * For resource https://origin/api/mcp the metadata is at
- * https://origin/.well-known/oauth-protected-resource/api/mcp
+ * For resource https://origin/health/api/mcp the metadata is at
+ * https://origin/.well-known/oauth-protected-resource/health/api/mcp
  */
 export function mcpProtectedResourceMetadataUrl(config: AppConfig): string {
   return `${mcpPublicOrigin(config)}/.well-known/oauth-protected-resource${mcpPublicPath(config)}`;
+}
+
+/** OAuth consent path colocated with the canonical MCP resource. */
+export function mcpOAuthPath(config: AppConfig): string {
+  const path = mcpPublicPath(config);
+  if (!path.endsWith("/mcp")) {
+    throw new Error("MCP_PUBLIC_PATH must end with /mcp so the OAuth consent path can be derived.");
+  }
+  return `${path.slice(0, -"/mcp".length)}/oauth`;
 }
 
 /** @deprecated Use mcpPublicOrigin + mcpPublicPath. Kept for callers that need the resource origin only. */

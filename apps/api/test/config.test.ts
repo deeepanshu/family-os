@@ -114,7 +114,13 @@ describe("configuration", () => {
       MCP_PUBLIC_BASE_URL: "https://familyos.deepanshujain.me"
     });
     expect(fromLegacy.MCP_PUBLIC_ORIGIN).toBe("https://familyos.deepanshujain.me");
-    expect(fromLegacy.MCP_PUBLIC_PATH).toBe("/api/mcp");
+    expect(fromLegacy.MCP_PUBLIC_PATH).toBe("/health/api/mcp");
+  });
+
+  it("requires the MCP path to end in /mcp so OAuth paths are deterministic", () => {
+    expect(() => loadConfig({ NODE_ENV: "test", MCP_PUBLIC_PATH: "/health/api" })).toThrow(
+      "MCP_PUBLIC_PATH must end with /mcp"
+    );
   });
 
   it("rejects MCP_PUBLIC_ORIGIN values that include a path, query, or fragment", () => {

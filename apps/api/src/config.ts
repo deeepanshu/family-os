@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /** Default public path of the MCP resource relative to the public origin. */
-export const DEFAULT_MCP_PUBLIC_PATH = "/api/mcp";
+export const DEFAULT_MCP_PUBLIC_PATH = "/health/api/mcp";
 
 const emptyToUndefined = (value: unknown) => (value === "" ? undefined : value);
 
@@ -28,8 +28,8 @@ const envSchema = z.object({
   MCP_PUBLIC_ORIGIN: z.preprocess(emptyToUndefined, z.string().url().optional()),
   /**
    * Public path of the MCP endpoint on that origin.
-   * Default /api/mcp → resource https://origin/api/mcp and metadata at
-   * /.well-known/oauth-protected-resource/api/mcp
+   * Default /health/api/mcp → resource https://origin/health/api/mcp and
+   * metadata at /.well-known/oauth-protected-resource/health/api/mcp
    */
   MCP_PUBLIC_PATH: z.preprocess(emptyToUndefined, z.string().default(DEFAULT_MCP_PUBLIC_PATH)),
   /**
@@ -165,6 +165,9 @@ export function loadConfig(env: Record<string, unknown> = process.env): AppConfi
   const mcpPublicPath = normalizePublicPath(config.MCP_PUBLIC_PATH);
   const allowedOAuthClientIds = parseOAuthClientAllowlist(config.MCP_ALLOWED_OAUTH_CLIENT_IDS);
 
+  if (!mcpPublicPath.endsWith("/mcp")) {
+    throw new Error("MCP_PUBLIC_PATH must end with /mcp so the OAuth consent path can be derived.");
+  }
   if (config.NODE_ENV === "production" && !mcpPublicOrigin) {
     throw new Error("MCP_PUBLIC_ORIGIN must be configured in production.");
   }

@@ -24,7 +24,7 @@ export type McpRouteDeps = {
 /**
  * Serves RFC 9728 Protected Resource Metadata.
  * Primary path: /.well-known/oauth-protected-resource{MCP_PUBLIC_PATH}
- * e.g. /.well-known/oauth-protected-resource/api/mcp
+ * e.g. /.well-known/oauth-protected-resource/health/api/mcp
  * Also serves the root metadata document for clients that probe the origin root.
  */
 export function createMcpWellKnownRoutes(config: AppConfig) {

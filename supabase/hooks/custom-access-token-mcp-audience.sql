@@ -2,7 +2,7 @@
 --
 -- Supabase OAuth access tokens default to aud: "authenticated". Family OS MCP
 -- validates tokens against the MCP resource URL (RFC 8707 resource indicator):
---   https://familyos.deepanshujain.me/api/mcp
+--   https://familyos.deepanshujain.me/health/api/mcp
 --
 -- Without this hook, ChatGPT receives valid Supabase tokens that the MCP
 -- server correctly rejects for wrong audience.
@@ -37,7 +37,7 @@ declare
   claims jsonb;
   client_id text;
   -- Must match mcpResourceUrl() / MCP_PUBLIC_ORIGIN + MCP_PUBLIC_PATH in production.
-  mcp_resource_aud constant text := 'https://familyos.deepanshujain.me/api/mcp';
+  mcp_resource_aud constant text := 'https://familyos.deepanshujain.me/health/api/mcp';
 begin
   claims := event->'claims';
   client_id := claims->>'client_id';

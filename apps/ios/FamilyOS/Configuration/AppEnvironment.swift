@@ -32,9 +32,9 @@ struct AppEnvironment {
     private static func defaultAPIBaseURL(for name: AppEnvironmentName) -> String {
         switch name {
         case .local:
-            return "http://localhost:3001/health/v1"
+            return "http://localhost:3001/health/api/v1"
         case .release:
-            return "https://api.deepanshujain.me/health/v1"
+            return "https://familyos.deepanshujain.me/health/api/v1"
         }
     }
 

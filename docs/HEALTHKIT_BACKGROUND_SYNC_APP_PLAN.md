@@ -79,7 +79,7 @@ Implement the companion [API plan](HEALTHKIT_BACKGROUND_SYNC_API_PLAN.md) before
 
 ### 4.1 Normal sync
 
-POST /health/v1/healthkit/sync
+POST /health/api/v1/healthkit/sync
 
 Every request includes a persisted syncId, active installationId, profile timezone version, and at most 500 typed operations. Retrying the same syncId returns the original result without applying the operations again. The server validates the self-profile link, active consent, enabled metric, active installation, and timezone version before writing.
 
@@ -118,9 +118,9 @@ blood_pressure_delete is sent only for an explicit anchored HealthKit deletion a
 
 The initial repair and an explicit timezone-change repair use a short-lived repair session:
 
-1. POST /health/v1/healthkit/repairs creates repairId for one metric and a 90-day UTC/profile-timezone window.
+1. POST /health/api/v1/healthkit/repairs creates repairId for one metric and a 90-day UTC/profile-timezone window.
 2. The app uploads real records through /sync in idempotent chunks of at most 500 operations, each carrying repairId and chunkIndex.
-3. POST /health/v1/healthkit/repairs/{repairId}/complete supplies the expected chunk count.
+3. POST /health/api/v1/healthkit/repairs/{repairId}/complete supplies the expected chunk count.
 4. The API makes the repaired window available to MCP only after completion.
 
 There are no per-record content hashes, generic staging tables, or raw HealthKit uploads. While repairing, the app resumes the failed chunk; it does not restart or duplicate the repair. An incomplete repair expires and is not reported as available health coverage.
@@ -131,7 +131,7 @@ There are no per-record content hashes, generic staging tables, or raw HealthKit
 
 1. Add the HealthKit background-delivery entitlement.
 2. In a foreground Profile flow, request read access for step count, sleep analysis, and blood-pressure correlations.
-3. Call PUT /health/v1/healthkit/settings to link the user's Self profile, record consent and enabled metrics server-side, activate this installation, and persist the returned configuration.
+3. Call PUT /health/api/v1/healthkit/settings to link the user's Self profile, record consent and enabled metrics server-side, activate this installation, and persist the returned configuration.
 4. Register one observer per enabled type and request .immediate background delivery.
 5. Run the initial 90-day repair.
 

@@ -39,14 +39,14 @@ xcodebuild \
 
 Debug builds use the `local` environment:
 
-- Health API: `http://localhost:3001/health/v1`
+- Health API: `http://localhost:3001/health/api/v1`
 - Backend database: local Docker Postgres
 - Auth: Supabase Auth for real Apple sign-in, or `dev-token` for local smoke
   tests when the backend enables dev auth
 
 Release builds use the `release` environment:
 
-- Health API: `https://api.deepanshujain.me/health/v1`
+- Health API: `https://familyos.deepanshujain.me/health/api/v1`
 - Backend database: Supabase Postgres behind the Raspberry Pi API
 - Auth: Supabase Auth with Sign in with Apple
 
@@ -81,21 +81,21 @@ is parsed as a comment after `https:`.
 
 The current bootstrap screen can call:
 
-- `GET /health/v1/healthcheck`
-- `GET /health/v1/me` with `Authorization: Bearer <supabase_access_token>`
-- `GET /health/v1/families/current`
-- `POST /health/v1/families`
-- `GET /health/v1/invites/{token}`
-- `POST /health/v1/invites`
-- `POST /health/v1/invites/{token}/accept`
-- `GET /health/v1/people`
-- `POST /health/v1/people`
-- `POST /health/v1/readings/blood-pressure`
-- `GET /health/v1/readings/blood-pressure`
-- `POST /health/v1/readings/blood-glucose`
-- `GET /health/v1/readings/blood-glucose`
-- `POST /health/v1/reminders`
-- `GET /health/v1/reminders`
+- `GET /health/api/v1/healthcheck`
+- `GET /health/api/v1/me` with `Authorization: Bearer <supabase_access_token>`
+- `GET /health/api/v1/families/current`
+- `POST /health/api/v1/families`
+- `GET /health/api/v1/invites/{token}`
+- `POST /health/api/v1/invites`
+- `POST /health/api/v1/invites/{token}/accept`
+- `GET /health/api/v1/people`
+- `POST /health/api/v1/people`
+- `POST /health/api/v1/readings/blood-pressure`
+- `GET /health/api/v1/readings/blood-pressure`
+- `POST /health/api/v1/readings/blood-glucose`
+- `GET /health/api/v1/readings/blood-glucose`
+- `POST /health/api/v1/reminders`
+- `GET /health/api/v1/reminders`
 
 ## Sign In With Apple
 

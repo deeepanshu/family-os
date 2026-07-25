@@ -1,4 +1,9 @@
-import { HEALTH_API_PREFIX, type AuthSessionResponse, type HealthcheckResponse } from "@family-os/shared";
+import {
+  HEALTH_API_PREFIX,
+  LEGACY_HEALTH_API_PREFIX,
+  type AuthSessionResponse,
+  type HealthcheckResponse
+} from "@family-os/shared";
 import { Hono } from "hono";
 import { loadConfig } from "./config";
 import { HttpError, jsonError } from "./errors";
@@ -21,7 +26,7 @@ import { corsMiddleware, requestLoggingMiddleware, writeRateLimitMiddleware } fr
 import { createDependencies, repositoriesFromFamilyRepository } from "./dependencies";
 import type { AppRepositories } from "./repositories/contracts";
 import { createMcpRoutes, createMcpWellKnownRoutes } from "./mcp/routes";
-import { mcpPublicPath } from "./mcp/publicUrl";
+import { mcpOAuthPath, mcpPublicPath } from "./mcp/publicUrl";
 
 export type AppOptions = {
   /** Env-like values parsed by `loadConfig` (strings, not pre-parsed arrays). */
@@ -48,6 +53,8 @@ export function createApp(options: AppOptions = {}) {
   app.use("*", requestLoggingMiddleware());
   app.use(`${HEALTH_API_PREFIX}/*`, corsMiddleware(config));
   app.use(`${HEALTH_API_PREFIX}/*`, writeRateLimitMiddleware(config));
+  app.use(`${LEGACY_HEALTH_API_PREFIX}/*`, corsMiddleware(config));
+  app.use(`${LEGACY_HEALTH_API_PREFIX}/*`, writeRateLimitMiddleware(config));
 
   health.get("/healthcheck", (c) => {
     const body: HealthcheckResponse = {
@@ -76,11 +83,13 @@ export function createApp(options: AppOptions = {}) {
   health.route("/audit-logs", createAuditLogRoutes(repositories.auditLogs));
   health.route("/mcp/connections", createMcpConnectionRoutes(repositories.mcpConnections));
 
-  // Public MCP resource path (default /api/mcp) and RFC 9728 metadata under the origin.
+  // Canonical MCP resource and RFC 9728 metadata under the Family OS origin.
   app.route("/", createMcpWellKnownRoutes(config));
   app.route(mcpPublicPath(config), createMcpRoutes({ config, repositories }));
-  app.route("/api/oauth", createOAuthConsentRoutes({ config, mcpConnections: repositories.mcpConnections }));
+  app.route(mcpOAuthPath(config), createOAuthConsentRoutes({ config, mcpConnections: repositories.mcpConnections }));
   app.route(HEALTH_API_PREFIX, health);
+  // Preserve the API used by already-installed clients while TestFlight build 7 rolls out.
+  app.route(LEGACY_HEALTH_API_PREFIX, health);
 
   app.notFound((c) =>
     c.json(

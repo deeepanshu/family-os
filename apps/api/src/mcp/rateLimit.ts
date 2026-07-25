@@ -12,7 +12,7 @@ type Bucket = {
  * applies its own full limit, so N instances multiply effective throughput by N.
  *
  * Horizontal scaling is unsupported until this is replaced with a shared
- * limiter (Cloudflare rate limiting on `/api/mcp`, Redis, or Postgres). See
+ * limiter (Cloudflare rate limiting on `/health/api/mcp`, Redis, or Postgres). See
  * `infra/cloudflare/README.md` for the gateway path. Single-process Raspberry Pi
  * deploys are the intended production topology for Release 1.
  */

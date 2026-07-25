@@ -6,7 +6,7 @@ import type { McpConnectionStore } from "../repositories/contracts";
  * User-facing MCP connection management.
  *
  * Connection grants are created by the OAuth consent handler
- * (`POST /api/oauth/consent/decision`) after it derives the OAuth client ID from
+ * (`POST /health/api/oauth/consent/decision`) after it derives the OAuth client ID from
  * the verified Supabase authorization request. Clients must not supply
  * oauthClientId in a browser body for grant creation.
  */

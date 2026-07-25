@@ -5,7 +5,7 @@
 Target public API:
 
 ```text
-https://api.deepanshujain.me/health/v1
+https://familyos.deepanshujain.me/health/api/v1
 ```
 
 Expected local backend target:
@@ -22,28 +22,28 @@ If using a reverse proxy on the Raspberry Pi, route:
 
 ## MCP / OAuth public surface
 
-ChatGPT and other MCP clients use the Family OS public origin (not necessarily
-the same hostname as the iOS Health API):
+ChatGPT and other MCP clients use the same Family OS public hostname as the
+iOS Health API:
 
 ```text
-https://familyos.deepanshujain.me/api/mcp
-https://familyos.deepanshujain.me/.well-known/oauth-protected-resource/api/mcp
-https://familyos.deepanshujain.me/api/oauth/consent
+https://familyos.deepanshujain.me/health/api/mcp
+https://familyos.deepanshujain.me/.well-known/oauth-protected-resource/health/api/mcp
+https://familyos.deepanshujain.me/health/api/oauth/consent
 ```
 
 Tunnel or reverse-proxy this hostname to the dedicated MCP API process at
-`localhost:3002`, **without stripping** `/api`. The app serves MCP at
-`/api/mcp` and well-known metadata at
-`/.well-known/oauth-protected-resource/api/mcp`. Keep the existing iOS Health
+`localhost:3002`, without stripping URL paths. The app serves MCP at
+`/health/api/mcp` and well-known metadata at
+`/.well-known/oauth-protected-resource/health/api/mcp`. Keep the existing iOS Health
 API on `localhost:3001`.
 
 Smoke checks after deploy:
 
 ```sh
-curl -sS https://familyos.deepanshujain.me/api/mcp/healthcheck
-curl -sS https://familyos.deepanshujain.me/.well-known/oauth-protected-resource/api/mcp
+curl -sS https://familyos.deepanshujain.me/health/api/mcp/healthcheck
+curl -sS https://familyos.deepanshujain.me/.well-known/oauth-protected-resource/health/api/mcp
 curl -sS -o /dev/null -w "%{http_code}\n" \
-  "https://familyos.deepanshujain.me/api/oauth/consent?authorization_id=test"
+  "https://familyos.deepanshujain.me/health/api/oauth/consent?authorization_id=test"
 ```
 
 ## Rate limiting (required before horizontal scale)
@@ -55,7 +55,7 @@ instances multiplies the effective limit.
 Before scaling beyond one instance, put a shared limiter in front of MCP:
 
 1. **Preferred for this deploy:** Cloudflare Rate Limiting (or WAF custom rule)
-   on the public MCP hostname for path `/api/mcp*`.
+   on the public MCP hostname for path `/health/api/mcp*`.
 2. Or replace `McpRateLimiter` with Redis / Postgres counters shared by all
    instances.
 
@@ -63,7 +63,7 @@ Suggested Cloudflare starting point (tune to traffic):
 
 | Field | Value |
 | --- | --- |
-| If | URI Path starts with `/api/mcp` |
+| If | URI Path starts with `/health/api/mcp` |
 | Characteristics | IP + (optional) JWT `sub` / custom header if available |
 | Rate | e.g. 60 requests / 1 minute |
 | Action | Block or managed challenge |

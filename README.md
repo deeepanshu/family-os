@@ -18,24 +18,24 @@ iOS-only family management app. Health is the first facet.
 Base URL:
 
 ```text
-https://api.deepanshujain.me/health/v1
+https://familyos.deepanshujain.me/health/api/v1
 ```
 
 Local API URL:
 
 ```text
-http://localhost:3001/health/v1
+http://localhost:3001/health/api/v1
 ```
 
 ## Environments
 
 The iOS app has two build-time environments:
 
-- `local` - Debug builds. Uses `http://localhost:3001/health/v1`, which points
+- `local` - Debug builds. Uses `http://localhost:3001/health/api/v1`, which points
   at the local Bun API from the iOS simulator. The local API uses Docker
   Postgres through `DATABASE_URL`.
 - `release` - Release builds. Uses
-  `https://api.deepanshujain.me/health/v1`, which points at the Raspberry
+  `https://familyos.deepanshujain.me/health/api/v1`, which points at the Raspberry
   Pi-hosted API. Release database storage is Supabase Postgres.
 
 Both environments use Supabase Auth for real Sign in with Apple. The local

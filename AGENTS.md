@@ -37,7 +37,7 @@ xcodebuild \
   -configuration Debug \
   -destination 'platform=iOS,name=<YOUR_IPHONE_NAME>' \
   DEVELOPMENT_TEAM=LG9UP2KBHV \
-  HEALTH_API_BASE_URL=http://<YOUR_MAC_LAN_IP>:3001/health/v1 \
+  HEALTH_API_BASE_URL=http://<YOUR_MAC_LAN_IP>:3001/health/api/v1 \
   FAMILY_OS_ENV=local \
   build
 ```

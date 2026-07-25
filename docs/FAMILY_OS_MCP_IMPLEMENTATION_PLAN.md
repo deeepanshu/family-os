@@ -29,7 +29,7 @@ ChatGPT Web or another OAuth-capable MCP client
     |
     | OAuth 2.1 access token (per Family OS user)
     v
-Family OS MCP server: https://familyos.deepanshujain.me/api/mcp
+Family OS MCP server: https://familyos.deepanshujain.me/health/api/mcp
 hosted by the Family OS API runtime
     |
     | direct application-service call; no user-token forwarding
@@ -213,13 +213,13 @@ OAuth grant/refresh path where the provider supports it.
 Expose a single remote MCP endpoint from the API runtime:
 
 ```text
-https://familyos.deepanshujain.me/api/mcp
+https://familyos.deepanshujain.me/health/api/mcp
 ```
 
 The same public deployment also serves the OAuth consent page at
-`https://familyos.deepanshujain.me/api/oauth/consent` and protected-resource
+`https://familyos.deepanshujain.me/health/api/oauth/consent` and protected-resource
 metadata at
-`https://familyos.deepanshujain.me/.well-known/oauth-protected-resource/api/mcp`.
+`https://familyos.deepanshujain.me/.well-known/oauth-protected-resource/health/api/mcp`.
 
 Public URL config is origin + path (`MCP_PUBLIC_ORIGIN` + `MCP_PUBLIC_PATH`),
 not a base that incorrectly nests `.well-known` under `/api`.
