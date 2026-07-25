@@ -566,6 +566,10 @@
 			<key>children</key>
 			<array>
 				<string>DE1000000000000000000017</string>
+				<string>DE6000000000000000000011</string>
+				<string>DE6000000000000000000012</string>
+				<string>DE6000000000000000000013</string>
+				<string>DE6000000000000000000014</string>
 			</array>
 			<key>isa</key>
 			<string>PBXGroup</string>
@@ -758,6 +762,10 @@
 				<string>DE4000000000000000000002</string>
 				<string>DE4000000000000000000003</string>
 				<string>DE4000000000000000000004</string>
+				<string>DE6000000000000000000001</string>
+				<string>DE6000000000000000000002</string>
+				<string>DE6000000000000000000003</string>
+				<string>DE6000000000000000000004</string>
 			</array>
 			<key>isa</key>
 			<string>PBXSourcesBuildPhase</string>
@@ -1467,6 +1475,34 @@
 			<key>isa</key>
 			<string>PBXBuildFile</string>
 		</dict>
+		<key>DE6000000000000000000001</key>
+			<dict>
+				<key>fileRef</key>
+				<string>DE6000000000000000000011</string>
+				<key>isa</key>
+				<string>PBXBuildFile</string>
+			</dict>
+		<key>DE6000000000000000000002</key>
+			<dict>
+				<key>fileRef</key>
+				<string>DE6000000000000000000012</string>
+				<key>isa</key>
+				<string>PBXBuildFile</string>
+			</dict>
+		<key>DE6000000000000000000003</key>
+			<dict>
+				<key>fileRef</key>
+				<string>DE6000000000000000000013</string>
+				<key>isa</key>
+				<string>PBXBuildFile</string>
+			</dict>
+		<key>DE6000000000000000000004</key>
+			<dict>
+				<key>fileRef</key>
+				<string>DE6000000000000000000014</string>
+				<key>isa</key>
+				<string>PBXBuildFile</string>
+			</dict>
 		<key>DE4000000000000000000011</key>
 		<dict>
 			<key>isa</key>
@@ -1511,6 +1547,50 @@
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
+		<key>DE6000000000000000000011</key>
+			<dict>
+				<key>isa</key>
+				<string>PBXFileReference</string>
+				<key>lastKnownFileType</key>
+				<string>sourcecode.swift</string>
+				<key>path</key>
+				<string>HealthKit/HealthKitSyncStateStore.swift</string>
+				<key>sourceTree</key>
+				<string>&lt;group&gt;</string>
+			</dict>
+		<key>DE6000000000000000000012</key>
+			<dict>
+				<key>isa</key>
+				<string>PBXFileReference</string>
+				<key>lastKnownFileType</key>
+				<string>sourcecode.swift</string>
+				<key>path</key>
+				<string>HealthKit/HealthKitSyncEngine.swift</string>
+				<key>sourceTree</key>
+				<string>&lt;group&gt;</string>
+			</dict>
+		<key>DE6000000000000000000013</key>
+			<dict>
+				<key>isa</key>
+				<string>PBXFileReference</string>
+				<key>lastKnownFileType</key>
+				<string>sourcecode.swift</string>
+				<key>path</key>
+				<string>HealthKit/HealthKitBackgroundSyncCoordinator.swift</string>
+				<key>sourceTree</key>
+				<string>&lt;group&gt;</string>
+			</dict>
+		<key>DE6000000000000000000014</key>
+			<dict>
+				<key>isa</key>
+				<string>PBXFileReference</string>
+				<key>lastKnownFileType</key>
+				<string>sourcecode.swift</string>
+				<key>path</key>
+				<string>HealthKit/HealthKitSessionProvider.swift</string>
+				<key>sourceTree</key>
+				<string>&lt;group&gt;</string>
+			</dict>
 		<key>DE5000000000000000000001</key>
 		<dict>
 			<key>isa</key>

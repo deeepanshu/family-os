@@ -137,13 +137,10 @@ enum GlucoseContext: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-enum HealthKitMetricType: String, Codable, CaseIterable, Identifiable {
+enum HealthKitSyncMetric: String, Codable, CaseIterable, Identifiable {
     case steps
-    case walkingDistance = "walking_distance"
     case sleep
-    case weight
     case bloodPressure = "blood_pressure"
-    case bloodGlucose = "blood_glucose"
 
     var id: String { rawValue }
 
@@ -151,61 +148,170 @@ enum HealthKitMetricType: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .steps:
             return "Steps"
-        case .walkingDistance:
-            return "Walking distance"
         case .sleep:
             return "Sleep"
-        case .weight:
-            return "Weight"
         case .bloodPressure:
             return "Blood pressure"
-        case .bloodGlucose:
-            return "Blood sugar"
         }
     }
 }
 
+/// Matches frozen API `HealthMetricSyncStatusCode`.
+enum HealthKitMetricSyncStatus: String, Codable {
+    case neverSynced = "never_synced"
+    case ready
+    case repairing
+    case repairNeeded = "repair_needed"
+    case error
+    case disabled
+
+    var displayName: String {
+        switch self {
+        case .neverSynced:
+            return "Not started"
+        case .ready:
+            return "Ready"
+        case .repairing:
+            return "Repairing"
+        case .repairNeeded:
+            return "Repair needed"
+        case .error:
+            return "Error"
+        case .disabled:
+            return "Disabled"
+        }
+    }
+}
+
+struct HealthKitMetricState: Decodable, Identifiable {
+    var id: String { metric.rawValue }
+
+    let metric: HealthKitSyncMetric
+    let enabled: Bool
+    let status: HealthKitMetricSyncStatus
+    let lastSuccessfulAt: String?
+    let lastAttemptAt: String?
+    let lastErrorCode: String?
+    let coverageStartAt: String?
+    let coverageEndAt: String?
+}
+
+/// Matches frozen API `HealthKitSettings` from GET/PUT `/healthkit/settings`.
 struct HealthKitSyncStatus: Decodable {
-    let linkedProfileId: String?
-    let enabledMetrics: [HealthKitMetricType]
-    let lastSync: HealthKitLastSync?
+    let personId: String
+    let consentVersion: String?
+    let consentedAt: String?
+    let healthTimezone: String
+    let healthTimezoneVersion: Int
+    let enabledMetrics: [HealthKitSyncMetric]
+    let activeInstallationId: String?
+    let metrics: [HealthKitMetricState]
+
+    var consentActive: Bool {
+        consentVersion != nil && consentedAt != nil && !enabledMetrics.isEmpty
+    }
 }
 
-struct HealthKitLastSync: Decodable {
-    let id: String
-    let status: String
-    let startedAt: String
-    let finishedAt: String
-    let importedCount: Int
-    let skippedCount: Int
-    let failedCount: Int
+struct HealthKitSyncResult: Decodable {
+    let syncId: String
+    let accepted: Bool
+    let operationCount: Int
+    let metricsAffected: [HealthKitSyncMetric]
+    let repairId: String?
+    let chunkIndex: Int?
 }
 
-struct HealthKitImportResult: Decodable {
-    let syncRunId: String
-    let importedCount: Int
-    let skippedCount: Int
-    let failedCount: Int
+struct HealthKitRepair: Decodable {
+    let repairId: String
+    let personId: String
+    let metric: HealthKitSyncMetric
+    let installationId: String
+    let timezoneVersion: Int
+    let rangeStart: String
+    let rangeEnd: String
+    let rangeStartDay: String
+    let rangeEndDay: String
+    let expiresAt: String
 }
 
-struct HealthKitSampleInput: Encodable {
-    let metricType: HealthKitMetricType
-    let sourceSampleKey: String
-    let startDate: String
-    let endDate: String?
-    let value: Double?
-    let unit: String?
-    let systolic: Int?
-    let diastolic: Int?
-    let pulse: Int?
-    let glucoseContext: GlucoseContext?
+struct HealthKitRepairCompleteResult: Decodable {
+    let repairId: String
+    let metric: HealthKitSyncMetric
+    let completed: Bool
+    let expectedChunkCount: Int
+    let completedChunkCount: Int
 }
 
-struct HealthMetricDailySummary: Decodable, Identifiable {
-    let id: String
-    let metricType: HealthKitMetricType
-    let date: String
-    let value: Double
-    let unit: String
-    let sampleCount: Int
+enum HealthKitSyncOperation: Encodable {
+    case stepsHourUpsert(hourStartUtc: String, count: Int)
+    case sleepDayUpsert(sleepDay: String, durationMinutes: Int)
+    case bloodPressureUpsert(sourceSampleKey: String, measuredAtUtc: String, systolic: Int, diastolic: Int, pulse: Int?)
+    case bloodPressureDelete(sourceSampleKey: String)
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case hourStartUtc
+        case count
+        case sleepDay
+        case durationMinutes
+        case sourceSampleKey
+        case measuredAtUtc
+        case systolic
+        case diastolic
+        case pulse
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .stepsHourUpsert(hourStartUtc, count):
+            try container.encode("steps_hour_upsert", forKey: .kind)
+            try container.encode(hourStartUtc, forKey: .hourStartUtc)
+            try container.encode(count, forKey: .count)
+        case let .sleepDayUpsert(sleepDay, durationMinutes):
+            try container.encode("sleep_day_upsert", forKey: .kind)
+            try container.encode(sleepDay, forKey: .sleepDay)
+            try container.encode(durationMinutes, forKey: .durationMinutes)
+        case let .bloodPressureUpsert(sourceSampleKey, measuredAtUtc, systolic, diastolic, pulse):
+            try container.encode("blood_pressure_upsert", forKey: .kind)
+            try container.encode(sourceSampleKey, forKey: .sourceSampleKey)
+            try container.encode(measuredAtUtc, forKey: .measuredAtUtc)
+            try container.encode(systolic, forKey: .systolic)
+            try container.encode(diastolic, forKey: .diastolic)
+            try container.encodeIfPresent(pulse, forKey: .pulse)
+        case let .bloodPressureDelete(sourceSampleKey):
+            try container.encode("blood_pressure_delete", forKey: .kind)
+            try container.encode(sourceSampleKey, forKey: .sourceSampleKey)
+        }
+    }
+
+    var metric: HealthKitSyncMetric {
+        switch self {
+        case .stepsHourUpsert:
+            return .steps
+        case .sleepDayUpsert:
+            return .sleep
+        case .bloodPressureUpsert, .bloodPressureDelete:
+            return .bloodPressure
+        }
+    }
+
+    /// Stable sort key for deterministic repair chunking / resume.
+    var stableKey: String {
+        switch self {
+        case let .stepsHourUpsert(hourStartUtc, _):
+            return "steps:\(hourStartUtc)"
+        case let .sleepDayUpsert(sleepDay, _):
+            return "sleep:\(sleepDay)"
+        case let .bloodPressureUpsert(sourceSampleKey, _, _, _, _):
+            return "bp_up:\(sourceSampleKey)"
+        case let .bloodPressureDelete(sourceSampleKey):
+            return "bp_del:\(sourceSampleKey)"
+        }
+    }
+}
+
+enum HealthKitConsent {
+    /// Must match the server's accepted consent version for enabling metrics.
+    static let version = "2026-07-25"
 }

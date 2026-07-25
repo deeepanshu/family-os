@@ -34,6 +34,7 @@ struct ProfileView: View {
             .navigationTitle("Profile")
             .task {
                 await viewModel.loadHealthKitStatus()
+                await HealthKitBackgroundSyncCoordinator.shared.resumePendingWorkIfSignedIn(using: viewModel)
             }
         }
     }

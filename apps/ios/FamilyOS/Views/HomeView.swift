@@ -17,15 +17,6 @@ struct HomeView: View {
 
                     VStack(spacing: 14) {
                         PrimaryActionButton(
-                            title: "Record BP",
-                            subtitle: "Blood pressure and pulse",
-                            systemImage: "heart.text.square.fill",
-                            tint: .red
-                        ) {
-                            activeLog = .bloodPressure
-                        }
-
-                        PrimaryActionButton(
                             title: "Record Blood Sugar",
                             subtitle: "Blood sugar reading",
                             systemImage: "drop.fill",
@@ -34,6 +25,10 @@ struct HomeView: View {
                             activeLog = .bloodSugar
                         }
                     }
+
+                    Text("Blood pressure is imported from Apple Health when HealthKit sync is enabled.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
 
                     LatestReadingsSummary(viewModel: viewModel)
                     StatusText(viewModel: viewModel)

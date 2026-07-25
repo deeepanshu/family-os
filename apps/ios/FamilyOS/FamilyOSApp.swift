@@ -34,6 +34,11 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, @preconcur
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        HealthKitBackgroundSyncCoordinator.shared.registerBackgroundTasks()
+        // Observers are registered only after validated local consent/configuration is restored.
+        Task { @MainActor in
+            await HealthKitBackgroundSyncCoordinator.shared.restoreObserversFromLocalConfiguration()
+        }
         return true
     }
 

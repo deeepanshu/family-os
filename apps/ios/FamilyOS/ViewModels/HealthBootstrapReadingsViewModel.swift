@@ -1,39 +1,6 @@
 import Foundation
 
 extension HealthBootstrapViewModel {
-    func createBloodPressure() async {
-        await request {
-            guard !profiles.selectedProfileId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return "Choose a profile first."
-            }
-            guard let systolicValue = Int(readings.systolic), let diastolicValue = Int(readings.diastolic) else {
-                return "Enter numeric systolic and diastolic values."
-            }
-            guard (50...260).contains(systolicValue), (30...180).contains(diastolicValue) else {
-                return "BP must be systolic 50-260 and diastolic 30-180."
-            }
-            let trimmedPulse = readings.pulse.trimmingCharacters(in: .whitespacesAndNewlines)
-            let pulseValue: Int?
-            if trimmedPulse.isEmpty {
-                pulseValue = nil
-            } else if let parsedPulse = Int(trimmedPulse), (30...220).contains(parsedPulse) {
-                pulseValue = parsedPulse
-            } else {
-                return "Pulse must be a number from 30-220."
-            }
-            let reading = try await client.createBloodPressure(
-                baseURL: connection.baseURL,
-                accessToken: auth.accessToken,
-                personId: profiles.selectedProfileId,
-                systolic: systolicValue,
-                diastolic: diastolicValue,
-                pulse: pulseValue
-            )
-            readings.bloodPressureReadings.insert(reading, at: 0)
-            return "Logged BP \(reading.systolic)/\(reading.diastolic)."
-        }
-    }
-
     func loadBloodPressure() async {
         await request {
             readings.bloodPressureReadings = try await client.listBloodPressure(

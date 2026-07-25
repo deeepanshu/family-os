@@ -94,6 +94,12 @@ final class HealthBootstrapViewModel: ObservableObject {
     }
 
     func signOut() {
+        if let userId = auth.signedInUserId, let personId = healthKit.linkedProfileId ?? selfProfile?.id {
+            Task {
+                await HealthKitSyncStateStore().clearAll(userId: userId, personId: personId)
+            }
+        }
+        HealthKitBackgroundSyncCoordinator.shared.stopObservers()
         auth.clear(defaults: defaults, keychain: keychain)
         family.clear()
         profiles.clear()

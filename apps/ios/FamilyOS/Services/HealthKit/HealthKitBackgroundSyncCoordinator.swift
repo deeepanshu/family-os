@@ -1,0 +1,176 @@
+import BackgroundTasks
+import Foundation
+import HealthKit
+import UIKit
+
+/// Owns observer registration, completion handlers, and background retry scheduling.
+@MainActor
+final class HealthKitBackgroundSyncCoordinator {
+    static let shared = HealthKitBackgroundSyncCoordinator()
+    static let bgTaskIdentifier = "com.deepanshujain.familyos.healthkit-sync"
+
+    private let healthKit = HealthKitClient()
+    private let engine = HealthKitSyncEngine()
+    private let stateStore = HealthKitSyncStateStore()
+    private let sessionProvider = HealthKitSessionProvider()
+    private var observerQueries: [HKObserverQuery] = []
+    private var observedMetrics: Set<HealthKitSyncMetric> = []
+    private var isProcessing = false
+
+    private init() {}
+
+    func registerBackgroundTasks() {
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.bgTaskIdentifier, using: nil) { task in
+            guard let processingTask = task as? BGProcessingTask else {
+                task.setTaskCompleted(success: false)
+                return
+            }
+            Task { @MainActor in
+                await HealthKitBackgroundSyncCoordinator.shared.handleBackgroundProcessing(task: processingTask)
+            }
+        }
+    }
+
+    /// Call after validated consent/configuration is available. Registers only enabled metrics.
+    func configureObservers(for metrics: [HealthKitSyncMetric]) {
+        guard healthKit.isAvailable else { return }
+        let enabled = Set(metrics)
+        if enabled == observedMetrics, !observerQueries.isEmpty {
+            return
+        }
+        stopObservers()
+        guard !enabled.isEmpty else { return }
+
+        for metric in enabled {
+            guard let type = try? healthKit.sampleType(for: metric) else { continue }
+            let query = healthKit.observe(type: type) {
+                Task { @MainActor in
+                    await HealthKitBackgroundSyncCoordinator.shared.handleObserverFire(metric: metric)
+                }
+            }
+            observerQueries.append(query)
+        }
+        observedMetrics = enabled
+        Task {
+            try? await healthKit.enableBackgroundDelivery()
+        }
+    }
+
+    /// Restores local configuration and registers observers only when consent is active.
+    func restoreObserversFromLocalConfiguration() async {
+        guard let configuration = await stateStore.loadConfiguration(),
+              configuration.consentVersion != nil,
+              !configuration.enabledMetrics.isEmpty
+        else {
+            stopObservers()
+            return
+        }
+        configureObservers(for: configuration.enabledMetrics)
+    }
+
+    func stopObservers() {
+        for query in observerQueries {
+            healthKit.stop(query)
+        }
+        observerQueries.removeAll()
+        observedMetrics = []
+    }
+
+    func scheduleBackgroundRetry() {
+        let request = BGProcessingTaskRequest(identifier: Self.bgTaskIdentifier)
+        request.requiresNetworkConnectivity = true
+        request.requiresExternalPower = false
+        try? BGTaskScheduler.shared.submit(request)
+    }
+
+    func resumePendingWorkIfSignedIn(using viewModel: HealthBootstrapViewModel? = nil) async {
+        await processSerialized {
+            let context: HealthKitSyncEngine.SessionContext
+            if let viewModel, let uiContext = await self.contextFromViewModel(viewModel) {
+                context = uiContext
+            } else {
+                context = try await self.sessionProvider.makeContext()
+            }
+            try await self.engine.processPendingWork(context: context)
+            self.configureObservers(for: context.enabledMetrics)
+        }
+    }
+
+    private func handleObserverFire(metric: HealthKitSyncMetric) async {
+        await processSerialized {
+            let context = try await self.sessionProvider.makeContext()
+            guard context.enabledMetrics.contains(metric) else { return }
+            try await self.engine.processMetric(metric, context: context)
+        }
+        // Always mark pending and schedule retry if process failed internally.
+        scheduleBackgroundRetry()
+    }
+
+    private func handleBackgroundProcessing(task: BGProcessingTask) async {
+        task.expirationHandler = {
+            Task { @MainActor in
+                HealthKitBackgroundSyncCoordinator.shared.scheduleBackgroundRetry()
+            }
+        }
+
+        let success = await processSerialized {
+            let context = try await self.sessionProvider.makeContext()
+            try await self.engine.processPendingWork(context: context)
+            self.configureObservers(for: context.enabledMetrics)
+        }
+
+        task.setTaskCompleted(success: success)
+        if !success {
+            scheduleBackgroundRetry()
+        }
+    }
+
+    @discardableResult
+    private func processSerialized(_ work: @escaping () async throws -> Void) async -> Bool {
+        guard !isProcessing else {
+            scheduleBackgroundRetry()
+            return false
+        }
+        isProcessing = true
+        defer { isProcessing = false }
+        do {
+            try await work()
+            return true
+        } catch {
+            // Redacted: do not log health values, UUIDs, anchors, or tokens.
+            scheduleBackgroundRetry()
+            return false
+        }
+    }
+
+    private func contextFromViewModel(_ viewModel: HealthBootstrapViewModel) async -> HealthKitSyncEngine.SessionContext? {
+        guard !viewModel.auth.accessToken.isEmpty,
+              let userId = viewModel.auth.signedInUserId,
+              let personId = viewModel.selfProfile?.id ?? viewModel.healthKit.linkedProfileId,
+              let status = viewModel.healthKit.status,
+              status.consentActive
+        else {
+            return nil
+        }
+        let installationId: String
+        do {
+            installationId = try await stateStore.installationId()
+        } catch {
+            return nil
+        }
+        return HealthKitSyncEngine.SessionContext(
+            baseURL: viewModel.connection.baseURL,
+            accessToken: viewModel.auth.accessToken,
+            userId: userId,
+            personId: personId,
+            timezone: status.healthTimezone,
+            timezoneVersion: status.healthTimezoneVersion,
+            installationId: installationId,
+            enabledMetrics: status.enabledMetrics
+        )
+    }
+}
+
+extension Notification.Name {
+    static let healthKitObserverFired = Notification.Name("FamilyOSHealthKitObserverFired")
+}

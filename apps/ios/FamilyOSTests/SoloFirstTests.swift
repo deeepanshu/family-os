@@ -125,11 +125,18 @@ final class SoloFirstTests: XCTestCase {
         let selfProfile = makeProfile(id: "p1", linkedUserId: "user-1", displayName: "Me", relationshipLabel: "Self")
         let otherProfile = makeProfile(id: "p2", linkedUserId: nil, displayName: "Mom", relationshipLabel: "Mother")
         viewModel.profiles.profiles = [selfProfile, otherProfile]
+        // Self profile exists, but linked HealthKit target is someone else.
         viewModel.healthKit.linkedProfileId = otherProfile.id
         viewModel.healthKit.isAvailable = true
         await viewModel.syncHealthKitNow()
         XCTAssertTrue(viewModel.isError)
         XCTAssertEqual(viewModel.statusMessage, "HealthKit sync must target your own profile.")
+    }
+
+    func testHealthKitMetricDisplayNames() {
+        XCTAssertEqual(HealthKitSyncMetric.steps.displayName, "Steps")
+        XCTAssertEqual(HealthKitSyncMetric.sleep.displayName, "Sleep")
+        XCTAssertEqual(HealthKitSyncMetric.bloodPressure.displayName, "Blood pressure")
     }
 
     func testStartupAcceptsPendingInviteBeforeBootstrap() async throws {

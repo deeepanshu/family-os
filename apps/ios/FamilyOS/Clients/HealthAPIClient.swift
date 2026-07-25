@@ -134,24 +134,6 @@ struct HealthAPIClient {
         return try await get(path: "readings/blood-pressure?personId=\(encodedPersonId)", baseURL: baseURL, accessToken: accessToken)
     }
 
-    func createBloodPressure(
-        baseURL: String,
-        accessToken: String,
-        personId: String,
-        systolic: Int,
-        diastolic: Int,
-        pulse: Int?
-    ) async throws -> BloodPressureReading {
-        let body = CreateBloodPressureRequest(
-            personId: personId,
-            systolic: systolic,
-            diastolic: diastolic,
-            pulse: pulse,
-            measuredAt: ISO8601DateFormatter().string(from: Date())
-        )
-        return try await post(path: "readings/blood-pressure", baseURL: baseURL, accessToken: accessToken, body: body)
-    }
-
     func listBloodGlucose(baseURL: String, accessToken: String, personId: String) async throws -> [BloodGlucoseReading] {
         let encodedPersonId = personId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? personId
         return try await get(path: "readings/blood-glucose?personId=\(encodedPersonId)", baseURL: baseURL, accessToken: accessToken)
@@ -173,33 +155,123 @@ struct HealthAPIClient {
         return try await post(path: "readings/blood-glucose", baseURL: baseURL, accessToken: accessToken, body: body)
     }
 
-    func healthKitSyncStatus(baseURL: String, accessToken: String) async throws -> HealthKitSyncStatus {
-        try await get(path: "healthkit/sync/status", baseURL: baseURL, accessToken: accessToken)
+    func healthKitSettings(baseURL: String, accessToken: String, personId: String? = nil) async throws -> HealthKitSyncStatus {
+        if let personId {
+            let encoded = personId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? personId
+            return try await get(path: "healthkit/settings?personId=\(encoded)", baseURL: baseURL, accessToken: accessToken)
+        }
+        return try await get(path: "healthkit/settings", baseURL: baseURL, accessToken: accessToken)
     }
 
-    func linkHealthKitProfile(baseURL: String, accessToken: String, personId: String) async throws -> HealthKitSyncStatus {
-        try await post(path: "healthkit/link-profile", baseURL: baseURL, accessToken: accessToken, body: LinkHealthKitProfileRequest(personId: personId))
-    }
-
-    func updateHealthKitSettings(
+    /// Frozen API settings write: omit `consentVersion` and empty metrics to withdraw consent.
+    func putHealthKitSettings(
         baseURL: String,
         accessToken: String,
-        enabledMetrics: [HealthKitMetricType]
+        personId: String,
+        consentVersion: String?,
+        enabledMetrics: [HealthKitSyncMetric],
+        healthTimezone: String,
+        installationId: String,
+        replaceActiveInstallation: Bool = false
     ) async throws -> HealthKitSyncStatus {
-        try await patch(path: "healthkit/sync/settings", baseURL: baseURL, accessToken: accessToken, body: HealthKitSettingsRequest(enabledMetrics: enabledMetrics))
+        try await put(
+            path: "healthkit/settings",
+            baseURL: baseURL,
+            accessToken: accessToken,
+            body: HealthKitSettingsRequest(
+                personId: personId,
+                consentVersion: consentVersion,
+                enabledMetrics: enabledMetrics,
+                healthTimezone: healthTimezone,
+                installationId: installationId,
+                replaceActiveInstallation: replaceActiveInstallation
+            )
+        )
     }
 
-    func importHealthKitSamples(
+    func syncHealthKit(
         baseURL: String,
         accessToken: String,
-        samples: [HealthKitSampleInput]
-    ) async throws -> HealthKitImportResult {
-        try await post(path: "healthkit/samples/batch", baseURL: baseURL, accessToken: accessToken, body: HealthKitSamplesBatchRequest(samples: samples))
+        syncId: String,
+        installationId: String,
+        personId: String,
+        timezoneVersion: Int,
+        operations: [HealthKitSyncOperation],
+        repairId: String?,
+        chunkIndex: Int?
+    ) async throws -> HealthKitSyncResult {
+        try await post(
+            path: "healthkit/sync",
+            baseURL: baseURL,
+            accessToken: accessToken,
+            body: HealthKitSyncBody(
+                syncId: syncId,
+                installationId: installationId,
+                personId: personId,
+                timezoneVersion: timezoneVersion,
+                operations: operations,
+                repairId: repairId,
+                chunkIndex: chunkIndex
+            )
+        )
     }
 
-    func listHealthKitDailySummaries(baseURL: String, accessToken: String, personId: String) async throws -> [HealthMetricDailySummary] {
-        let encodedPersonId = personId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? personId
-        return try await get(path: "healthkit/metrics/daily?personId=\(encodedPersonId)", baseURL: baseURL, accessToken: accessToken)
+    func createHealthKitRepair(
+        baseURL: String,
+        accessToken: String,
+        installationId: String,
+        personId: String,
+        metric: HealthKitSyncMetric,
+        timezoneVersion: Int
+    ) async throws -> HealthKitRepair {
+        try await post(
+            path: "healthkit/repairs",
+            baseURL: baseURL,
+            accessToken: accessToken,
+            body: HealthKitRepairBody(
+                installationId: installationId,
+                personId: personId,
+                metric: metric,
+                timezoneVersion: timezoneVersion
+            )
+        )
+    }
+
+    func completeHealthKitRepair(
+        baseURL: String,
+        accessToken: String,
+        repairId: String,
+        expectedChunkCount: Int
+    ) async throws -> HealthKitRepairCompleteResult {
+        try await post(
+            path: "healthkit/repairs/\(repairId)/complete",
+            baseURL: baseURL,
+            accessToken: accessToken,
+            body: HealthKitRepairCompleteBody(expectedChunkCount: expectedChunkCount)
+        )
+    }
+
+    private func put<T: Decodable, Body: Encodable>(
+        path: String,
+        baseURL: String,
+        accessToken: String,
+        body: Body
+    ) async throws -> T {
+        guard !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw HealthAPIError.missingToken
+        }
+        guard let url = endpointURL(baseURL: baseURL, path: path) else {
+            throw HealthAPIError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.setValue("application/json", forHTTPHeaderField: "accept")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "authorization")
+        request.httpBody = try JSONEncoder().encode(body)
+
+        return try await decodeEnvelope(T.self, from: request)
     }
 
     private func post<T: Decodable, Body: Encodable>(
@@ -310,14 +382,6 @@ private struct CreateSelfProfileRequest: Encodable {
     let displayName: String
 }
 
-private struct CreateBloodPressureRequest: Encodable {
-    let personId: String
-    let systolic: Int
-    let diastolic: Int
-    let pulse: Int?
-    let measuredAt: String
-}
-
 private struct CreateBloodGlucoseRequest: Encodable {
     let personId: String
     let value: Double
@@ -326,14 +390,51 @@ private struct CreateBloodGlucoseRequest: Encodable {
     let measuredAt: String
 }
 
-private struct LinkHealthKitProfileRequest: Encodable {
-    let personId: String
-}
-
 private struct HealthKitSettingsRequest: Encodable {
-    let enabledMetrics: [HealthKitMetricType]
+    let personId: String
+    let consentVersion: String?
+    let enabledMetrics: [HealthKitSyncMetric]
+    let healthTimezone: String
+    let installationId: String
+    let replaceActiveInstallation: Bool
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(personId, forKey: .personId)
+        try container.encodeIfPresent(consentVersion, forKey: .consentVersion)
+        try container.encode(enabledMetrics, forKey: .enabledMetrics)
+        try container.encode(healthTimezone, forKey: .healthTimezone)
+        try container.encode(installationId, forKey: .installationId)
+        try container.encode(replaceActiveInstallation, forKey: .replaceActiveInstallation)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case personId
+        case consentVersion
+        case enabledMetrics
+        case healthTimezone
+        case installationId
+        case replaceActiveInstallation
+    }
 }
 
-private struct HealthKitSamplesBatchRequest: Encodable {
-    let samples: [HealthKitSampleInput]
+private struct HealthKitSyncBody: Encodable {
+    let syncId: String
+    let installationId: String
+    let personId: String
+    let timezoneVersion: Int
+    let operations: [HealthKitSyncOperation]
+    let repairId: String?
+    let chunkIndex: Int?
+}
+
+private struct HealthKitRepairBody: Encodable {
+    let installationId: String
+    let personId: String
+    let metric: HealthKitSyncMetric
+    let timezoneVersion: Int
+}
+
+private struct HealthKitRepairCompleteBody: Encodable {
+    let expectedChunkCount: Int
 }

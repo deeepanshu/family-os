@@ -13,15 +13,6 @@ struct LogReadingSheet: View {
                 }
 
                 switch kind {
-                case .bloodPressure:
-                    Section("Blood Pressure") {
-                        TextField("Systolic", text: $viewModel.readings.systolic)
-                            .keyboardType(.numberPad)
-                        TextField("Diastolic", text: $viewModel.readings.diastolic)
-                            .keyboardType(.numberPad)
-                        TextField("Pulse (optional)", text: $viewModel.readings.pulse)
-                            .keyboardType(.numberPad)
-                    }
                 case .bloodSugar:
                     Section("Blood Sugar") {
                         TextField("Blood sugar mg/dL", text: $viewModel.readings.glucoseValue)
@@ -47,8 +38,6 @@ struct LogReadingSheet: View {
                     Button("Save") {
                         Task {
                             switch kind {
-                            case .bloodPressure:
-                                await viewModel.createBloodPressure()
                             case .bloodSugar:
                                 await viewModel.createBloodGlucose()
                             }
@@ -64,13 +53,10 @@ struct LogReadingSheet: View {
 }
 
 enum LogKind: Identifiable {
-    case bloodPressure
     case bloodSugar
 
     var id: String {
         switch self {
-        case .bloodPressure:
-            return "blood-pressure"
         case .bloodSugar:
             return "blood-sugar"
         }
@@ -78,8 +64,6 @@ enum LogKind: Identifiable {
 
     var title: String {
         switch self {
-        case .bloodPressure:
-            return "Record BP"
         case .bloodSugar:
             return "Record Blood Sugar"
         }

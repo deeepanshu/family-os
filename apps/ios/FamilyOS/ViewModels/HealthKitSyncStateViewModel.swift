@@ -3,20 +3,34 @@ import Foundation
 @MainActor
 final class HealthKitSyncStateViewModel: ObservableObject {
     @Published var status: HealthKitSyncStatus?
-    @Published var dailySummaries: [HealthMetricDailySummary] = []
     @Published var isAvailable = false
     @Published var isSyncing = false
     @Published var linkedProfileId: String?
-
-    var enabledMetrics: [HealthKitMetricType] {
-        status?.enabledMetrics ?? []
-    }
+    @Published var consentGranted = false
+    @Published var selectedTimezone = TimeZone.current.identifier
+    @Published var enabledMetrics: Set<HealthKitSyncMetric> = Set(HealthKitSyncMetric.allCases)
+    @Published var confirmTimezoneChange = false
 
     func clear() {
         status = nil
-        dailySummaries = []
         isAvailable = false
         isSyncing = false
         linkedProfileId = nil
+        consentGranted = false
+        selectedTimezone = TimeZone.current.identifier
+        enabledMetrics = Set(HealthKitSyncMetric.allCases)
+        confirmTimezoneChange = false
+    }
+
+    func apply(status: HealthKitSyncStatus) {
+        self.status = status
+        linkedProfileId = status.personId
+        consentGranted = status.consentActive
+        selectedTimezone = status.healthTimezone
+        enabledMetrics = Set(status.enabledMetrics.isEmpty ? HealthKitSyncMetric.allCases : status.enabledMetrics)
+    }
+
+    var metricRows: [HealthKitMetricState] {
+        status?.metrics ?? []
     }
 }

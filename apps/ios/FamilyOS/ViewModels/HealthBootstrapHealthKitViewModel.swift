@@ -1,46 +1,66 @@
 import Foundation
 
 extension HealthBootstrapViewModel {
+    private var syncEngine: HealthKitSyncEngine { HealthKitSyncEngine() }
+    private var syncStateStore: HealthKitSyncStateStore { HealthKitSyncStateStore() }
+
     func loadHealthKitStatus() async {
         healthKit.isAvailable = healthKitClient.isAvailable
         await request {
-            healthKit.status = try await client.healthKitSyncStatus(baseURL: connection.baseURL, accessToken: auth.accessToken)
-            healthKit.linkedProfileId = healthKit.status?.linkedProfileId
-            if let linkedProfileId = healthKit.linkedProfileId {
-                healthKit.dailySummaries = try await client.listHealthKitDailySummaries(
-                    baseURL: connection.baseURL,
-                    accessToken: auth.accessToken,
-                    personId: linkedProfileId
-                )
+            let status = try await client.healthKitSettings(
+                baseURL: connection.baseURL,
+                accessToken: auth.accessToken,
+                personId: selfProfile?.id
+            )
+            healthKit.apply(status: status)
+            try await persistLocalConfiguration(from: status)
+            if status.consentActive {
+                HealthKitBackgroundSyncCoordinator.shared.configureObservers(for: status.enabledMetrics)
+            } else {
+                HealthKitBackgroundSyncCoordinator.shared.stopObservers()
             }
             return "Loaded HealthKit sync status."
         }
     }
 
-    func linkSelectedProfileForHealthKit() async {
-        guard let profile = selectedProfile else {
+    func saveHealthKitSettings(replaceInstallation: Bool = false) async {
+        guard let personId = selfProfile?.id else {
             isError = true
-            statusMessage = "Choose your own profile before linking HealthKit."
+            statusMessage = "Create your profile before enabling HealthKit sync."
+            return
+        }
+        if healthKit.consentGranted && healthKit.enabledMetrics.isEmpty {
+            isError = true
+            statusMessage = "Select at least one HealthKit metric, or turn off consent."
             return
         }
         await request {
-            healthKit.status = try await client.linkHealthKitProfile(
+            let installationId = try await syncStateStore.installationId()
+            let consentVersion = healthKit.consentGranted ? HealthKitConsent.version : nil
+            let enabled = healthKit.consentGranted
+                ? Array(healthKit.enabledMetrics).sorted { $0.rawValue < $1.rawValue }
+                : []
+            let status = try await client.putHealthKitSettings(
                 baseURL: connection.baseURL,
                 accessToken: auth.accessToken,
-                personId: profile.id
+                personId: personId,
+                consentVersion: consentVersion,
+                enabledMetrics: enabled,
+                healthTimezone: healthKit.selectedTimezone,
+                installationId: installationId,
+                replaceActiveInstallation: replaceInstallation
             )
-            return "Linked \(profile.displayName) to HealthKit sync."
-        }
-    }
-
-    func enableDefaultHealthKitMetrics() async {
-        await request {
-            healthKit.status = try await client.updateHealthKitSettings(
-                baseURL: connection.baseURL,
-                accessToken: auth.accessToken,
-                enabledMetrics: HealthKitMetricType.allCases
-            )
-            return "Enabled HealthKit categories."
+            healthKit.apply(status: status)
+            try await persistLocalConfiguration(from: status)
+            if status.consentActive {
+                try await healthKitClient.requestAuthorization()
+                try await healthKitClient.enableBackgroundDelivery()
+                HealthKitBackgroundSyncCoordinator.shared.configureObservers(for: status.enabledMetrics)
+            } else if let userId = auth.signedInUserId {
+                await syncStateStore.clearAll(userId: userId, personId: personId)
+                HealthKitBackgroundSyncCoordinator.shared.stopObservers()
+            }
+            return status.consentActive ? "HealthKit sync settings saved." : "HealthKit consent withdrawn."
         }
     }
 
@@ -50,73 +70,110 @@ extension HealthBootstrapViewModel {
             statusMessage = "HealthKit is not available on this device."
             return
         }
-        guard let linkedProfileId = healthKit.linkedProfileId else {
+        guard let personId = selfProfile?.id else {
             isError = true
-            statusMessage = "Link your profile before syncing HealthKit."
+            statusMessage = "Create your profile before syncing HealthKit."
             return
         }
-        guard linkedProfileId == selfProfile?.id else {
+        guard healthKit.linkedProfileId == nil || healthKit.linkedProfileId == personId else {
             isError = true
             statusMessage = "HealthKit sync must target your own profile."
             return
         }
+
+        if healthKit.status?.consentActive != true {
+            healthKit.consentGranted = true
+            if healthKit.enabledMetrics.isEmpty {
+                healthKit.enabledMetrics = Set(HealthKitSyncMetric.allCases)
+            }
+            await saveHealthKitSettings()
+            if isError { return }
+        }
+
         healthKit.isSyncing = true
         defer { healthKit.isSyncing = false }
+
         await request {
-            try await healthKitClient.requestAuthorization()
-            let startDate = Calendar.current.date(byAdding: .day, value: -90, to: Date()) ?? Date()
-            let enabled = Set(healthKit.enabledMetrics)
-            let samples = try await healthKitClient.readSamples(since: startDate)
-                .filter { enabled.contains($0.metricType) }
-            let result = try await importHealthKitSamplesInBatches(samples)
-            healthKit.status = try await client.healthKitSyncStatus(baseURL: connection.baseURL, accessToken: auth.accessToken)
-            healthKit.dailySummaries = try await client.listHealthKitDailySummaries(
+            guard let status = healthKit.status,
+                  let userId = auth.signedInUserId ?? defaults.string(forKey: DefaultsKey.userId)
+            else {
+                throw HealthAPIError.badStatus(409, "HealthKit sync is not configured.")
+            }
+
+            let installationId = try await syncStateStore.installationId()
+            let context = HealthKitSyncEngine.SessionContext(
                 baseURL: connection.baseURL,
                 accessToken: auth.accessToken,
-                personId: linkedProfileId
+                userId: userId,
+                personId: personId,
+                timezone: status.healthTimezone,
+                timezoneVersion: status.healthTimezoneVersion,
+                installationId: installationId,
+                enabledMetrics: status.enabledMetrics
             )
+
+            try await persistLocalConfiguration(from: status, userId: userId, installationId: installationId)
+            try await syncEngine.enableAndRepair(context: context)
+            let refreshed = try await client.healthKitSettings(
+                baseURL: connection.baseURL,
+                accessToken: auth.accessToken,
+                personId: personId
+            )
+            healthKit.apply(status: refreshed)
+            try await persistLocalConfiguration(from: refreshed, userId: userId, installationId: installationId)
             readings.bloodPressureReadings = try await client.listBloodPressure(
                 baseURL: connection.baseURL,
                 accessToken: auth.accessToken,
-                personId: linkedProfileId
+                personId: personId
             )
-            readings.bloodGlucoseReadings = try await client.listBloodGlucose(
-                baseURL: connection.baseURL,
-                accessToken: auth.accessToken,
-                personId: linkedProfileId
-            )
-            return "HealthKit sync imported \(result.importedCount), skipped \(result.skippedCount), failed \(result.failedCount)."
+            HealthKitBackgroundSyncCoordinator.shared.configureObservers(for: refreshed.enabledMetrics)
+            return "HealthKit sync completed. Background delivery is best effort."
         }
     }
 
-    private func importHealthKitSamplesInBatches(_ samples: [HealthKitSampleInput]) async throws -> HealthKitImportResult {
-        let batchSize = 500
-        var syncRunId = ""
-        var importedCount = 0
-        var skippedCount = 0
-        var failedCount = 0
-
-        for startIndex in stride(from: 0, to: samples.count, by: batchSize) {
-            let endIndex = min(startIndex + batchSize, samples.count)
-            let batch = Array(samples[startIndex..<endIndex])
-            let result = try await client.importHealthKitSamples(
-                baseURL: connection.baseURL,
-                accessToken: auth.accessToken,
-                samples: batch
-            )
-            if syncRunId.isEmpty {
-                syncRunId = result.syncRunId
-            }
-            importedCount += result.importedCount
-            skippedCount += result.skippedCount
-            failedCount += result.failedCount
+    func changeHealthTimezone() async {
+        guard healthKit.confirmTimezoneChange else {
+            isError = true
+            statusMessage = "Confirm the timezone change. This repairs the latest 90 days."
+            return
         }
+        await saveHealthKitSettings()
+        guard !isError else { return }
+        await syncHealthKitNow()
+        healthKit.confirmTimezoneChange = false
+    }
 
-        return HealthKitImportResult(
-            syncRunId: syncRunId,
-            importedCount: importedCount,
-            skippedCount: skippedCount,
-            failedCount: failedCount
+    private func persistLocalConfiguration(
+        from status: HealthKitSyncStatus,
+        userId: String? = nil,
+        installationId: String? = nil
+    ) async throws {
+        let resolvedUserId = userId
+            ?? auth.signedInUserId
+            ?? defaults.string(forKey: DefaultsKey.userId)
+            ?? ""
+        let resolvedInstallation: String
+        if let installationId {
+            resolvedInstallation = installationId
+        } else {
+            resolvedInstallation = try await syncStateStore.installationId()
+        }
+        guard status.consentActive else {
+            await syncStateStore.clearConfiguration()
+            return
+        }
+        guard !resolvedUserId.isEmpty else { return }
+        await syncStateStore.saveConfiguration(
+            HealthKitLocalConfiguration(
+                userId: resolvedUserId,
+                personId: status.personId,
+                healthTimezone: status.healthTimezone,
+                healthTimezoneVersion: status.healthTimezoneVersion,
+                enabledMetrics: status.enabledMetrics,
+                consentVersion: status.consentVersion,
+                installationId: resolvedInstallation,
+                updatedAt: Date()
+            )
         )
     }
 }
