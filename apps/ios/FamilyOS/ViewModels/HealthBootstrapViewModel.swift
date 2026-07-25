@@ -140,6 +140,7 @@ final class HealthBootstrapViewModel: ObservableObject {
         defer { isStartingUp = false }
 
         do {
+            try await refreshSessionIfNeeded()
             if let token = pendingInviteToken {
                 _ = try await client.acceptInvite(baseURL: connection.baseURL, accessToken: auth.accessToken, token: token)
                 pendingInviteToken = nil
@@ -194,6 +195,7 @@ final class HealthBootstrapViewModel: ObservableObject {
         isError = false
         statusMessage = "Contacting Health API..."
         do {
+            try await refreshSessionIfNeeded()
             statusMessage = try await action()
         } catch {
             isError = true
@@ -204,6 +206,28 @@ final class HealthBootstrapViewModel: ObservableObject {
     func storeSession(_ session: SupabaseSession) throws {
         try auth.store(session: session, defaults: defaults, keychain: keychain)
         saveConnectionSettings()
+    }
+
+    private func refreshSessionIfNeeded() async throws {
+        guard AccessTokenExpiry.requiresRefresh(auth.accessToken) else {
+            return
+        }
+        guard let refreshToken = auth.refreshToken, !refreshToken.isEmpty else {
+            auth.clear(defaults: defaults, keychain: keychain)
+            throw SupabaseAuthError.requestFailed("Your sign-in session expired. Please sign in again.")
+        }
+
+        do {
+            let session = try await authClient.refreshSession(
+                supabaseURL: connection.supabaseURL,
+                anonKey: connection.supabaseAnonKey,
+                refreshToken: refreshToken
+            )
+            try auth.store(session: session, defaults: defaults, keychain: keychain)
+        } catch {
+            auth.clear(defaults: defaults, keychain: keychain)
+            throw SupabaseAuthError.requestFailed("Your sign-in session expired. Please sign in again.")
+        }
     }
 
     func handleInviteURL(_ url: URL) -> Bool {

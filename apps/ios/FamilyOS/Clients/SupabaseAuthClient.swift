@@ -30,6 +30,12 @@ enum SupabaseAuthError: LocalizedError {
 }
 
 struct SupabaseAuthClient {
+    let session: URLSession
+
+    init(session: URLSession = .shared) {
+        self.session = session
+    }
+
     func makeAppleNonce() throws -> AppleSignInNonce {
         let raw = try randomNonceString()
         return AppleSignInNonce(raw: raw, sha256: sha256(raw))
@@ -95,7 +101,7 @@ struct SupabaseAuthClient {
         request.setValue("Bearer \(anonKey)", forHTTPHeaderField: "authorization")
         request.httpBody = try JSONEncoder.supabase.encode(body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw SupabaseAuthError.badStatus(-1, nil)
         }

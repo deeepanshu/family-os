@@ -169,6 +169,35 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertEqual(connection.baseURL, customURL)
     }
 
+    func testAccessTokenExpiryRequiresRefreshForExpiredToken() {
+        let expiredToken = "eyJhbGciOiJub25lIn0.eyJleHAiOjF9.signature"
+        XCTAssertTrue(AccessTokenExpiry.requiresRefresh(expiredToken, now: Date(timeIntervalSince1970: 2)))
+    }
+
+    func testAccessTokenExpiryKeepsLocalDevelopmentToken() {
+        XCTAssertFalse(AccessTokenExpiry.requiresRefresh("dev-token"))
+    }
+
+    func testStartupRefreshesExpiredSessionBeforeBootstrap() async {
+        let viewModel = makeViewModelWithMock([
+            "/auth/v1/token": """
+            {"access_token":"fresh-token","refresh_token":"fresh-refresh-token","user":{"id":"user-1","email":"test@example.com"}}
+            """,
+            "/bootstrap": """
+            {"data":{"family":{"id":"f1","name":"My Health","kind":"personal"},"membership":{"id":"m1","userId":"user-1","role":"manager","status":"active"},"profiles":[],"selfProfile":null,"needsProfileSetup":true}}
+            """
+        ])
+        viewModel.auth.accessToken = "eyJhbGciOiJub25lIn0.eyJleHAiOjF9.signature"
+        viewModel.auth.refreshToken = "expired-session-refresh-token"
+
+        await viewModel.startup()
+
+        XCTAssertEqual(viewModel.auth.accessToken, "fresh-token")
+        XCTAssertEqual(viewModel.auth.refreshToken, "fresh-refresh-token")
+        XCTAssertEqual(viewModel.family.currentFamilyName, "My Health")
+        XCTAssertFalse(viewModel.isError)
+    }
+
     func testStartupAcceptsPendingInviteBeforeBootstrap() async throws {
         let viewModel = makeViewModelWithMock([
             "/invites/invite-token/accept": """
@@ -301,7 +330,7 @@ private func makeViewModelWithMock(_ handlers: [String: String]) -> HealthBootst
         environment: AppEnvironment(name: .local, apiBaseURL: "https://test.example.com", supabaseURL: "https://test.supabase.co"),
         healthClient: HealthAPIClient(session: session),
         healthKitClient: HealthKitClient(),
-        authClient: SupabaseAuthClient(),
+        authClient: SupabaseAuthClient(session: session),
         keychain: KeychainStore(),
         defaults: UserDefaults(suiteName: nil)!
     )
