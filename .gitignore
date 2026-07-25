@@ -9,6 +9,10 @@ dist/
 build/
 coverage/
 **/*.xcodeproj/project.xcworkspace/
+!apps/ios/FamilyOS.xcodeproj/project.xcworkspace/
+!apps/ios/FamilyOS.xcodeproj/project.xcworkspace/xcshareddata/
+!apps/ios/FamilyOS.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+!apps/ios/FamilyOS.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 **/*.xcworkspace/xcuserdata/
 **/*.xcodeproj/xcuserdata/
 apps/ios/Config/*.private.xcconfig
