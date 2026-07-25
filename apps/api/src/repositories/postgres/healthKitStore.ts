@@ -721,8 +721,7 @@ export class PostgresHealthKitStore {
     );
     if (stepOperations.length > 0) {
       await tx`
-        insert into health_step_hours (family_id, person_id, hour_start_utc, count, updated_at)
-        ${tx(
+        insert into health_step_hours ${tx(
           stepOperations.map((op) => ({
             family_id: input.familyId,
             person_id: input.personId,
