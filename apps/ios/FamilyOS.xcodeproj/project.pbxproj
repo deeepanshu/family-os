@@ -1045,7 +1045,7 @@
 				<key>CODE_SIGN_STYLE</key>
 				<string>Automatic</string>
 				<key>CURRENT_PROJECT_VERSION</key>
-				<string>5</string>
+				<string>6</string>
 				<key>DEVELOPMENT_TEAM</key>
 				<string>LG9UP2KBHV</string>
 				<key>ENABLE_PREVIEWS</key>
@@ -1102,7 +1102,7 @@
 				<key>CODE_SIGN_STYLE</key>
 				<string>Automatic</string>
 				<key>CURRENT_PROJECT_VERSION</key>
-				<string>5</string>
+				<string>6</string>
 				<key>DEVELOPMENT_TEAM</key>
 				<string>LG9UP2KBHV</string>
 				<key>FAMILY_OS_ENV</key>
