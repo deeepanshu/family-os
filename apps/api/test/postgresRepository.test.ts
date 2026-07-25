@@ -212,6 +212,19 @@ describe("Postgres repository wiring", () => {
     });
     expect(settings.status).toBe(200);
 
+    const repair = await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        personId: profile.data.id,
+        installationId: "00000000-0000-4000-8000-000000009010",
+        group: "vitals",
+        timezoneVersion: 1
+      })
+    });
+    expect(repair.status).toBe(201);
+    expect((await repair.json()).data.group).toBe("vitals");
+
     const sync = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
       method: "POST",
       headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },

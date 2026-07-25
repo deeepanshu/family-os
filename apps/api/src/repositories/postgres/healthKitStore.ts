@@ -422,7 +422,7 @@ export class PostgresHealthKitStore {
     return {
       repairId: repair.repair_id,
       personId: repair.person_id,
-      group: repair.group,
+      group: repair.group_key as HealthKitMetric,
       installationId: repair.installation_id,
       timezoneVersion: repair.timezone_version,
       rangeStart: range.rangeStartIso,
@@ -450,7 +450,7 @@ export class PostgresHealthKitStore {
       if (repair.completed_at) {
         return {
           repairId,
-          group: repair.group as HealthKitMetric,
+          group: repair.group_key as HealthKitMetric,
           completed: true as const,
           expectedChunkCount: repair.expected_chunk_count ?? input.expectedChunkCount,
           completedChunkCount: repair.expected_chunk_count ?? input.expectedChunkCount
@@ -470,8 +470,8 @@ export class PostgresHealthKitStore {
       if (authority.settings.health_timezone_version !== repair.timezone_version) {
         throw new HttpError(409, "healthkit_timezone_version_invalid", "Timezone version is stale.");
       }
-      if (!authority.enabledGroups.has(repair.group as HealthKitMetric)) {
-        throw new HttpError(403, "healthkit_metric_disabled", `Metric ${repair.group} is not enabled.`);
+      if (!authority.enabledGroups.has(repair.group_key as HealthKitMetric)) {
+        throw new HttpError(403, "healthkit_metric_disabled", `Metric ${repair.group_key} is not enabled.`);
       }
 
       const chunks = await tx`
@@ -488,7 +488,7 @@ export class PostgresHealthKitStore {
         }
       }
 
-      if (repair.group === "sleep") {
+      if (repair.group_key === "sleep") {
         const range = repairRangeFromRow(repair);
         await tx`
           delete from health_sleep_days
@@ -515,12 +515,12 @@ export class PostgresHealthKitStore {
           coverage_start_at = ${toIso(repair.range_start)},
           coverage_end_at = ${toIso(repair.range_end)},
           updated_at = ${nowIso}
-        where person_id = ${selfId} and group_key = ${repair.group}
+        where person_id = ${selfId} and group_key = ${repair.group_key}
       `;
 
       return {
         repairId,
-        group: repair.group as HealthKitMetric,
+        group: repair.group_key as HealthKitMetric,
         completed: true as const,
         expectedChunkCount: input.expectedChunkCount,
         completedChunkCount: input.expectedChunkCount

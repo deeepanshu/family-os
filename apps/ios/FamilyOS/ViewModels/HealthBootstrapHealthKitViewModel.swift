@@ -107,11 +107,10 @@ extension HealthBootstrapViewModel {
         defer { healthKit.isSyncing = false }
 
         await request {
-            guard let status = healthKit.status,
-                  let userId = auth.signedInUserId ?? defaults.string(forKey: DefaultsKey.userId)
-            else {
-                throw HealthAPIError.badStatus(409, "HealthKit sync is not configured.")
+            guard let status = healthKit.status else {
+                throw HealthAPIError.badStatus(409, "HealthKit settings could not be loaded. Save the settings and try again.")
             }
+            let userId = try await syncUserId()
 
             let installationId = try await syncStateStore.installationId()
             let context = HealthKitSyncEngine.SessionContext(
@@ -188,5 +187,23 @@ extension HealthBootstrapViewModel {
                 updatedAt: Date()
             )
         )
+    }
+
+    private func syncUserId() async throws -> String {
+        if let userId = auth.signedInUserId, !userId.isEmpty {
+            return userId
+        }
+        if let userId = defaults.string(forKey: DefaultsKey.userId), !userId.isEmpty {
+            auth.signedInUserId = userId
+            return userId
+        }
+
+        let session = try await client.session(
+            baseURL: connection.baseURL,
+            accessToken: auth.accessToken
+        )
+        auth.signedInUserId = session.userId
+        defaults.set(session.userId, forKey: DefaultsKey.userId)
+        return session.userId
     }
 }
