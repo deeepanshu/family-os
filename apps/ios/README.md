@@ -57,22 +57,25 @@ The app reads these generated Info.plist keys:
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
 
-`SUPABASE_URL` and `SUPABASE_ANON_KEY` are read from tracked base config files:
+`SUPABASE_URL` and `SUPABASE_ANON_KEY` are read from the tracked base config
+files. The Release values are intentionally tracked because they are
+client-safe values embedded in the app, which also makes them available to
+Xcode Cloud:
 
 - `Config/Local.xcconfig`
 - `Config/Release.xcconfig`
 
-Those files include ignored private overrides:
+Those files support ignored private overrides for local development:
 
 - `Config/Local.private.xcconfig`
 - `Config/Release.private.xcconfig`
 
-Create the private files from the examples and put real Supabase values there
-before using real Apple login:
+Create `Local.private.xcconfig` from its example and put your local development
+Supabase values there before using real Apple login. Do not put the Supabase
+service-role key in any iOS configuration file.
 
 ```sh
 cp apps/ios/Config/Local.private.xcconfig.example apps/ios/Config/Local.private.xcconfig
-cp apps/ios/Config/Release.private.xcconfig.example apps/ios/Config/Release.private.xcconfig
 ```
 
 In `.xcconfig` files, write URLs as `https:/$()/your-project.supabase.co`.
