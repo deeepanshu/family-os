@@ -16,6 +16,7 @@ final class HealthKitBackgroundSyncCoordinator {
     private var observerQueries: [HKObserverQuery] = []
     private var observedMetrics: Set<HealthKitSyncMetric> = []
     private var isProcessing = false
+    private var processingWaiters: [CheckedContinuation<Void, Never>] = []
 
     private init() {}
 
@@ -119,6 +120,20 @@ final class HealthKitBackgroundSyncCoordinator {
         }
     }
 
+    /// Foreground sync shares the same engine and outbox serialisation as observer work.
+    func runForegroundSync(context: HealthKitSyncEngine.SessionContext) async throws {
+        while isProcessing {
+            await withCheckedContinuation { continuation in
+                processingWaiters.append(continuation)
+            }
+        }
+
+        isProcessing = true
+        defer { finishProcessing() }
+        try await engine.enableAndRepair(context: context)
+        configureObservers(for: context.enabledGroups)
+    }
+
     private func handleObserverFire(metric: HealthKitSyncMetric) async {
         let success = await processSerialized {
             let context = try await self.sessionProvider.makeContext()
@@ -172,7 +187,7 @@ final class HealthKitBackgroundSyncCoordinator {
             return false
         }
         isProcessing = true
-        defer { isProcessing = false }
+        defer { finishProcessing() }
         do {
             try await work()
             return true
@@ -180,6 +195,13 @@ final class HealthKitBackgroundSyncCoordinator {
             // Redacted: do not log health values, UUIDs, anchors, or tokens.
             return false
         }
+    }
+
+    private func finishProcessing() {
+        isProcessing = false
+        let waiters = processingWaiters
+        processingWaiters.removeAll()
+        waiters.forEach { $0.resume() }
     }
 
     private func contextFromViewModel(_ viewModel: HealthBootstrapViewModel) async -> HealthKitSyncEngine.SessionContext? {

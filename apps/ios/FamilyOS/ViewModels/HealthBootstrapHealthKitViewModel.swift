@@ -1,7 +1,6 @@
 import Foundation
 
 extension HealthBootstrapViewModel {
-    private var syncEngine: HealthKitSyncEngine { HealthKitSyncEngine() }
     private var syncStateStore: HealthKitSyncStateStore { HealthKitSyncStateStore() }
 
     func loadHealthKitStatus() async {
@@ -125,7 +124,7 @@ extension HealthBootstrapViewModel {
             )
 
             try await persistLocalConfiguration(from: status, userId: userId, installationId: installationId)
-            try await syncEngine.enableAndRepair(context: context)
+            try await HealthKitBackgroundSyncCoordinator.shared.runForegroundSync(context: context)
             let refreshed = try await client.healthKitSettings(
                 baseURL: connection.baseURL,
                 accessToken: auth.accessToken,
@@ -138,7 +137,6 @@ extension HealthBootstrapViewModel {
                 accessToken: auth.accessToken,
                 personId: personId
             )
-            HealthKitBackgroundSyncCoordinator.shared.configureObservers(for: refreshed.enabledMetrics)
             return "HealthKit sync completed. Background delivery is best effort."
         }
     }
