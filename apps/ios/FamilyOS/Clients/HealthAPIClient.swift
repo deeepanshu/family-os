@@ -3,7 +3,7 @@ import Foundation
 enum HealthAPIError: LocalizedError {
     case invalidURL
     case missingToken
-    case badStatus(Int, String?)
+    case badStatus(Int, String?, code: String? = nil)
 
     var errorDescription: String? {
         switch self {
@@ -11,8 +11,17 @@ enum HealthAPIError: LocalizedError {
             return "The Health API base URL is invalid."
         case .missingToken:
             return "Paste a Supabase access token first."
-        case .badStatus(let status, let message):
+        case .badStatus(let status, let message, _):
             return message.map { "Health API returned HTTP \(status): \($0)" } ?? "Health API returned HTTP \(status)."
+        }
+    }
+
+    var errorCode: String? {
+        switch self {
+        case let .badStatus(_, _, code):
+            return code
+        default:
+            return nil
         }
     }
 }
@@ -168,46 +177,40 @@ struct HealthAPIClient {
         )
     }
 
-    func syncHealthKit(
+    func applyHealthKitEvents(
         baseURL: String,
         accessToken: String,
-        syncId: String,
         installationId: String,
         personId: String,
         timezoneVersion: Int,
-        operations: [HealthKitSyncOperation],
-        repairId: String?,
-        chunkIndex: Int?
-    ) async throws -> HealthKitSyncResult {
+        events: [HealthKitWireEvent]
+    ) async throws -> HealthKitEventsBatchResult {
         try await post(
-            path: "healthkit/sync",
+            path: "healthkit/events:batch",
             baseURL: baseURL,
             accessToken: accessToken,
-            body: HealthKitSyncBody(
-                syncId: syncId,
+            body: HealthKitEventsBatchBody(
                 installationId: installationId,
                 personId: personId,
                 timezoneVersion: timezoneVersion,
-                operations: operations,
-                repairId: repairId,
-                chunkIndex: chunkIndex
+                events: events
             )
         )
     }
 
-    func createHealthKitRepair(
+    func createHealthKitBackfillSession(
         baseURL: String,
         accessToken: String,
         installationId: String,
         personId: String,
         metric: HealthKitSyncMetric,
         timezoneVersion: Int
-    ) async throws -> HealthKitRepair {
+    ) async throws -> HealthKitBackfillSession {
         try await post(
-            path: "healthkit/repairs",
+            path: "healthkit/sessions",
             baseURL: baseURL,
             accessToken: accessToken,
-            body: HealthKitRepairBody(
+            body: HealthKitSessionBody(
                 installationId: installationId,
                 personId: personId,
                 group: metric,
@@ -216,17 +219,82 @@ struct HealthAPIClient {
         )
     }
 
-    func completeHealthKitRepair(
+    func putHealthKitScopeManifest(
         baseURL: String,
         accessToken: String,
-        repairId: String,
-        expectedChunkCount: Int
-    ) async throws -> HealthKitRepairCompleteResult {
-        try await post(
-            path: "healthkit/repairs/\(repairId)/complete",
+        sessionId: String,
+        scopeKey: String,
+        installationId: String,
+        personId: String,
+        timezoneVersion: Int,
+        eventCount: Int,
+        manifestHash: String
+    ) async throws -> HealthKitScopeManifestResult {
+        try await put(
+            path: "healthkit/sessions/\(sessionId)/scopes/\(scopeKey)/manifest",
             baseURL: baseURL,
             accessToken: accessToken,
-            body: HealthKitRepairCompleteBody(expectedChunkCount: expectedChunkCount)
+            body: HealthKitScopeManifestBody(
+                installationId: installationId,
+                personId: personId,
+                timezoneVersion: timezoneVersion,
+                eventCount: eventCount,
+                manifestHash: manifestHash
+            )
+        )
+    }
+
+    func completeHealthKitBackfillSession(
+        baseURL: String,
+        accessToken: String,
+        sessionId: String,
+        installationId: String,
+        personId: String,
+        timezoneVersion: Int
+    ) async throws -> HealthKitBackfillSessionCompleteResult {
+        try await post(
+            path: "healthkit/sessions/\(sessionId)/complete",
+            baseURL: baseURL,
+            accessToken: accessToken,
+            body: HealthKitSessionActionBody(
+                installationId: installationId,
+                personId: personId,
+                timezoneVersion: timezoneVersion
+            )
+        )
+    }
+
+    func abortHealthKitBackfillSession(
+        baseURL: String,
+        accessToken: String,
+        sessionId: String,
+        installationId: String,
+        personId: String,
+        timezoneVersion: Int,
+        reason: String? = nil
+    ) async throws -> HealthKitBackfillSessionAbortResult {
+        try await post(
+            path: "healthkit/sessions/\(sessionId)/abort",
+            baseURL: baseURL,
+            accessToken: accessToken,
+            body: HealthKitSessionActionBody(
+                installationId: installationId,
+                personId: personId,
+                timezoneVersion: timezoneVersion,
+                reason: reason
+            )
+        )
+    }
+
+    func getHealthKitBackfillSession(
+        baseURL: String,
+        accessToken: String,
+        sessionId: String
+    ) async throws -> HealthKitBackfillSession {
+        try await get(
+            path: "healthkit/sessions/\(sessionId)",
+            baseURL: baseURL,
+            accessToken: accessToken
         )
     }
 
@@ -317,13 +385,25 @@ struct HealthAPIClient {
     private func decodeEnvelope<T: Decodable>(_ type: T.Type, from request: URLRequest) async throws -> T {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
-            throw HealthAPIError.badStatus(-1, nil)
+            throw HealthAPIError.badStatus(-1, nil, code: nil)
         }
         guard (200..<300).contains(http.statusCode) else {
+            #if DEBUG
+            if request.url?.path.contains("/healthkit/") == true,
+               let body = String(data: data, encoding: .utf8) {
+                print("FamilyOS HealthKit error \(http.statusCode) \(request.httpMethod ?? "GET") \(request.url?.path ?? ""): \(body)")
+            }
+            #endif
             let error = try? JSONDecoder().decode(APIErrorEnvelope.self, from: data)
-            throw HealthAPIError.badStatus(http.statusCode, error?.error.message)
+            throw HealthAPIError.badStatus(http.statusCode, error?.error.message, code: error?.error.code)
         }
 
+        #if DEBUG
+        if request.url?.path.contains("/healthkit/") == true,
+           let body = String(data: data, encoding: .utf8) {
+            print("FamilyOS HealthKit response \(request.httpMethod ?? "GET") \(request.url?.path ?? ""): \(body)")
+        }
+        #endif
         return try JSONDecoder().decode(APIEnvelope<T>.self, from: data).data
     }
 
@@ -339,6 +419,7 @@ private struct APIErrorEnvelope: Decodable {
 }
 
 private struct APIErrorBody: Decodable {
+    let code: String?
     let message: String
 }
 
@@ -389,23 +470,31 @@ private struct HealthKitSettingsRequest: Encodable {
     }
 }
 
-private struct HealthKitSyncBody: Encodable {
-    let syncId: String
+private struct HealthKitEventsBatchBody: Encodable {
     let installationId: String
     let personId: String
     let timezoneVersion: Int
-    let operations: [HealthKitSyncOperation]
-    let repairId: String?
-    let chunkIndex: Int?
+    let events: [HealthKitWireEvent]
 }
 
-private struct HealthKitRepairBody: Encodable {
+private struct HealthKitSessionBody: Encodable {
     let installationId: String
     let personId: String
     let group: HealthKitSyncMetric
     let timezoneVersion: Int
 }
 
-private struct HealthKitRepairCompleteBody: Encodable {
-    let expectedChunkCount: Int
+private struct HealthKitScopeManifestBody: Encodable {
+    let installationId: String
+    let personId: String
+    let timezoneVersion: Int
+    let eventCount: Int
+    let manifestHash: String
+}
+
+private struct HealthKitSessionActionBody: Encodable {
+    let installationId: String
+    let personId: String
+    let timezoneVersion: Int
+    var reason: String? = nil
 }

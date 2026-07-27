@@ -4,6 +4,7 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { HEALTH_API_PREFIX } from "@family-os/shared";
 import { createApp } from "../src/app";
 import { PostgresFamilyRepository } from "../src/repositories/postgres";
+import { seedHealthKitReadyGroup } from "./healthKitTestHelpers";
 
 const databaseUrl = process.env.DATABASE_URL ?? "postgres://family_os:family_os@localhost:5432/family_os";
 const jwtSecret = "test-supabase-jwt-secret-with-enough-length";
@@ -64,9 +65,10 @@ describe("Postgres RLS policies", () => {
         notification_devices,
         reminder_recipients,
         reminders,
-        healthkit_repair_chunks,
-        healthkit_repairs,
-        healthkit_sync_receipts,
+        healthkit_backfill_scope_manifests,
+        healthkit_backfill_sessions,
+        healthkit_sync_events,
+        healthkit_sync_entities,
         healthkit_sync_state,
         healthkit_sync_groups,
         healthkit_sync_installations,
@@ -147,9 +149,10 @@ describe("Postgres repository wiring", () => {
         notification_devices,
         reminder_recipients,
         reminders,
-        healthkit_repair_chunks,
-        healthkit_repairs,
-        healthkit_sync_receipts,
+        healthkit_backfill_scope_manifests,
+        healthkit_backfill_sessions,
+        healthkit_sync_events,
+        healthkit_sync_entities,
         healthkit_sync_state,
         healthkit_sync_groups,
         healthkit_sync_installations,
@@ -212,36 +215,23 @@ describe("Postgres repository wiring", () => {
     });
     expect(settings.status).toBe(200);
 
-    const repair = await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        personId: profile.data.id,
-        installationId: "00000000-0000-4000-8000-000000009010",
+    const installationId = "00000000-0000-4000-8000-000000009010";
+    await seedHealthKitReadyGroup(api, managerToken, profile.data.id, installationId, "vitals", [
+      {
+        eventId: "00000000-0000-4000-8000-000000009011",
+        entityKey: "blood_glucose:00000000-0000-4000-8000-000000009012",
+        entityVersion: 1,
         group: "vitals",
-        timezoneVersion: 1
-      })
-    });
-    expect(repair.status).toBe(201);
-    expect((await repair.json()).data.group).toBe("vitals");
-
-    const sync = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        syncId: "00000000-0000-4000-8000-000000009011",
-        installationId: "00000000-0000-4000-8000-000000009010",
-        personId: profile.data.id,
-        timezoneVersion: 1,
-        operations: [{
-          kind: "blood_glucose_upsert",
+        scopeKey: "blood_glucose",
+        op: "upsert",
+        payload: {
+          kind: "blood_glucose",
           sourceSampleKey: "00000000-0000-4000-8000-000000009012",
           measuredAtUtc: "2026-06-21T10:00:00.000Z",
           valueMgDl: 104
-        }]
-      })
-    });
-    expect(sync.status).toBe(200);
+        }
+      }
+    ]);
 
     const repository = PostgresFamilyRepository.fromDatabaseUrl(databaseUrl, { syncLocalAuthUsers: true });
     const readings = await repository.listHealthKitBloodGlucose(

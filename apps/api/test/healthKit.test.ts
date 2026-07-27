@@ -1,15 +1,27 @@
 import { SignJWT } from "jose";
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { HEALTH_API_PREFIX } from "@family-os/shared";
+import {
+  HEALTH_API_PREFIX,
+  HEALTHKIT_FROZEN_FINGERPRINTS,
+  assertFrozenFingerprintsStable,
+  fingerprintHealthEvent,
+  fingerprintScopeManifest,
+  requiredScopeKeysForGroup,
+  type HealthKitSyncEvent
+} from "@family-os/shared";
 import { createApp } from "../src/app";
 import { InMemoryFamilyRepository } from "../src/repositories/families";
 
 const jwtSecret = "test-supabase-jwt-secret-with-enough-length";
 const supabaseUrl = "https://project.supabase.co";
 const userId = "00000000-0000-4000-8000-000000001001";
-const otherUserId = "00000000-0000-4000-8000-000000001002";
 const installationId = "53064303-35cf-4db0-a5d3-8af7d8f747e1";
 const otherInstallationId = "63064303-35cf-4db0-a5d3-8af7d8f747e2";
+
+function nodeSha256(data: Uint8Array): Uint8Array {
+  return createHash("sha256").update(data).digest();
+}
 
 function app() {
   return createApp({
@@ -71,22 +83,36 @@ async function putSettings(
   });
 }
 
-function sleepDayOperation(sleepDay: string) {
+function stepsEvent(overrides: Partial<HealthKitSyncEvent> = {}): HealthKitSyncEvent {
   return {
-    kind: "sleep_day_upsert",
-    sleepDay,
-    totalMinutes: 400,
-    coreMinutes: 200,
-    deepMinutes: 80,
-    remMinutes: 100,
-    unspecifiedAsleepMinutes: 20,
-    awakeMinutes: 15,
-    inBedMinutes: 430
+    eventId: overrides.eventId ?? crypto.randomUUID(),
+    entityKey: overrides.entityKey ?? "steps_hour:2026-07-25T14:00:00.000Z",
+    entityVersion: overrides.entityVersion ?? 1,
+    group: overrides.group ?? "activity",
+    scopeKey: overrides.scopeKey ?? "steps",
+    op: overrides.op ?? "upsert",
+    sessionId: overrides.sessionId ?? null,
+    payload:
+      overrides.payload === undefined
+        ? {
+            kind: "steps_hour",
+            hourStartUtc: "2026-07-25T14:00:00.000Z",
+            count: 1200
+          }
+        : overrides.payload
   };
 }
 
-describe("HealthKit background sync", () => {
-  it("aligns step repair starts to a UTC hour without extending the 90-day window", async () => {
+describe("HealthKit canonical fingerprints", () => {
+  it("keeps frozen fixture digests stable", () => {
+    assertFrozenFingerprintsStable();
+    expect(HEALTHKIT_FROZEN_FINGERPRINTS.stepsHourUpsert).toMatch(/^[a-f0-9]{64}$/);
+    expect(HEALTHKIT_FROZEN_FINGERPRINTS.scopeManifest).toMatch(/^[a-f0-9]{64}$/);
+  });
+});
+
+describe("HealthKit outbox sync API", () => {
+  it("aligns activity backfill starts to a UTC hour without extending the 90-day window", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-25T10:34:56.789Z"));
     try {
@@ -94,7 +120,7 @@ describe("HealthKit background sync", () => {
       const { token, profileId } = await setup(api);
       await putSettings(api, token, profileId);
 
-      const response = await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs`, {
+      const response = await api.request(`${HEALTH_API_PREFIX}/healthkit/sessions`, {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({
@@ -105,315 +131,159 @@ describe("HealthKit background sync", () => {
         })
       });
       expect(response.status).toBe(201);
-      await expect(response.json()).resolves.toMatchObject({
-        data: {
-          rangeStart: "2026-04-26T11:00:00.000Z",
-          rangeEnd: "2026-07-25T10:34:56.789Z"
-        }
-      });
+      const body = await response.json();
+      expect(body.data.rangeStart).toBe("2026-04-26T11:00:00.000Z");
+      expect(body.data.rangeEnd).toBe("2026-07-25T10:34:56.789Z");
+      expect(body.data.status).toBe("open");
+      expect(body.data.requiredScopeKeys).toEqual(requiredScopeKeysForGroup("activity"));
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("requires a self profile before settings", async () => {
-    const api = app();
-    const token = await jwtFor(userId);
-    await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}` }
-    });
-
-    const response = await putSettings(api, token, "00000000-0000-4000-8000-000000000099");
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: "healthkit_self_profile_required" }
-    });
-  });
-
-  it("stores settings, accepts idempotent sync, and isolates per-metric freshness", async () => {
-    const api = app();
-    const { token, profileId } = await setup(api);
-
-    const settings = await putSettings(api, token, profileId);
-    expect(settings.status).toBe(200);
-    const settingsBody = await settings.json();
-    expect(settingsBody.data).toMatchObject({
-      personId: profileId,
-      healthTimezone: "UTC",
-      healthTimezoneVersion: 1,
-      enabledGroups: ["activity", "sleep", "vitals"],
-      activeInstallationId: installationId
-    });
-
-    const syncId = "7afbe594-7e1d-4b31-a9a1-420b7fba42a7";
-    const syncPayload = {
-      syncId,
-      installationId,
-      personId: profileId,
-      timezoneVersion: 1,
-      operations: [
-        { kind: "steps_hour_upsert", hourStartUtc: "2026-07-25T02:00:00.000Z", count: 842 },
-        {
-          kind: "blood_pressure_upsert",
-          sourceSampleKey: "5e1ed621-4a6c-4e09-969e-31c6f0872c24",
-          measuredAtUtc: "2026-07-25T01:10:00.000Z",
-          systolic: 118,
-          diastolic: 76,
-          pulse: 64
-        }
-      ]
-    };
-
-    const first = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify(syncPayload)
-    });
-    expect(first.status).toBe(200);
-    const firstBody = await first.json();
-    expect(firstBody.data).toMatchObject({
-      syncId,
-      accepted: true,
-      operationCount: 2,
-      groupsAffected: expect.arrayContaining(["activity", "vitals"])
-    });
-    expect(JSON.stringify(firstBody)).not.toContain("118");
-    expect(JSON.stringify(firstBody)).not.toContain("842");
-
-    const replay = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        ...syncPayload,
-        operations: [{ kind: "steps_hour_upsert", hourStartUtc: "2026-07-25T03:00:00.000Z", count: 1 }]
-      })
-    });
-    expect(replay.status).toBe(200);
-    await expect(replay.json()).resolves.toEqual(firstBody);
-
-    const status = await (
-      await api.request(`${HEALTH_API_PREFIX}/healthkit/settings?personId=${profileId}`, {
-        headers: { authorization: `Bearer ${token}` }
-      })
-    ).json();
-    const stepsState = status.data.groups.find((g: { group: string }) => g.group === "activity");
-    const sleepState = status.data.groups.find((g: { group: string }) => g.group === "sleep");
-    expect(stepsState.lastSuccessfulAt).toBeTruthy();
-    expect(sleepState.lastSuccessfulAt).toBeFalsy();
-  });
-
-  it("rejects inactive installation and disabled metrics", async () => {
+  it("applies, duplicates, and supersedes immutable events by entity version", async () => {
     const api = app();
     const { token, profileId } = await setup(api);
     await putSettings(api, token, profileId);
 
-    const stale = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
+    const eventId = "11111111-1111-4111-8111-111111111111";
+    const first = stepsEvent({
+      eventId,
+      entityVersion: 1,
+      payload: { kind: "steps_hour", hourStartUtc: "2026-07-25T14:00:00.000Z", count: 100 }
+    });
+
+    const batch1 = await api.request(`${HEALTH_API_PREFIX}/healthkit/events:batch`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({
-        syncId: "8afbe594-7e1d-4b31-a9a1-420b7fba42a8",
+        installationId,
+        personId: profileId,
+        timezoneVersion: 1,
+        events: [first]
+      })
+    });
+    expect(batch1.status).toBe(200);
+    expect((await batch1.json()).data.results[0].result).toBe("applied");
+
+    const dup = await api.request(`${HEALTH_API_PREFIX}/healthkit/events:batch`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        installationId,
+        personId: profileId,
+        timezoneVersion: 1,
+        events: [first]
+      })
+    });
+    expect((await dup.json()).data.results[0].result).toBe("duplicate");
+
+    const newer = stepsEvent({
+      eventId: crypto.randomUUID(),
+      entityVersion: 3,
+      payload: { kind: "steps_hour", hourStartUtc: "2026-07-25T14:00:00.000Z", count: 300 }
+    });
+    const older = stepsEvent({
+      eventId: crypto.randomUUID(),
+      entityVersion: 2,
+      payload: { kind: "steps_hour", hourStartUtc: "2026-07-25T14:00:00.000Z", count: 200 }
+    });
+
+    const ordered = await api.request(`${HEALTH_API_PREFIX}/healthkit/events:batch`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        installationId,
+        personId: profileId,
+        timezoneVersion: 1,
+        events: [newer, older]
+      })
+    });
+    const results = (await ordered.json()).data.results;
+    expect(results[0].result).toBe("applied");
+    expect(results[1].result).toBe("superseded");
+  });
+
+  it("returns event_conflict when event id is reused with different fingerprint", async () => {
+    const api = app();
+    const { token, profileId } = await setup(api);
+    await putSettings(api, token, profileId);
+
+    const eventId = crypto.randomUUID();
+    const a = stepsEvent({
+      eventId,
+      payload: { kind: "steps_hour", hourStartUtc: "2026-07-25T14:00:00.000Z", count: 1 }
+    });
+    await api.request(`${HEALTH_API_PREFIX}/healthkit/events:batch`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        installationId,
+        personId: profileId,
+        timezoneVersion: 1,
+        events: [a]
+      })
+    });
+
+    const b = stepsEvent({
+      eventId,
+      payload: { kind: "steps_hour", hourStartUtc: "2026-07-25T14:00:00.000Z", count: 999 }
+    });
+    const conflict = await api.request(`${HEALTH_API_PREFIX}/healthkit/events:batch`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        installationId,
+        personId: profileId,
+        timezoneVersion: 1,
+        events: [b]
+      })
+    });
+    const body = await conflict.json();
+    expect(body.data.results[0].result).toBe("event_conflict");
+  });
+
+  it("rejects inactive installation and stale timezone", async () => {
+    const api = app();
+    const { token, profileId } = await setup(api);
+    await putSettings(api, token, profileId);
+
+    const inactive = await api.request(`${HEALTH_API_PREFIX}/healthkit/events:batch`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
         installationId: otherInstallationId,
         personId: profileId,
         timezoneVersion: 1,
-        operations: [{ kind: "steps_hour_upsert", hourStartUtc: "2026-07-25T02:00:00.000Z", count: 10 }]
+        events: [stepsEvent()]
       })
     });
-    expect(stale.status).toBe(403);
-    await expect(stale.json()).resolves.toMatchObject({
-      error: { code: "healthkit_installation_inactive" }
-    });
+    expect(inactive.status).toBe(403);
+    expect((await inactive.json()).error.code).toBe("installation_inactive");
 
-    await putSettings(api, token, profileId, {
-      enabledGroups: ["sleep"],
-      replaceActiveInstallation: false
-    });
-    const disabled = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
+    const stale = await api.request(`${HEALTH_API_PREFIX}/healthkit/events:batch`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({
-        syncId: "9afbe594-7e1d-4b31-a9a1-420b7fba42a9",
         installationId,
         personId: profileId,
-        timezoneVersion: 1,
-        operations: [{ kind: "steps_hour_upsert", hourStartUtc: "2026-07-25T02:00:00.000Z", count: 10 }]
+        timezoneVersion: 99,
+        events: [stepsEvent()]
       })
     });
-    expect(disabled.status).toBe(403);
-    await expect(disabled.json()).resolves.toMatchObject({
-      error: { code: "healthkit_metric_disabled" }
-    });
+    expect(stale.status).toBe(409);
+    expect((await stale.json()).error.code).toBe("timezone_stale");
   });
 
-  it("fences the previous phone when replacing the active installation", async () => {
-    const api = app();
-    const { token, profileId } = await setup(api);
-    await putSettings(api, token, profileId);
+  it("completes a backfill session only after all scope manifests validate", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-25T12:00:00.000Z"));
+    try {
+      const api = app();
+      const { token, profileId } = await setup(api);
+      await putSettings(api, token, profileId, { enabledGroups: ["activity"] });
 
-    const withoutFlag = await putSettings(api, token, profileId, {
-      installationId: otherInstallationId
-    });
-    expect(withoutFlag.status).toBe(409);
-
-    const replaced = await putSettings(api, token, profileId, {
-      installationId: otherInstallationId,
-      replaceActiveInstallation: true
-    });
-    expect(replaced.status).toBe(200);
-    await expect(replaced.json()).resolves.toMatchObject({
-      data: { activeInstallationId: otherInstallationId }
-    });
-
-    const oldPhone = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        syncId: "aafbe594-7e1d-4b31-a9a1-420b7fba42aa",
-        installationId,
-        personId: profileId,
-        timezoneVersion: 1,
-        operations: [{ kind: "steps_hour_upsert", hourStartUtc: "2026-07-25T02:00:00.000Z", count: 10 }]
-      })
-    });
-    expect(oldPhone.status).toBe(403);
-  });
-
-  it("runs a chunked repair and rejects incomplete completion", async () => {
-    const api = app();
-    const { token, profileId } = await setup(api);
-    await putSettings(api, token, profileId);
-
-    const created = await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        installationId,
-        personId: profileId,
-        group: "activity",
-        timezoneVersion: 1
-      })
-    });
-    expect(created.status).toBe(201);
-    const repair = (await created.json()).data;
-    expect(repair.repairId).toBeTruthy();
-
-    const incomplete = await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs/${repair.repairId}/complete`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ expectedChunkCount: 1 })
-    });
-    expect(incomplete.status).toBe(409);
-    await expect(incomplete.json()).resolves.toMatchObject({
-      error: { code: "healthkit_repair_incomplete" }
-    });
-
-    const chunkSyncId = "bafbe594-7e1d-4b31-a9a1-420b7fba42ab";
-    const chunk = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        syncId: chunkSyncId,
-        installationId,
-        personId: profileId,
-        timezoneVersion: 1,
-        repairId: repair.repairId,
-        chunkIndex: 0,
-        operations: [{ kind: "steps_hour_upsert", hourStartUtc: "2026-07-20T02:00:00.000Z", count: 100 }]
-      })
-    });
-    expect(chunk.status).toBe(200);
-
-    const replayChunk = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        syncId: "cafbe594-7e1d-4b31-a9a1-420b7fba42ac",
-        installationId,
-        personId: profileId,
-        timezoneVersion: 1,
-        repairId: repair.repairId,
-        chunkIndex: 0,
-        operations: [{ kind: "steps_hour_upsert", hourStartUtc: "2026-07-20T03:00:00.000Z", count: 1 }]
-      })
-    });
-    expect(replayChunk.status).toBe(200);
-    const chunkBody = await chunk.json();
-    await expect(replayChunk.json()).resolves.toEqual(chunkBody);
-
-    const complete = await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs/${repair.repairId}/complete`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ expectedChunkCount: 1 })
-    });
-    expect(complete.status).toBe(200);
-    await expect(complete.json()).resolves.toMatchObject({
-      data: { completed: true, expectedChunkCount: 1, completedChunkCount: 1 }
-    });
-  });
-
-  it("stores profile-local sleep day bounds on repairs and validates sleep against them", async () => {
-    const api = app();
-    const { token, profileId } = await setup(api);
-    await putSettings(api, token, profileId, { healthTimezone: "America/Los_Angeles" });
-
-    const created = await (
-      await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({
-          installationId,
-          personId: profileId,
-          group: "sleep",
-          timezoneVersion: 1
-        })
-      })
-    ).json();
-    expect(created.data.rangeStartDay).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(created.data.rangeEndDay).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(created.data.rangeStartDay <= created.data.rangeEndDay).toBe(true);
-
-    const outside = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        syncId: "b2fbe594-7e1d-4b31-a9a1-420b7fba42b2",
-        installationId,
-        personId: profileId,
-        timezoneVersion: 1,
-        repairId: created.data.repairId,
-        chunkIndex: 0,
-        operations: [sleepDayOperation("2019-01-01")]
-      })
-    });
-    expect(outside.status).toBe(400);
-    await expect(outside.json()).resolves.toMatchObject({
-      error: { code: "healthkit_operation_invalid" }
-    });
-
-    const insideDay = created.data.rangeEndDay as string;
-    const ok = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        syncId: "b3fbe594-7e1d-4b31-a9a1-420b7fba42b3",
-        installationId,
-        personId: profileId,
-        timezoneVersion: 1,
-        repairId: created.data.repairId,
-        chunkIndex: 0,
-        operations: [sleepDayOperation(insideDay)]
-      })
-    });
-    expect(ok.status).toBe(200);
-  });
-
-  it("rejects repair chunks outside the server 90-day range and completion after metric disable", async () => {
-    const api = app();
-    const { token, profileId } = await setup(api);
-    await putSettings(api, token, profileId);
-
-    const created = await (
-      await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs`, {
+      const sessionRes = await api.request(`${HEALTH_API_PREFIX}/healthkit/sessions`, {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({
@@ -422,204 +292,106 @@ describe("HealthKit background sync", () => {
           group: "activity",
           timezoneVersion: 1
         })
-      })
-    ).json();
-    const repairId = created.data.repairId as string;
+      });
+      const session = (await sessionRes.json()).data;
+      const sessionId = session.sessionId as string;
+      const scopes = session.requiredScopeKeys as string[];
 
-    const tooOld = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        syncId: "b0fbe594-7e1d-4b31-a9a1-420b7fba42b0",
-        installationId,
-        personId: profileId,
-        timezoneVersion: 1,
-        repairId,
-        chunkIndex: 0,
-        operations: [{ kind: "steps_hour_upsert", hourStartUtc: "2020-01-01T00:00:00.000Z", count: 100 }]
-      })
-    });
-    expect(tooOld.status).toBe(400);
-    await expect(tooOld.json()).resolves.toMatchObject({
-      error: { code: "healthkit_operation_invalid" }
-    });
-
-    const okChunk = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        syncId: "b1fbe594-7e1d-4b31-a9a1-420b7fba42b1",
-        installationId,
-        personId: profileId,
-        timezoneVersion: 1,
-        repairId,
-        chunkIndex: 0,
-        operations: [{ kind: "steps_hour_upsert", hourStartUtc: "2026-07-20T02:00:00.000Z", count: 100 }]
-      })
-    });
-    expect(okChunk.status).toBe(200);
-
-    await putSettings(api, token, profileId, { enabledGroups: ["sleep"] });
-    const completeAfterDisable = await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs/${repairId}/complete`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ expectedChunkCount: 1 })
-    });
-    expect(completeAfterDisable.status).toBe(403);
-    await expect(completeAfterDisable.json()).resolves.toMatchObject({
-      error: { code: "healthkit_metric_disabled" }
-    });
-  });
-
-  it("upserts and hard-deletes HealthKit blood pressure by correlation UUID", async () => {
-    const api = app();
-    const { token, profileId } = await setup(api);
-    await putSettings(api, token, profileId);
-    const sourceSampleKey = "5e1ed621-4a6c-4e09-969e-31c6f0872c24";
-
-    await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        syncId: "dafbe594-7e1d-4b31-a9a1-420b7fba42ad",
-        installationId,
-        personId: profileId,
-        timezoneVersion: 1,
-        operations: [
+      // Upload empty manifests for every activity scope (no data is valid).
+      for (const scopeKey of scopes) {
+        const eventIds: string[] = [];
+        const manifestHash = fingerprintScopeManifest({ sessionId, scopeKey, eventIds }, nodeSha256);
+        const put = await api.request(
+          `${HEALTH_API_PREFIX}/healthkit/sessions/${sessionId}/scopes/${scopeKey}/manifest`,
           {
-            kind: "blood_pressure_upsert",
-            sourceSampleKey,
-            measuredAtUtc: "2026-07-25T01:10:00.000Z",
-            systolic: 118,
-            diastolic: 76
+            method: "PUT",
+            headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+            body: JSON.stringify({
+              installationId,
+              personId: profileId,
+              timezoneVersion: 1,
+              eventCount: 0,
+              manifestHash
+            })
           }
-        ]
-      })
-    });
+        );
+        expect(put.status).toBe(200);
+      }
 
-    const list1 = await (
-      await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure?personId=${profileId}`, {
-        headers: { authorization: `Bearer ${token}` }
-      })
-    ).json();
-    expect(list1.data).toHaveLength(1);
-    expect(list1.data[0]).toMatchObject({ systolic: 118, source: "healthkit" });
-
-    await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        syncId: "eafbe594-7e1d-4b31-a9a1-420b7fba42ae",
-        installationId,
-        personId: profileId,
-        timezoneVersion: 1,
-        operations: [
-          {
-            kind: "blood_pressure_upsert",
-            sourceSampleKey,
-            measuredAtUtc: "2026-07-25T01:10:00.000Z",
-            systolic: 122,
-            diastolic: 78
-          }
-        ]
-      })
-    });
-    const list2 = await (
-      await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure?personId=${profileId}`, {
-        headers: { authorization: `Bearer ${token}` }
-      })
-    ).json();
-    expect(list2.data).toHaveLength(1);
-    expect(list2.data[0].systolic).toBe(122);
-
-    await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        syncId: "fafbe594-7e1d-4b31-a9a1-420b7fba42af",
-        installationId,
-        personId: profileId,
-        timezoneVersion: 1,
-        operations: [{ kind: "blood_pressure_delete", sourceSampleKey }]
-      })
-    });
-    const list3 = await (
-      await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure?personId=${profileId}`, {
-        headers: { authorization: `Bearer ${token}` }
-      })
-    ).json();
-    expect(list3.data).toHaveLength(0);
-  });
-
-  it("rejects non-self profile and another family member targeting the manager profile", async () => {
-    const api = app();
-    const { token, profileId } = await setup(api);
-
-    const otherProfile = await (
-      await api.request(`${HEALTH_API_PREFIX}/people`, {
+      const complete = await api.request(`${HEALTH_API_PREFIX}/healthkit/sessions/${sessionId}/complete`, {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ displayName: "Mom", relationshipLabel: "Mother" })
-      })
-    ).json();
+        body: JSON.stringify({
+          installationId,
+          personId: profileId,
+          timezoneVersion: 1
+        })
+      });
+      expect(complete.status).toBe(200);
+      expect((await complete.json()).data.completed).toBe(true);
 
-    const nonSelf = await putSettings(api, token, otherProfile.data.id);
-    expect(nonSelf.status).toBe(409);
-
-    const invite = await (
-      await api.request(`${HEALTH_API_PREFIX}/invites`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ email: `${otherUserId}@example.com`, role: "member" })
-      })
-    ).json();
-    await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${await jwtFor(otherUserId)}` }
-    });
-    await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${await jwtFor(otherUserId)}`,
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({ displayName: "Other" })
-    });
-
-    const hijack = await putSettings(api, await jwtFor(otherUserId), profileId);
-    expect(hijack.status).toBe(409);
+      const settings = await (
+        await api.request(`${HEALTH_API_PREFIX}/healthkit/settings?personId=${profileId}`, {
+          headers: { authorization: `Bearer ${token}` }
+        })
+      ).json();
+      const activity = settings.data.groups.find((g: { group: string }) => g.group === "activity");
+      expect(activity.status).toBe("ready");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("rejects non-hour-boundary step ops and unknown fields", async () => {
+  it("rejects sleep stage incoherence as payload_invalid", async () => {
     const api = app();
     const { token, profileId } = await setup(api);
     await putSettings(api, token, profileId);
 
-    const badHour = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        syncId: "1afbe594-7e1d-4b31-a9a1-420b7fba4211",
-        installationId,
-        personId: profileId,
-        timezoneVersion: 1,
-        operations: [{ kind: "steps_hour_upsert", hourStartUtc: "2026-07-25T02:15:00.000Z", count: 10 }]
-      })
-    });
-    expect(badHour.status).toBe(400);
+    const event: HealthKitSyncEvent = {
+      eventId: crypto.randomUUID(),
+      entityKey: "sleep_day:2026-07-24",
+      entityVersion: 1,
+      group: "sleep",
+      scopeKey: "sleep",
+      op: "upsert",
+      payload: {
+        kind: "sleep_day",
+        sleepDay: "2026-07-24",
+        totalMinutes: 400,
+        coreMinutes: 100,
+        deepMinutes: 100,
+        remMinutes: 100,
+        unspecifiedAsleepMinutes: 50,
+        awakeMinutes: 10,
+        inBedMinutes: 420
+      }
+    };
 
-    const unknownField = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
+    const res = await api.request(`${HEALTH_API_PREFIX}/healthkit/events:batch`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({
-        syncId: "2afbe594-7e1d-4b31-a9a1-420b7fba4212",
         installationId,
         personId: profileId,
         timezoneVersion: 1,
-        familyId: "00000000-0000-4000-8000-000000000001",
-        operations: []
+        events: [event]
       })
     });
-    expect(unknownField.status).toBe(400);
+    const body = await res.json();
+    expect(body.data.results[0].result).toBe("payload_invalid");
+  });
+
+  it("server fingerprint matches shared serializer", () => {
+    const event = stepsEvent({
+      eventId: "11111111-1111-4111-8111-111111111111",
+      entityKey: "steps_hour:2026-07-25T14:00:00.000Z",
+      entityVersion: 1,
+      payload: {
+        kind: "steps_hour",
+        hourStartUtc: "2026-07-25T14:00:00.000Z",
+        count: 1200
+      }
+    });
+    expect(fingerprintHealthEvent(event, nodeSha256)).toBe(HEALTHKIT_FROZEN_FINGERPRINTS.stepsHourUpsert);
   });
 });

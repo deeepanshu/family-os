@@ -20,6 +20,9 @@ final class HealthKitBackgroundSyncCoordinator {
     private init() {}
 
     func registerBackgroundTasks() {
+        Task {
+            await HealthKitSyncWorker.shared.start()
+        }
         BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.bgTaskIdentifier, using: nil) { task in
             guard let processingTask = task as? BGProcessingTask else {
                 task.setTaskCompleted(success: false)
@@ -117,21 +120,29 @@ final class HealthKitBackgroundSyncCoordinator {
     }
 
     private func handleObserverFire(metric: HealthKitSyncMetric) async {
-        await processSerialized {
+        let success = await processSerialized {
             let context = try await self.sessionProvider.makeContext()
             guard context.enabledGroups.contains(metric) else { return }
             try await self.engine.processMetric(metric, context: context)
         }
-        // Always mark pending and schedule retry if process failed internally.
-        scheduleBackgroundRetry()
+        // Plan: do not schedule after successful observer work unless a future retry is owed.
+        if !success || hasFutureOutboxRetry() {
+            scheduleBackgroundRetry()
+        }
     }
 
     private func handleObserverFire(dataMetric: HealthKitDataMetric) async {
-        await processSerialized {
+        let success = await processSerialized {
             let context = try await self.sessionProvider.makeContext()
             try await self.engine.processDataMetric(dataMetric, context: context)
         }
-        scheduleBackgroundRetry()
+        if !success || hasFutureOutboxRetry() {
+            scheduleBackgroundRetry()
+        }
+    }
+
+    private func hasFutureOutboxRetry() -> Bool {
+        (try? HealthKitOutboxStore.shared.hasFutureRetries()) == true
     }
 
     private func handleBackgroundProcessing(task: BGProcessingTask) async {
@@ -156,6 +167,7 @@ final class HealthKitBackgroundSyncCoordinator {
     @discardableResult
     private func processSerialized(_ work: @escaping () async throws -> Void) async -> Bool {
         guard !isProcessing else {
+            // Contended; schedule a later pass rather than dropping work.
             scheduleBackgroundRetry()
             return false
         }
@@ -166,7 +178,6 @@ final class HealthKitBackgroundSyncCoordinator {
             return true
         } catch {
             // Redacted: do not log health values, UUIDs, anchors, or tokens.
-            scheduleBackgroundRetry()
             return false
         }
     }

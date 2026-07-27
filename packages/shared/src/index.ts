@@ -4,6 +4,9 @@ import { HEALTHKIT_METRIC_KEYS, type HealthKitConsentGroup, type HealthKitMetric
 export const HEALTH_API_PREFIX = "/health/api/v1" as const;
 
 export * from "./healthkitRegistry";
+export * from "./healthkitCanonical";
+export * from "./healthkitEvents";
+export * from "./healthkitFixtures";
 
 export type ApiEnvelope<T> = {
   data: T;
@@ -145,8 +148,7 @@ export type HealthKitMetric = HealthKitConsentGroup;
 export type HealthMetricSyncStatusCode =
   | "never_synced"
   | "ready"
-  | "repairing"
-  | "repair_needed"
+  | "backfilling"
   | "error"
   | "disabled";
 
@@ -181,54 +183,6 @@ export type PutHealthKitSettingsInput = {
   replaceActiveInstallation?: boolean;
 };
 
-export type HealthKitStepsHourUpsert = {
-  kind: "steps_hour_upsert";
-  hourStartUtc: string;
-  count: number;
-};
-
-export type HealthKitStepsHourDelete = {
-  kind: "steps_hour_delete";
-  hourStartUtc: string;
-};
-
-export type HealthKitSleepDayUpsert = {
-  kind: "sleep_day_upsert";
-  sleepDay: string;
-  totalMinutes: number;
-  coreMinutes: number;
-  deepMinutes: number;
-  remMinutes: number;
-  unspecifiedAsleepMinutes: number;
-  awakeMinutes: number;
-  inBedMinutes: number;
-  wristTemperatureCelsius?: number;
-  breathingDisturbanceCount?: number;
-};
-
-export type HealthKitSleepDayDelete = {
-  kind: "sleep_day_delete";
-  sleepDay: string;
-};
-
-export type HealthKitDailyMetricUpsert = {
-  kind: "daily_metric_upsert";
-  healthMetric: HealthKitMetricKey;
-  localDay: string;
-  sumValue?: number;
-  averageValue?: number;
-  minimumValue?: number;
-  maximumValue?: number;
-  latestValue?: number;
-  sampleCount: number;
-};
-
-export type HealthKitDailyMetricDelete = {
-  kind: "daily_metric_delete";
-  healthMetric: HealthKitMetricKey;
-  localDay: string;
-};
-
 /** A calendar-day aggregate for a registry metric stored in health_daily_metrics. */
 export type HealthDailyMetricRecord = {
   personId: string;
@@ -244,50 +198,6 @@ export type HealthDailyMetricRecord = {
   sampleCount: number;
 };
 
-export type HealthKitBloodPressureUpsert = {
-  kind: "blood_pressure_upsert";
-  sourceSampleKey: string;
-  measuredAtUtc: string;
-  systolic: number;
-  diastolic: number;
-  pulse?: number;
-};
-
-export type HealthKitBloodPressureDelete = {
-  kind: "blood_pressure_delete";
-  sourceSampleKey: string;
-};
-
-export type HealthKitBloodGlucoseUpsert = {
-  kind: "blood_glucose_upsert";
-  sourceSampleKey: string;
-  measuredAtUtc: string;
-  valueMgDl: number;
-};
-
-export type HealthKitBloodGlucoseDelete = {
-  kind: "blood_glucose_delete";
-  sourceSampleKey: string;
-};
-
-export type HealthKitWorkoutUpsert = {
-  kind: "workout_upsert";
-  sourceSampleKey: string;
-  workoutType: string;
-  startedAtUtc: string;
-  endedAtUtc: string;
-  durationSeconds: number;
-  activeEnergyKcal?: number;
-  distanceMeters?: number;
-  averageHeartRateBpm?: number;
-  maximumHeartRateBpm?: number;
-};
-
-export type HealthKitWorkoutDelete = {
-  kind: "workout_delete";
-  sourceSampleKey: string;
-};
-
 export type HealthWorkoutRecord = {
   id: string;
   personId: string;
@@ -299,74 +209,6 @@ export type HealthWorkoutRecord = {
   distanceMeters?: number;
   averageHeartRateBpm?: number;
   maximumHeartRateBpm?: number;
-};
-
-export type HealthKitSyncOperation =
-  | HealthKitStepsHourUpsert
-  | HealthKitStepsHourDelete
-  | HealthKitSleepDayUpsert
-  | HealthKitSleepDayDelete
-  | HealthKitDailyMetricUpsert
-  | HealthKitDailyMetricDelete
-  | HealthKitBloodPressureUpsert
-  | HealthKitBloodPressureDelete
-  | HealthKitBloodGlucoseUpsert
-  | HealthKitBloodGlucoseDelete
-  | HealthKitWorkoutUpsert
-  | HealthKitWorkoutDelete;
-
-export type HealthKitSyncInput = {
-  syncId: string;
-  installationId: string;
-  personId: string;
-  timezoneVersion: number;
-  repairId?: string;
-  chunkIndex?: number;
-  operations: HealthKitSyncOperation[];
-};
-
-/** Redacted acknowledgement for an accepted sync or replayed idempotent request. */
-export type HealthKitSyncResult = {
-  syncId: string;
-  accepted: true;
-  operationCount: number;
-  groupsAffected: HealthKitConsentGroup[];
-  repairId?: string;
-  chunkIndex?: number;
-};
-
-export type CreateHealthKitRepairInput = {
-  installationId: string;
-  personId: string;
-  group: HealthKitConsentGroup;
-  timezoneVersion: number;
-};
-
-export type HealthKitRepair = {
-  repairId: string;
-  personId: string;
-  group: HealthKitConsentGroup;
-  installationId: string;
-  timezoneVersion: number;
-  /** Inclusive UTC instant bounds for steps/BP. */
-  rangeStart: string;
-  rangeEnd: string;
-  /** Inclusive profile-local sleep days (health timezone calendar). */
-  rangeStartDay: string;
-  rangeEndDay: string;
-  expiresAt: string;
-};
-
-export type CompleteHealthKitRepairInput = {
-  expectedChunkCount: number;
-};
-
-export type HealthKitRepairCompleteResult = {
-  repairId: string;
-  group: HealthKitConsentGroup;
-  completed: true;
-  expectedChunkCount: number;
-  completedChunkCount: number;
 };
 
 export type HealthStepHourRecord = {
@@ -514,7 +356,7 @@ export type McpCoverage = {
   rangeStart: string;
   rangeEnd: string;
   daysWithData: number;
-  /** True when stored coverage fully covers the requested range and the metric is not mid-repair. */
+  /** True when stored coverage fully covers the requested range and the metric is not mid-backfill. */
   complete: boolean;
   availableStart?: string;
   availableEnd?: string;

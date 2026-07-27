@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { HEALTH_API_PREFIX } from "@family-os/shared";
 import { createApp } from "../src/app";
 import { InMemoryFamilyRepository } from "../src/repositories/families";
+import { seedHealthKitReadyGroup, stepsHourEvent } from "./healthKitTestHelpers";
 
 const jwtSecret = "test-supabase-jwt-secret-with-enough-length";
 const supabaseUrl = "https://project.supabase.co";
@@ -81,36 +82,9 @@ async function seedWithSteps(repo: InMemoryFamilyRepository, subject: string) {
       installationId
     })
   });
-  const repair = await (
-    await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        installationId,
-        personId: profileId,
-        group: "activity",
-        timezoneVersion: 1
-      })
-    })
-  ).json();
-  await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      syncId: "7afbe594-7e1d-4b31-a9a1-420b7fba4299",
-      installationId,
-      personId: profileId,
-      timezoneVersion: 1,
-      repairId: repair.data.repairId,
-      chunkIndex: 0,
-      operations: [{ kind: "steps_hour_upsert", hourStartUtc: "2026-07-15T08:00:00.000Z", count: 2500 }]
-    })
-  });
-  await api.request(`${HEALTH_API_PREFIX}/healthkit/repairs/${repair.data.repairId}/complete`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ expectedChunkCount: 1 })
-  });
+  await seedHealthKitReadyGroup(api, token, profileId, installationId, "activity", [
+    stepsHourEvent("2026-07-15T08:00:00.000Z", 2500)
+  ]);
 
   return { token, profileId };
 }

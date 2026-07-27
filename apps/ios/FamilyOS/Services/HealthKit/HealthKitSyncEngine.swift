@@ -4,7 +4,7 @@ import HealthKit
 enum HealthKitSyncEngineError: LocalizedError {
     case missingSession
     case missingConfiguration
-    case repairNeeded(String)
+    case backfillRequired(String)
 
     var errorDescription: String? {
         switch self {
@@ -12,8 +12,8 @@ enum HealthKitSyncEngineError: LocalizedError {
             return "Sign in required for HealthKit sync."
         case .missingConfiguration:
             return "HealthKit sync is not configured."
-        case .repairNeeded:
-            return "A foreground HealthKit repair is required."
+        case .backfillRequired:
+            return "A foreground HealthKit backfill is required."
         }
     }
 }
@@ -23,17 +23,20 @@ actor HealthKitSyncEngine {
     private let healthKit: HealthKitClient
     private let api: HealthAPIClient
     private let stateStore: HealthKitSyncStateStore
+    private let outbox: HealthKitOutboxStore
     private let maxOperations = 500
     private let anchoredPageLimit = 1_000
 
     init(
         healthKit: HealthKitClient = HealthKitClient(),
         api: HealthAPIClient = HealthAPIClient(),
-        stateStore: HealthKitSyncStateStore = HealthKitSyncStateStore()
+        stateStore: HealthKitSyncStateStore = HealthKitSyncStateStore(),
+        outbox: HealthKitOutboxStore = .shared
     ) {
         self.healthKit = healthKit
         self.api = api
         self.stateStore = stateStore
+        self.outbox = outbox
     }
 
     struct SessionContext {
@@ -54,38 +57,63 @@ actor HealthKitSyncEngine {
             "healthkit_metrics": metricSummary
         ])
         CrashReporting.log("healthkit.sync_started metrics=\(metricSummary)")
+        try outbox.saveConfiguration(
+            userId: context.userId,
+            personId: context.personId,
+            installationId: context.installationId,
+            healthTimezone: context.timezone,
+            timezoneVersion: context.timezoneVersion,
+            enabledGroups: context.enabledGroups.map(\.rawValue)
+        )
         try await healthKit.requestAuthorization(for: Set(context.enabledGroups))
         try await healthKit.enableBackgroundDelivery(for: Set(context.enabledGroups))
         for metric in context.enabledGroups {
             try await processMetric(metric, context: context)
         }
+        await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL) { context.accessToken }
         CrashReporting.setCustomValues(["healthkit_stage": "sync_completed"])
         CrashReporting.log("healthkit.sync_completed")
     }
 
     func processPendingWork(context: SessionContext) async throws {
+        try outbox.saveConfiguration(
+            userId: context.userId,
+            personId: context.personId,
+            installationId: context.installationId,
+            healthTimezone: context.timezone,
+            timezoneVersion: context.timezoneVersion,
+            enabledGroups: context.enabledGroups.map(\.rawValue)
+        )
         for metric in context.enabledGroups {
             try await processMetric(metric, context: context)
         }
+        try await materializeDirtyBuckets(context: context)
+        await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL) { context.accessToken }
     }
 
     func processMetric(_ metric: HealthKitSyncMetric, context: SessionContext) async throws {
         guard context.enabledGroups.contains(metric) else { return }
-        let local = await stateStore.loadMetricState(
+        try outbox.saveConfiguration(
             userId: context.userId,
             personId: context.personId,
-            metric: metric
+            installationId: context.installationId,
+            healthTimezone: context.timezone,
+            timezoneVersion: context.timezoneVersion,
+            enabledGroups: context.enabledGroups.map(\.rawValue)
         )
-        var pending = local
-        pending.pendingSync = true
-        pending.redactedStatus = "pending"
-        await stateStore.saveMetricState(userId: context.userId, personId: context.personId, metric: metric, state: pending)
-        if local.repairId != nil {
-            try await resumeRepair(metric: metric, context: context)
-        } else if local.anchorData == nil {
-            try await runRepair(metric: metric, context: context)
+        let groupStatus = try outbox.groupStatus(groupKey: metric.rawValue)
+        let hasCursor = try outbox.loadCursor(key: cursorKey(for: metric, context: context)) != nil
+        let openSession = try outbox.openBackfillSession(groupKey: metric.rawValue)
+        // Prefer SQLite group_state + cursors over UserDefaults repairId/anchors.
+        // Transient backfill failures leave status "backfilling" with an open session —
+        // resume that session rather than creating a new 90-day scan.
+        if groupStatus == "backfilling", openSession != nil {
+            try await resumeOpenBackfill(metric: metric, context: context)
+        } else if groupStatus == "error" || groupStatus == nil || groupStatus == "never_synced" || !hasCursor {
+            try await runBackfill(metric: metric, context: context)
         } else {
             try await processAnchoredChanges(metric: metric, context: context)
+            try await materializeDirtyBuckets(context: context)
         }
     }
 
@@ -95,8 +123,23 @@ actor HealthKitSyncEngine {
     func processDataMetric(_ dataMetric: HealthKitDataMetric, context: SessionContext) async throws {
         guard context.enabledGroups.contains(dataMetric.group), isIncrementalDataMetric(dataMetric) else { return }
         guard let type = dataMetric.sampleType else { return }
-        guard let anchor = await stateStore.loadDataMetricAnchor(userId: context.userId, personId: context.personId, metric: dataMetric) else {
-            try await runRepair(metric: dataMetric.group, context: context)
+
+        // Never start a second backfill while the consent group already has an open session.
+        let groupStatus = try outbox.groupStatus(groupKey: dataMetric.group.rawValue)
+        let openSession = try outbox.openBackfillSession(groupKey: dataMetric.group.rawValue)
+        if groupStatus == "backfilling" || openSession != nil {
+            try await resumeOpenBackfill(metric: dataMetric.group, context: context)
+            return
+        }
+
+        let cursor = try outbox.loadCursor(key: dataMetricCursorKey(for: dataMetric, context: context))
+        let anchor: HKQueryAnchor?
+        if let cursor {
+            anchor = try? NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: cursor)
+        } else if let legacy = await stateStore.loadDataMetricAnchor(userId: context.userId, personId: context.personId, metric: dataMetric) {
+            anchor = legacy
+        } else {
+            try await runBackfill(metric: dataMetric.group, context: context)
             return
         }
 
@@ -109,207 +152,271 @@ actor HealthKitSyncEngine {
             if !empty {
                 try await applyDataMetricPage(dataMetric, context: context, page: page)
             }
-            await stateStore.saveDataMetricAnchor(page.newAnchor, userId: context.userId, personId: context.personId, metric: dataMetric)
+            try await saveAnchorCursor(page.newAnchor, key: dataMetricCursorKey(for: dataMetric, context: context), context: context, dataMetric: dataMetric)
             currentAnchor = page.newAnchor
             if empty || page.added.count + page.deletedObjectUUIDs.count < anchoredPageLimit { break }
         }
     }
 
-    func runRepair(metric: HealthKitSyncMetric, context: SessionContext) async throws {
-        let repair = try await api.createHealthKitRepair(
-            baseURL: context.baseURL,
-            accessToken: context.accessToken,
-            installationId: context.installationId,
-            personId: context.personId,
-            metric: metric,
-            timezoneVersion: context.timezoneVersion
-        )
+    func runBackfill(metric: HealthKitSyncMetric, context: SessionContext) async throws {
+        // Clear any stale local open session bookkeeping before starting a new one.
+        try outbox.clearOpenBackfillSession(groupKey: metric.rawValue)
+        try outbox.setGroupStatus(groupKey: metric.rawValue, status: "backfilling")
 
-        let rangeStart = parseInstant(repair.rangeStart) ?? Date().addingTimeInterval(-90 * 24 * 3600)
-        let rangeEnd = parseInstant(repair.rangeEnd) ?? Date()
-        let operations = try await buildRepairOperations(
-            metric: metric,
-            rangeStart: rangeStart,
-            rangeEnd: rangeEnd,
-            rangeStartDay: repair.rangeStartDay,
-            rangeEndDay: repair.rangeEndDay,
-            context: context
-        )
-        let sorted = operations.sorted { $0.stableKey < $1.stableKey }
-        let chunks = chunkOperations(sorted)
-        let expectedChunks = chunks.count
-
-        var syncIds: [String: String] = [:]
-        for index in 0..<expectedChunks {
-            syncIds[String(index)] = UUID().uuidString.lowercased()
-        }
-
-        var local = await stateStore.loadMetricState(userId: context.userId, personId: context.personId, metric: metric)
-        local.repairId = repair.repairId
-        local.repairChunkIndex = 0
-        local.repairExpectedChunks = expectedChunks
-        local.repairRangeStart = repair.rangeStart
-        local.repairRangeEnd = repair.rangeEnd
-        local.repairRangeStartDay = repair.rangeStartDay
-        local.repairRangeEndDay = repair.rangeEndDay
-        local.repairChunkSyncIds = syncIds
-        local.pendingSync = true
-        local.redactedStatus = "repairing"
-        await stateStore.saveMetricState(userId: context.userId, personId: context.personId, metric: metric, state: local)
-
-        try await uploadRepairChunks(
-            metric: metric,
-            context: context,
-            repairId: repair.repairId,
-            chunks: chunks,
-            startIndex: 0,
-            syncIds: syncIds,
-            expectedChunks: expectedChunks
-        )
-
-        try await seedLedgerAfterRepair(
-            metric: metric,
-            rangeStart: rangeStart,
-            rangeEnd: rangeEnd,
-            rangeStartDay: repair.rangeStartDay,
-            rangeEndDay: repair.rangeEndDay,
-            context: context
-        )
-        // History already uploaded via repair; advance anchor through the change feed without re-uploading.
-        try await establishBaselineAnchor(metric: metric, context: context)
-        try await establishAdditionalBaselines(group: metric, rangeStart: rangeStart, rangeEnd: rangeEnd, context: context)
-
-        local = await stateStore.loadMetricState(userId: context.userId, personId: context.personId, metric: metric)
-        local.repairId = nil
-        local.repairChunkIndex = nil
-        local.repairExpectedChunks = nil
-        local.repairRangeStart = nil
-        local.repairRangeEnd = nil
-        local.repairRangeStartDay = nil
-        local.repairRangeEndDay = nil
-        local.repairChunkSyncIds = nil
-        local.pendingSync = false
-        local.lastSuccessfulAt = Date()
-        local.lastErrorCode = nil
-        local.redactedStatus = "ready"
-        await stateStore.saveMetricState(userId: context.userId, personId: context.personId, metric: metric, state: local)
-    }
-
-    private func resumeRepair(metric: HealthKitSyncMetric, context: SessionContext) async throws {
-        var local = await stateStore.loadMetricState(userId: context.userId, personId: context.personId, metric: metric)
-        guard let repairId = local.repairId,
-              let expectedChunks = local.repairExpectedChunks,
-              let rangeStartRaw = local.repairRangeStart,
-              let rangeEndRaw = local.repairRangeEnd,
-              let rangeStartDay = local.repairRangeStartDay,
-              let rangeEndDay = local.repairRangeEndDay,
-              let rangeStart = parseInstant(rangeStartRaw),
-              let rangeEnd = parseInstant(rangeEndRaw)
-        else {
-            // Incomplete local progress — start a clean repair.
-            try await runRepair(metric: metric, context: context)
-            return
-        }
-
-        let nextIndex = local.repairChunkIndex ?? 0
-        let operations = try await buildRepairOperations(
-            metric: metric,
-            rangeStart: rangeStart,
-            rangeEnd: rangeEnd,
-            rangeStartDay: rangeStartDay,
-            rangeEndDay: rangeEndDay,
-            context: context
-        )
-        let sorted = operations.sorted { $0.stableKey < $1.stableKey }
-        let chunks = chunkOperations(sorted)
-        // Rebuild must match expected chunk count; if HealthKit data changed mid-repair, restart.
-        let rebuiltExpected = max(chunks.count, 1)
-        if rebuiltExpected != expectedChunks {
-            try await runRepair(metric: metric, context: context)
-            return
-        }
-
-        var syncIds = local.repairChunkSyncIds ?? [:]
-        for index in 0..<expectedChunks where syncIds[String(index)] == nil {
-            syncIds[String(index)] = UUID().uuidString.lowercased()
-        }
-        local.repairChunkSyncIds = syncIds
-        await stateStore.saveMetricState(userId: context.userId, personId: context.personId, metric: metric, state: local)
-
-        try await uploadRepairChunks(
-            metric: metric,
-            context: context,
-            repairId: repairId,
-            chunks: chunks,
-            startIndex: nextIndex,
-            syncIds: syncIds,
-            expectedChunks: expectedChunks
-        )
-
-        try await seedLedgerAfterRepair(
-            metric: metric,
-            rangeStart: rangeStart,
-            rangeEnd: rangeEnd,
-            rangeStartDay: rangeStartDay,
-            rangeEndDay: rangeEndDay,
-            context: context
-        )
-        try await establishBaselineAnchor(metric: metric, context: context)
-        try await establishAdditionalBaselines(group: metric, rangeStart: rangeStart, rangeEnd: rangeEnd, context: context)
-
-        local = await stateStore.loadMetricState(userId: context.userId, personId: context.personId, metric: metric)
-        local.repairId = nil
-        local.repairChunkIndex = nil
-        local.repairExpectedChunks = nil
-        local.repairRangeStart = nil
-        local.repairRangeEnd = nil
-        local.repairRangeStartDay = nil
-        local.repairRangeEndDay = nil
-        local.repairChunkSyncIds = nil
-        local.pendingSync = false
-        local.lastSuccessfulAt = Date()
-        local.lastErrorCode = nil
-        local.redactedStatus = "ready"
-        await stateStore.saveMetricState(userId: context.userId, personId: context.personId, metric: metric, state: local)
-    }
-
-    private func uploadRepairChunks(
-        metric: HealthKitSyncMetric,
-        context: SessionContext,
-        repairId: String,
-        chunks: [[HealthKitSyncOperation]],
-        startIndex: Int,
-        syncIds: [String: String],
-        expectedChunks: Int
-    ) async throws {
-        for index in startIndex..<chunks.count {
-            let syncId = syncIds[String(index)] ?? UUID().uuidString.lowercased()
-            _ = try await api.syncHealthKit(
+        let session: HealthKitBackfillSession
+        do {
+            session = try await api.createHealthKitBackfillSession(
                 baseURL: context.baseURL,
                 accessToken: context.accessToken,
-                syncId: syncId,
+                installationId: context.installationId,
+                personId: context.personId,
+                metric: metric,
+                timezoneVersion: context.timezoneVersion
+            )
+        } catch {
+            // Session create failed: leave group as backfilling if we never got a session id,
+            // but mark error only for permanent fencing — network stays retryable as never_synced.
+            if let apiError = error as? HealthAPIError, isTransientAPIError(apiError) {
+                try outbox.setGroupStatus(groupKey: metric.rawValue, status: "never_synced", lastErrorCode: "session_create_retry")
+            } else {
+                try outbox.setGroupStatus(groupKey: metric.rawValue, status: "error", lastErrorCode: "session_create_failed")
+            }
+            throw error
+        }
+        guard let rangeStart = parseInstant(session.rangeStart),
+              let rangeEnd = parseInstant(session.rangeEnd) else {
+            throw HealthKitSyncEngineError.missingConfiguration
+        }
+
+        // Dual-write lightweight UI state; SQLite group_state is authoritative for control flow.
+        var local = await stateStore.loadMetricState(userId: context.userId, personId: context.personId, metric: metric)
+        local.repairId = nil
+        local.pendingSync = true
+        local.redactedStatus = "backfilling"
+        local.lastErrorCode = nil
+        await stateStore.saveMetricState(userId: context.userId, personId: context.personId, metric: metric, state: local)
+
+        try outbox.saveBackfillSession(
+            sessionId: session.sessionId,
+            groupKey: metric.rawValue,
+            rangeStart: rangeStart,
+            rangeEnd: rangeEnd,
+            status: "open"
+        )
+
+        let operations = try await buildRepairOperations(
+            metric: metric,
+            rangeStart: rangeStart,
+            rangeEnd: rangeEnd,
+            rangeStartDay: session.rangeStartDay,
+            rangeEndDay: session.rangeEndDay,
+            context: context
+        )
+        var eventsByScope: [String: [String]] = [:]
+        for op in operations {
+            let eventId = try enqueueOperation(op, sessionId: session.sessionId, context: context)
+            eventsByScope[scopeKey(for: op), default: []].append(eventId)
+        }
+        for scope in session.requiredScopeKeys {
+            let ids = eventsByScope[scope] ?? []
+            let hash = HealthKitScopeManifest.hash(sessionId: session.sessionId, scopeKey: scope, eventIds: ids)
+            try outbox.saveScopeManifest(
+                sessionId: session.sessionId,
+                scopeKey: scope,
+                eventCount: ids.count,
+                manifestHash: hash,
+                eventIds: ids
+            )
+        }
+
+        try await finishBackfillSession(
+            metric: metric,
+            session: session,
+            eventsByScope: eventsByScope,
+            rangeStart: rangeStart,
+            rangeEnd: rangeEnd,
+            context: context
+        )
+    }
+
+    /// Resume an open local/server backfill after a transient failure without re-scanning 90 days.
+    private func resumeOpenBackfill(metric: HealthKitSyncMetric, context: SessionContext) async throws {
+        guard let open = try outbox.openBackfillSession(groupKey: metric.rawValue) else {
+            try await runBackfill(metric: metric, context: context)
+            return
+        }
+
+        // Prefer durable event ID lists stored with scope manifests (survives outbox drain).
+        let storedManifests = try outbox.allScopeManifests(sessionId: open.sessionId)
+        var eventsByScope: [String: [String]] = [:]
+        for entry in storedManifests {
+            eventsByScope[entry.scopeKey] = entry.eventIds
+        }
+
+        // Fetch session details from server for complete() identity.
+        let session: HealthKitBackfillSession
+        do {
+            session = try await api.getHealthKitBackfillSession(
+                baseURL: context.baseURL,
+                accessToken: context.accessToken,
+                sessionId: open.sessionId
+            )
+        } catch {
+            if let apiError = error as? HealthAPIError, isTransientAPIError(apiError) {
+                try outbox.setGroupStatus(groupKey: metric.rawValue, status: "backfilling", lastErrorCode: apiError.errorCode ?? "transient")
+                throw error
+            }
+            // Session gone permanently → full re-scan.
+            try await runBackfill(metric: metric, context: context)
+            return
+        }
+        guard let rangeStart = parseInstant(session.rangeStart),
+              let rangeEnd = parseInstant(session.rangeEnd) else {
+            try await runBackfill(metric: metric, context: context)
+            return
+        }
+
+        for scope in session.requiredScopeKeys {
+            if eventsByScope[scope] == nil {
+                eventsByScope[scope] = try outbox.eventIdsForSessionScope(sessionId: open.sessionId, scopeKey: scope)
+            }
+        }
+
+        try await finishBackfillSession(
+            metric: metric,
+            session: session,
+            eventsByScope: eventsByScope,
+            rangeStart: rangeStart,
+            rangeEnd: rangeEnd,
+            context: context
+        )
+    }
+
+    private func finishBackfillSession(
+        metric: HealthKitSyncMetric,
+        session: HealthKitBackfillSession,
+        eventsByScope: [String: [String]],
+        rangeStart: Date,
+        rangeEnd: Date,
+        context: SessionContext
+    ) async throws {
+        // Drain session events before manifests.
+        await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL) { context.accessToken }
+
+        do {
+            try await uploadManifestsAndComplete(
+                session: session,
+                eventsByScope: eventsByScope,
+                context: context
+            )
+        } catch let error as HealthAPIError {
+            let code = error.errorCode
+            if code == "session_incomplete" {
+                // Drain pending session events, then re-upload manifests (duplicates allowed) and complete.
+                await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL) { context.accessToken }
+                try await uploadManifestsAndComplete(
+                    session: session,
+                    eventsByScope: eventsByScope,
+                    context: context
+                )
+            } else if code == "manifest_incomplete" || code == "session_expired" || code == "event_conflict" {
+                _ = try? await api.abortHealthKitBackfillSession(
+                    baseURL: context.baseURL,
+                    accessToken: context.accessToken,
+                    sessionId: session.sessionId,
+                    installationId: context.installationId,
+                    personId: context.personId,
+                    timezoneVersion: context.timezoneVersion,
+                    reason: code
+                )
+                try outbox.updateBackfillSessionStatus(sessionId: session.sessionId, status: "aborted")
+                try outbox.retireSessionEvents(sessionId: session.sessionId, keepEventId: nil, errorCode: code ?? "session_aborted")
+                try outbox.setGroupStatus(groupKey: metric.rawValue, status: "error", lastErrorCode: code)
+                throw error
+            } else if isTransientAPIError(error) {
+                // Keep open session / backfilling status for retry with backoff.
+                try outbox.setGroupStatus(groupKey: metric.rawValue, status: "backfilling", lastErrorCode: code ?? "transient")
+                throw error
+            } else {
+                try outbox.setGroupStatus(groupKey: metric.rawValue, status: "error", lastErrorCode: code ?? "backfill_failed")
+                throw error
+            }
+        }
+
+        try await seedLedgerAfterRepair(
+            metric: metric,
+            rangeStart: rangeStart,
+            rangeEnd: rangeEnd,
+            rangeStartDay: session.rangeStartDay,
+            rangeEndDay: session.rangeEndDay,
+            context: context
+        )
+        try await establishBaselineAnchor(metric: metric, context: context)
+        try await establishAdditionalBaselines(group: metric, rangeStart: rangeStart, rangeEnd: rangeEnd, context: context)
+
+        var local = await stateStore.loadMetricState(userId: context.userId, personId: context.personId, metric: metric)
+        local.repairId = nil
+        local.pendingSync = false
+        local.lastSuccessfulAt = Date()
+        local.lastErrorCode = nil
+        local.redactedStatus = "ready"
+        await stateStore.saveMetricState(userId: context.userId, personId: context.personId, metric: metric, state: local)
+        try outbox.setGroupStatus(groupKey: metric.rawValue, status: "ready")
+        try outbox.updateBackfillSessionStatus(sessionId: session.sessionId, status: "completed")
+    }
+
+    private func uploadManifestsAndComplete(
+        session: HealthKitBackfillSession,
+        eventsByScope: [String: [String]],
+        context: SessionContext
+    ) async throws {
+        // Always (re)upload manifests; server accepts duplicate identical hashes.
+        for scope in session.requiredScopeKeys {
+            let ids = eventsByScope[scope] ?? []
+            let hash = HealthKitScopeManifest.hash(sessionId: session.sessionId, scopeKey: scope, eventIds: ids)
+            _ = try await api.putHealthKitScopeManifest(
+                baseURL: context.baseURL,
+                accessToken: context.accessToken,
+                sessionId: session.sessionId,
+                scopeKey: scope,
                 installationId: context.installationId,
                 personId: context.personId,
                 timezoneVersion: context.timezoneVersion,
-                operations: chunks[index],
-                repairId: repairId,
-                chunkIndex: index
+                eventCount: ids.count,
+                manifestHash: hash
             )
-            var local = await stateStore.loadMetricState(userId: context.userId, personId: context.personId, metric: metric)
-            local.repairChunkIndex = index + 1
-            await stateStore.saveMetricState(userId: context.userId, personId: context.personId, metric: metric, state: local)
+            try outbox.markScopeManifestUploaded(sessionId: session.sessionId, scopeKey: scope)
         }
-
-        _ = try await api.completeHealthKitRepair(
+        await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL) { context.accessToken }
+        _ = try await api.completeHealthKitBackfillSession(
             baseURL: context.baseURL,
             accessToken: context.accessToken,
-            repairId: repairId,
-            expectedChunkCount: expectedChunks
+            sessionId: session.sessionId,
+            installationId: context.installationId,
+            personId: context.personId,
+            timezoneVersion: context.timezoneVersion
         )
     }
 
+    private func isTransientAPIError(_ error: HealthAPIError) -> Bool {
+        switch error {
+        case let .badStatus(status, _, code):
+            if status == 429 || status >= 500 { return true }
+            if status == -1 { return true } // transport
+            // Permanent fencing codes are not transient.
+            if let code, ["payload_invalid", "event_conflict", "manifest_incomplete", "session_expired",
+                          "installation_inactive", "consent_withdrawn", "group_disabled", "timezone_stale"].contains(code) {
+                return false
+            }
+            // 409 session_incomplete is handled explicitly; other 4xx default permanent.
+            return false
+        case .invalidURL, .missingToken:
+            return false
+        }
+    }
+
     private func processAnchoredChanges(metric: HealthKitSyncMetric, context: SessionContext) async throws {
-        let starting = await stateStore.loadAnchor(userId: context.userId, personId: context.personId, metric: metric)
+        let starting = try await loadAnchorCursor(key: cursorKey(for: metric, context: context), context: context, metric: metric)
         try await drainAnchoredFeed(metric: metric, context: context, startingAnchor: starting)
         // The primary type (steps, sleep, BP, or the first available type) is
         // anchored above. Other group members are daily aggregates, so refresh
@@ -336,17 +443,7 @@ actor HealthKitSyncEngine {
         }
         if !additional.isEmpty {
             for chunk in chunkOperations(additional.sorted { $0.stableKey < $1.stableKey }) {
-                _ = try await api.syncHealthKit(
-                    baseURL: context.baseURL,
-                    accessToken: context.accessToken,
-                    syncId: UUID().uuidString.lowercased(),
-                    installationId: context.installationId,
-                    personId: context.personId,
-                    timezoneVersion: context.timezoneVersion,
-                    operations: chunk,
-                    repairId: nil,
-                    chunkIndex: nil
-                )
+                try await enqueueAndDrain(operations: chunk, context: context)
             }
         }
         var local = await stateStore.loadMetricState(userId: context.userId, personId: context.personId, metric: metric)
@@ -373,8 +470,8 @@ actor HealthKitSyncEngine {
             if !empty {
                 try await applyAnchoredPage(metric: metric, context: context, page: page)
             }
-            // Advance anchor only after successful upload (or empty page).
-            await stateStore.saveAnchor(page.newAnchor, userId: context.userId, personId: context.personId, metric: metric)
+            // Advance anchor only after successful local enqueue (or empty page).
+            try await saveAnchorCursor(page.newAnchor, key: cursorKey(for: metric, context: context), context: context, metric: metric)
             anchor = page.newAnchor
             if empty || (page.added.count + page.deletedObjectUUIDs.count) < anchoredPageLimit {
                 break
@@ -382,7 +479,7 @@ actor HealthKitSyncEngine {
         }
     }
 
-    /// After a completed repair, page the full change feed only to reach the terminal anchor (no re-upload).
+    /// After a completed backfill, page the full change feed only to reach the terminal anchor (no re-upload).
     private func establishBaselineAnchor(metric: HealthKitSyncMetric, context: SessionContext) async throws {
         let type = try healthKit.sampleType(for: metric)
         var anchor: HKQueryAnchor?
@@ -390,7 +487,7 @@ actor HealthKitSyncEngine {
         while guardCount < 10_000 {
             guardCount += 1
             let page = try await healthKit.anchoredQuery(type: type, anchor: anchor, limit: anchoredPageLimit)
-            await stateStore.saveAnchor(page.newAnchor, userId: context.userId, personId: context.personId, metric: metric)
+            try await saveAnchorCursor(page.newAnchor, key: cursorKey(for: metric, context: context), context: context, metric: metric)
             anchor = page.newAnchor
             let pageSize = page.added.count + page.deletedObjectUUIDs.count
             if pageSize == 0 || pageSize < anchoredPageLimit {
@@ -430,7 +527,12 @@ actor HealthKitSyncEngine {
                 anchor = page.newAnchor
                 if page.added.count + page.deletedObjectUUIDs.count < anchoredPageLimit { break }
             }
-            await stateStore.saveDataMetricAnchor(anchor, userId: context.userId, personId: context.personId, metric: dataMetric)
+            try await saveAnchorCursor(
+                anchor,
+                key: dataMetricCursorKey(for: dataMetric, context: context),
+                context: context,
+                dataMetric: dataMetric
+            )
         }
     }
 
@@ -455,9 +557,14 @@ actor HealthKitSyncEngine {
             for deleted in page.deletedObjectUUIDs {
                 let key = deleted.uuidString.lowercased()
                 guard let entry = ledger.removeValue(forKey: key) else {
-                    throw HealthKitSyncEngineError.repairNeeded(dataMetric.group.rawValue)
+                    // Cannot map sample→day without ledger; start a real backfill (not a permanent throw).
+                    try await runBackfill(metric: dataMetric.group, context: context)
+                    return
                 }
                 affectedDays.formUnion(entry.bucketKeys)
+                for day in entry.bucketKeys {
+                    try markDayDirty(dataMetric: dataMetric, localDay: day, context: context, allowsDelete: true)
+                }
             }
             for day in affectedDays {
                 guard let start = parseDayStart(day, timeZone: context.timezone) else { continue }
@@ -480,7 +587,8 @@ actor HealthKitSyncEngine {
             }
             for deleted in page.deletedObjectUUIDs {
                 let key = deleted.uuidString.lowercased()
-                guard ledger.removeValue(forKey: key) != nil else { throw HealthKitSyncEngineError.repairNeeded(dataMetric.group.rawValue) }
+                ledger.removeValue(forKey: key)
+                // Source-keyed: HK deletion UUID is sufficient; no ledger mapping required.
                 operations.append(.bloodGlucoseDelete(sourceSampleKey: key))
             }
         case .workout:
@@ -491,7 +599,7 @@ actor HealthKitSyncEngine {
             }
             for deleted in page.deletedObjectUUIDs {
                 let key = deleted.uuidString.lowercased()
-                guard ledger.removeValue(forKey: key) != nil else { throw HealthKitSyncEngineError.repairNeeded(dataMetric.group.rawValue) }
+                ledger.removeValue(forKey: key)
                 operations.append(.workoutDelete(sourceSampleKey: key))
             }
         case .hourly, .sleepDay, .bloodPressure:
@@ -499,17 +607,7 @@ actor HealthKitSyncEngine {
         }
 
         for chunk in chunkOperations(operations.sorted { $0.stableKey < $1.stableKey }) {
-            _ = try await api.syncHealthKit(
-                baseURL: context.baseURL,
-                accessToken: context.accessToken,
-                syncId: UUID().uuidString.lowercased(),
-                installationId: context.installationId,
-                personId: context.personId,
-                timezoneVersion: context.timezoneVersion,
-                operations: chunk,
-                repairId: nil,
-                chunkIndex: nil
-            )
+            try await enqueueAndDrain(operations: chunk, context: context)
         }
         await stateStore.saveDataMetricLedger(ledger, userId: context.userId, personId: context.personId, metric: dataMetric)
     }
@@ -560,10 +658,14 @@ actor HealthKitSyncEngine {
             }
             for deleted in page.deletedObjectUUIDs {
                 guard let entry = ledger[deleted.uuidString] else {
-                    throw HealthKitSyncEngineError.repairNeeded(metric.rawValue)
+                    try await runBackfill(metric: metric, context: context)
+                    return
                 }
                 affectedBuckets.formUnion(entry.bucketKeys)
                 ledger.removeValue(forKey: deleted.uuidString)
+                for bucket in entry.bucketKeys {
+                    try markHourDirty(hourStartUtc: bucket, context: context, allowsDelete: true)
+                }
             }
             for bucket in affectedBuckets {
                 guard let hourDate = parseHour(bucket) else { continue }
@@ -591,14 +693,21 @@ actor HealthKitSyncEngine {
             }
             for deleted in page.deletedObjectUUIDs {
                 guard let entry = ledger[deleted.uuidString] else {
-                    throw HealthKitSyncEngineError.repairNeeded(metric.rawValue)
+                    try await runBackfill(metric: metric, context: context)
+                    return
                 }
                 affectedBuckets.formUnion(entry.bucketKeys)
                 ledger.removeValue(forKey: deleted.uuidString)
+                // Sleep ledger bucket keys are profile-local calendar days, not UTC hours.
+                for day in entry.bucketKeys {
+                    try markSleepDayDirty(sleepDay: day, context: context, allowsDelete: true)
+                }
             }
             for day in affectedBuckets {
-                let dayStart = parseDayStart(day, timeZone: context.timezone) ?? Date()
-                let dayEnd = dayStart.addingTimeInterval(24 * 3600)
+                guard let dayStart = parseDayStart(day, timeZone: context.timezone) else { continue }
+                var calendar = Calendar(identifier: .gregorian)
+                calendar.timeZone = TimeZone(identifier: context.timezone) ?? TimeZone(secondsFromGMT: 0)!
+                guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else { continue }
                 let samples = try await healthKit.sleepSamples(
                     from: dayStart.addingTimeInterval(-12 * 3600),
                     to: dayEnd.addingTimeInterval(12 * 3600)
@@ -621,8 +730,7 @@ actor HealthKitSyncEngine {
                     expiresAt: expiry
                 )
                 operations.append(
-                    .bloodPressureUpsert(
-                        sourceSampleKey: key,
+                    .bloodPressureUpsert(sourceObjectKey: key,
                         measuredAtUtc: isoInstant(parsed.measuredAt),
                         systolic: parsed.systolic,
                         diastolic: parsed.diastolic,
@@ -632,11 +740,8 @@ actor HealthKitSyncEngine {
             }
             for deleted in page.deletedObjectUUIDs {
                 let key = deleted.uuidString.lowercased()
-                guard ledger[key] != nil else {
-                    throw HealthKitSyncEngineError.repairNeeded(metric.rawValue)
-                }
                 ledger.removeValue(forKey: key)
-                operations.append(.bloodPressureDelete(sourceSampleKey: key))
+                operations.append(.bloodPressureDelete(sourceObjectKey: key))
             }
         case .body, .mobility, .workouts, .mindfulnessEnvironment, .nutrition:
             break
@@ -645,21 +750,154 @@ actor HealthKitSyncEngine {
         if !operations.isEmpty {
             let sorted = operations.sorted { $0.stableKey < $1.stableKey }
             for chunk in chunkOperations(sorted) {
-                _ = try await api.syncHealthKit(
-                    baseURL: context.baseURL,
-                    accessToken: context.accessToken,
-                    syncId: UUID().uuidString.lowercased(),
-                    installationId: context.installationId,
-                    personId: context.personId,
-                    timezoneVersion: context.timezoneVersion,
-                    operations: chunk,
-                    repairId: nil,
-                    chunkIndex: nil
-                )
+                try await enqueueAndDrain(operations: chunk, context: context)
             }
         }
 
         await stateStore.saveLedger(ledger, userId: context.userId, personId: context.personId, metric: metric)
+    }
+
+
+    @discardableResult
+    private func enqueueOperation(_ op: HealthKitSyncOperation, sessionId: String?, context: SessionContext) throws -> String {
+        let eventId = UUID().uuidString.lowercased()
+        let entityKey = op.stableKey
+        // stableKey for upserts used as entity key after normalizing:
+        let key = entityKeyFor(op)
+        let version = try outbox.nextEntityVersion(entityKey: key)
+        let payloadData = try payloadJSON(for: op)
+        try outbox.enqueueEvent(
+            eventId: eventId,
+            entityKey: key,
+            entityVersion: version,
+            groupKey: op.metric.rawValue,
+            scopeKey: scopeKey(for: op),
+            op: isDelete(op) ? "delete" : "upsert",
+            sessionId: sessionId,
+            payloadJson: isDelete(op) ? nil : payloadData
+        )
+        return eventId
+    }
+
+    private func enqueueAndDrain(operations: [HealthKitSyncOperation], context: SessionContext, sessionId: String? = nil) async throws {
+        for op in operations {
+            _ = try enqueueOperation(op, sessionId: sessionId, context: context)
+        }
+        await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL) { context.accessToken }
+    }
+
+    private func isDelete(_ op: HealthKitSyncOperation) -> Bool {
+        switch op {
+        case .stepsHourDelete, .sleepDayDelete, .dailyMetricDelete, .bloodPressureDelete, .bloodGlucoseDelete, .workoutDelete:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func scopeKey(for op: HealthKitSyncOperation) -> String {
+        switch op {
+        case .stepsHourUpsert, .stepsHourDelete:
+            return "steps"
+        case .sleepDayUpsert, .sleepDayDelete:
+            return "sleep"
+        case let .dailyMetricUpsert(healthMetric, _, _, _, _, _, _, _):
+            return healthMetric.rawValue
+        case let .dailyMetricDelete(healthMetric, _):
+            return healthMetric.rawValue
+        case .bloodPressureUpsert, .bloodPressureDelete:
+            return "blood_pressure"
+        case .bloodGlucoseUpsert, .bloodGlucoseDelete:
+            return "blood_glucose"
+        case .workoutUpsert, .workoutDelete:
+            return "workout"
+        }
+    }
+
+    private func entityKeyFor(_ op: HealthKitSyncOperation) -> String {
+        switch op {
+        case let .stepsHourUpsert(hourStartUtc, _):
+            return "steps_hour:\(hourStartUtc)"
+        case let .stepsHourDelete(hourStartUtc):
+            return "steps_hour:\(hourStartUtc)"
+        case let .sleepDayUpsert(sleepDay, _, _, _, _, _, _, _, _, _):
+            return "sleep_day:\(sleepDay)"
+        case let .sleepDayDelete(sleepDay):
+            return "sleep_day:\(sleepDay)"
+        case let .dailyMetricUpsert(healthMetric, localDay, _, _, _, _, _, _):
+            return "daily_metric:\(healthMetric.rawValue):\(localDay)"
+        case let .dailyMetricDelete(healthMetric, localDay):
+            return "daily_metric:\(healthMetric.rawValue):\(localDay)"
+        case let .bloodPressureUpsert(sourceObjectKey, _, _, _, _):
+            return "blood_pressure:\(sourceObjectKey)"
+        case let .bloodPressureDelete(sourceObjectKey):
+            return "blood_pressure:\(sourceObjectKey)"
+        case let .bloodGlucoseUpsert(sourceSampleKey, _, _):
+            return "blood_glucose:\(sourceSampleKey)"
+        case let .bloodGlucoseDelete(sourceSampleKey):
+            return "blood_glucose:\(sourceSampleKey)"
+        case let .workoutUpsert(sourceSampleKey, _, _, _, _, _, _, _, _):
+            return "workout:\(sourceSampleKey)"
+        case let .workoutDelete(sourceSampleKey):
+            return "workout:\(sourceSampleKey)"
+        }
+    }
+
+    private func payloadJSON(for op: HealthKitSyncOperation) throws -> Data {
+        let payload: HealthKitEventPayload
+        switch op {
+        case let .stepsHourUpsert(hourStartUtc, count):
+            payload = .stepsHour(hourStartUtc: hourStartUtc, count: count)
+        case let .sleepDayUpsert(sleepDay, totalMinutes, coreMinutes, deepMinutes, remMinutes, unspecifiedAsleepMinutes, awakeMinutes, inBedMinutes, wristTemperatureCelsius, breathingDisturbanceCount):
+            payload = .sleepDay(
+                sleepDay: sleepDay,
+                totalMinutes: totalMinutes,
+                coreMinutes: coreMinutes,
+                deepMinutes: deepMinutes,
+                remMinutes: remMinutes,
+                unspecifiedAsleepMinutes: unspecifiedAsleepMinutes,
+                awakeMinutes: awakeMinutes,
+                inBedMinutes: inBedMinutes,
+                wristTemperatureCelsius: wristTemperatureCelsius,
+                breathingDisturbanceCount: breathingDisturbanceCount
+            )
+        case let .dailyMetricUpsert(healthMetric, localDay, sumValue, averageValue, minimumValue, maximumValue, latestValue, sampleCount):
+            payload = .dailyMetric(
+                healthMetric: healthMetric,
+                localDay: localDay,
+                sumValue: sumValue,
+                averageValue: averageValue,
+                minimumValue: minimumValue,
+                maximumValue: maximumValue,
+                latestValue: latestValue,
+                sampleCount: sampleCount
+            )
+        case let .bloodPressureUpsert(sourceObjectKey, measuredAtUtc, systolic, diastolic, pulse):
+            payload = .bloodPressure(
+                sourceObjectKey: sourceObjectKey,
+                measuredAtUtc: measuredAtUtc,
+                systolic: systolic,
+                diastolic: diastolic,
+                pulse: pulse
+            )
+        case let .bloodGlucoseUpsert(sourceSampleKey, measuredAtUtc, valueMgDl):
+            payload = .bloodGlucose(sourceSampleKey: sourceSampleKey, measuredAtUtc: measuredAtUtc, valueMgDl: valueMgDl)
+        case let .workoutUpsert(sourceSampleKey, workoutType, startedAtUtc, endedAtUtc, durationSeconds, activeEnergyKcal, distanceMeters, averageHeartRateBpm, maximumHeartRateBpm):
+            payload = .workout(
+                sourceSampleKey: sourceSampleKey,
+                workoutType: workoutType,
+                startedAtUtc: startedAtUtc,
+                endedAtUtc: endedAtUtc,
+                durationSeconds: durationSeconds,
+                activeEnergyKcal: activeEnergyKcal,
+                distanceMeters: distanceMeters,
+                averageHeartRateBpm: averageHeartRateBpm,
+                maximumHeartRateBpm: maximumHeartRateBpm
+            )
+        case .stepsHourDelete, .sleepDayDelete, .dailyMetricDelete, .bloodPressureDelete, .bloodGlucoseDelete, .workoutDelete:
+            throw HealthKitSyncEngineError.missingConfiguration
+        }
+        return try JSONEncoder().encode(payload)
     }
 
     private func chunkOperations(_ operations: [HealthKitSyncOperation]) -> [[HealthKitSyncOperation]] {
@@ -718,8 +956,7 @@ actor HealthKitSyncEngine {
             let correlations = try await healthKit.bloodPressureCorrelations(from: rangeStart, to: rangeEnd)
             primaryOperations = correlations.compactMap { correlation in
                 guard let parsed = healthKit.parseBloodPressure(correlation) else { return nil }
-                return .bloodPressureUpsert(
-                    sourceSampleKey: correlation.uuid.uuidString.lowercased(),
+                return .bloodPressureUpsert(sourceObjectKey: correlation.uuid.uuidString.lowercased(),
                     measuredAtUtc: isoInstant(parsed.measuredAt),
                     systolic: parsed.systolic,
                     diastolic: parsed.diastolic,
@@ -729,12 +966,16 @@ actor HealthKitSyncEngine {
         case .body, .mobility, .workouts, .mindfulnessEnvironment, .nutrition:
             primaryOperations = []
         }
-        return primaryOperations + (try await additionalRepairOperations(
+        let operations = primaryOperations + (try await additionalRepairOperations(
             group: metric,
             rangeStart: rangeStart,
             rangeEnd: rangeEnd,
             timeZone: context.timezone
         ))
+        // A repair is authorized for one consent group only. Keep the boundary
+        // client-side as well, so a registry or aggregation regression cannot
+        // send a mixed chunk that the API correctly rejects.
+        return operations.filter { $0.metric == metric }
     }
 
     private func seedLedgerAfterRepair(
@@ -819,12 +1060,12 @@ actor HealthKitSyncEngine {
               let endDayStart = parseDayStart(rangeEndDay, timeZone: timeZone),
               let zone = TimeZone(identifier: timeZone)
         else {
-            throw HealthKitSyncEngineError.repairNeeded(HealthKitSyncMetric.sleep.rawValue)
+            throw HealthKitSyncEngineError.missingConfiguration
         }
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = zone
         guard let end = calendar.date(byAdding: .day, value: 1, to: endDayStart) else {
-            throw HealthKitSyncEngineError.repairNeeded(HealthKitSyncMetric.sleep.rawValue)
+            throw HealthKitSyncEngineError.missingConfiguration
         }
         return try await healthKit.sleepSamples(from: start, to: end)
     }
@@ -988,5 +1229,201 @@ actor HealthKitSyncEngine {
         formatter.timeZone = TimeZone(identifier: timeZone) ?? TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.date(from: day)
+    }
+
+    // MARK: - SQLite cursors + dirty buckets
+
+    private func cursorKey(for metric: HealthKitSyncMetric, context: SessionContext) -> String {
+        "anchor:\(context.userId):\(context.personId):\(metric.rawValue)"
+    }
+
+    private func dataMetricCursorKey(for dataMetric: HealthKitDataMetric, context: SessionContext) -> String {
+        "anchor:\(context.userId):\(context.personId):metric:\(dataMetric.rawValue)"
+    }
+
+    private func loadAnchorCursor(
+        key: String,
+        context: SessionContext,
+        metric: HealthKitSyncMetric? = nil,
+        dataMetric: HealthKitDataMetric? = nil
+    ) async throws -> HKQueryAnchor? {
+        if let data = try outbox.loadCursor(key: key),
+           let anchor = try? NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: data) {
+            return anchor
+        }
+        // Legacy UserDefaults fallback during migration off the fragile path.
+        if let metric {
+            return await stateStore.loadAnchor(userId: context.userId, personId: context.personId, metric: metric)
+        }
+        if let dataMetric {
+            return await stateStore.loadDataMetricAnchor(userId: context.userId, personId: context.personId, metric: dataMetric)
+        }
+        return nil
+    }
+
+    private func saveAnchorCursor(
+        _ anchor: HKQueryAnchor?,
+        key: String,
+        context: SessionContext,
+        metric: HealthKitSyncMetric? = nil,
+        dataMetric: HealthKitDataMetric? = nil
+    ) async throws {
+        let data = try anchor.flatMap { try NSKeyedArchiver.archivedData(withRootObject: $0, requiringSecureCoding: true) }
+        try outbox.saveCursor(key: key, anchor: data)
+        // Dual-write legacy store for UI until fully removed.
+        if let metric {
+            await stateStore.saveAnchor(anchor, userId: context.userId, personId: context.personId, metric: metric)
+        }
+        if let dataMetric {
+            await stateStore.saveDataMetricAnchor(anchor, userId: context.userId, personId: context.personId, metric: dataMetric)
+        }
+    }
+
+    private func markHourDirty(hourStartUtc: String, context: SessionContext, allowsDelete: Bool) throws {
+        let descriptor = HealthKitOutboxStore.BucketDescriptor(kind: "steps_hour", hourStartUtc: hourStartUtc, localDay: nil, healthMetric: nil)
+        let json = try JSONEncoder().encode(descriptor)
+        try outbox.markDirtyBucket(
+            entityKey: "steps_hour:\(hourStartUtc)",
+            groupKey: HealthKitSyncMetric.activity.rawValue,
+            scopeKey: "steps",
+            bucketJson: json,
+            allowsDelete: allowsDelete
+        )
+    }
+
+    private func markSleepDayDirty(sleepDay: String, context: SessionContext, allowsDelete: Bool) throws {
+        let descriptor = HealthKitOutboxStore.BucketDescriptor(kind: "sleep_day", hourStartUtc: nil, localDay: sleepDay, healthMetric: nil)
+        let json = try JSONEncoder().encode(descriptor)
+        try outbox.markDirtyBucket(
+            entityKey: "sleep_day:\(sleepDay)",
+            groupKey: HealthKitSyncMetric.sleep.rawValue,
+            scopeKey: "sleep",
+            bucketJson: json,
+            allowsDelete: allowsDelete
+        )
+    }
+
+    private func markDayDirty(
+        dataMetric: HealthKitDataMetric,
+        localDay: String,
+        context: SessionContext,
+        allowsDelete: Bool
+    ) throws {
+        let descriptor = HealthKitOutboxStore.BucketDescriptor(
+            kind: "daily_metric",
+            hourStartUtc: nil,
+            localDay: localDay,
+            healthMetric: dataMetric.rawValue
+        )
+        let json = try JSONEncoder().encode(descriptor)
+        try outbox.markDirtyBucket(
+            entityKey: "daily_metric:\(dataMetric.rawValue):\(localDay)",
+            groupKey: dataMetric.group.rawValue,
+            scopeKey: dataMetric.rawValue,
+            bucketJson: json,
+            allowsDelete: allowsDelete
+        )
+    }
+
+    /// Recompute dirty buckets from HealthKit and emit immutable events only when generation is unchanged.
+    /// Outbox insert + dirty delete happen in one SQLite transaction.
+    private func materializeDirtyBuckets(context: SessionContext) async throws {
+        let dirty = try outbox.claimDirtyBuckets(limit: 50)
+        for row in dirty {
+            let generation = row.dirtyGeneration
+            let descriptor = try JSONDecoder().decode(HealthKitOutboxStore.BucketDescriptor.self, from: row.bucketJson)
+            var operations: [HealthKitSyncOperation] = []
+            switch descriptor.kind {
+            case "steps_hour":
+                guard let hour = descriptor.hourStartUtc, let hourDate = parseHour(hour) else { continue }
+                let hours = try await healthKit.hourlyStepCounts(from: hourDate, to: hourDate.addingTimeInterval(3600))
+                let count = hours.first?.count ?? 0
+                if count == 0 {
+                    if row.allowsDeleteFlag {
+                        operations.append(.stepsHourDelete(hourStartUtc: hour))
+                    }
+                    // else: clear dirty without event (empty incremental recompute without observed delete)
+                } else {
+                    operations.append(.stepsHourUpsert(hourStartUtc: hour, count: count))
+                }
+            case "sleep_day":
+                guard let day = descriptor.localDay,
+                      let dayStart = parseDayStart(day, timeZone: context.timezone)
+                else { continue }
+                var calendar = Calendar(identifier: .gregorian)
+                calendar.timeZone = TimeZone(identifier: context.timezone) ?? TimeZone(secondsFromGMT: 0)!
+                guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else { continue }
+                let samples = try await healthKit.sleepSamples(
+                    from: dayStart.addingTimeInterval(-12 * 3600),
+                    to: dayEnd.addingTimeInterval(12 * 3600)
+                )
+                let totals = healthKit.sleepDayTotals(samples: samples, timeZoneIdentifier: context.timezone)
+                if let dayTotals = totals[day] {
+                    operations.append(sleepUpsert(sleepDay: day, totals: dayTotals))
+                } else if row.allowsDeleteFlag {
+                    operations.append(.sleepDayDelete(sleepDay: day))
+                }
+            case "daily_metric":
+                guard let day = descriptor.localDay,
+                      let metricRaw = descriptor.healthMetric,
+                      let dataMetric = HealthKitDataMetric(rawValue: metricRaw),
+                      let start = parseDayStart(day, timeZone: context.timezone)
+                else { continue }
+                var calendar = Calendar(identifier: .gregorian)
+                calendar.timeZone = TimeZone(identifier: context.timezone) ?? TimeZone(secondsFromGMT: 0)!
+                guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { continue }
+                let replacements = try await dailyMetricOperations(
+                    metric: dataMetric,
+                    from: start,
+                    to: end,
+                    timeZone: context.timezone
+                )
+                if replacements.isEmpty {
+                    if row.allowsDeleteFlag {
+                        operations.append(.dailyMetricDelete(healthMetric: dataMetric, localDay: day))
+                    }
+                } else {
+                    operations += replacements.filter { $0.stableKey.hasSuffix(":" + day) }
+                }
+            default:
+                continue
+            }
+
+            let eventSpecs: [(
+                eventId: String,
+                entityKey: String,
+                entityVersion: Int?,
+                groupKey: String,
+                scopeKey: String,
+                op: String,
+                sessionId: String?,
+                payloadJson: Data?
+            )] = try operations.map { op in
+                let key = entityKeyFor(op)
+                let payload: Data? = isDelete(op) ? nil : (try payloadJSON(for: op))
+                return (
+                    eventId: UUID().uuidString.lowercased(),
+                    entityKey: key,
+                    entityVersion: nil,
+                    groupKey: op.metric.rawValue,
+                    scopeKey: scopeKey(for: op),
+                    op: isDelete(op) ? "delete" : "upsert",
+                    sessionId: nil,
+                    payloadJson: payload
+                )
+            }
+
+            // Empty ops still clear dirty atomically (no event) when generation matches.
+            let committed = try outbox.materializeDirtyBucketAtomically(
+                entityKey: row.entityKey,
+                expectedGeneration: generation,
+                events: eventSpecs
+            )
+            if committed, !eventSpecs.isEmpty {
+                // Upload only after durable local write of replacement event(s).
+                await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL) { context.accessToken }
+            }
+            // If generation changed during recompute, leave dirty for another pass.
+        }
     }
 }

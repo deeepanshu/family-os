@@ -1,36 +1,34 @@
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
-import { HEALTHKIT_CONSENT_GROUPS, HEALTHKIT_METRIC_REGISTRY, isHealthKitMetricKey } from "@family-os/shared";
-import type { HealthKitSyncInput } from "@family-os/shared";
+import {
+  HEALTHKIT_CONSENT_GROUPS,
+  HEALTHKIT_EVENTS_BATCH_MAX,
+  isHealthKitMetricKey
+} from "@family-os/shared";
+import type { HealthKitEventsBatchInput, HealthKitSyncEvent } from "@family-os/shared";
 import { requireAuth, type AppVariables } from "../auth";
 import { HttpError } from "../errors";
+import { assertEventCoherent, isValidIanaTimezone } from "../repositories/healthKitDomain";
 import type { HealthKitStore } from "../repositories/contracts";
 
 const group = z.enum(HEALTHKIT_CONSENT_GROUPS);
 const uuid = z.string().uuid();
 const isoInstant = z.string().datetime({ offset: true });
-const sleepDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
-const stepsHourUpsert = z
+const stepsHourPayload = z
   .object({
-    kind: z.literal("steps_hour_upsert"),
+    kind: z.literal("steps_hour"),
     hourStartUtc: isoInstant,
     count: z.number().int().min(0).max(200_000)
   })
   .strict();
 
-const stepsHourDelete = z
+const sleepDayPayload = z
   .object({
-    kind: z.literal("steps_hour_delete"),
-    hourStartUtc: isoInstant
-  })
-  .strict();
-
-const sleepDayUpsert = z
-  .object({
-    kind: z.literal("sleep_day_upsert"),
-    sleepDay,
+    kind: z.literal("sleep_day"),
+    sleepDay: ymd,
     totalMinutes: z.number().int().min(0).max(24 * 60),
     coreMinutes: z.number().int().min(0).max(24 * 60),
     deepMinutes: z.number().int().min(0).max(24 * 60),
@@ -43,13 +41,11 @@ const sleepDayUpsert = z
   })
   .strict();
 
-const sleepDayDelete = z.object({ kind: z.literal("sleep_day_delete"), sleepDay }).strict();
-
-const dailyMetricUpsert = z
+const dailyMetricPayload = z
   .object({
-    kind: z.literal("daily_metric_upsert"),
+    kind: z.literal("daily_metric"),
     healthMetric: z.string().min(1).max(80),
-    localDay: sleepDay,
+    localDay: ymd,
     sumValue: z.number().finite().optional(),
     averageValue: z.number().finite().optional(),
     minimumValue: z.number().finite().optional(),
@@ -59,14 +55,11 @@ const dailyMetricUpsert = z
   })
   .strict();
 
-const dailyMetricDelete = z
-  .object({ kind: z.literal("daily_metric_delete"), healthMetric: z.string().min(1).max(80), localDay: sleepDay })
-  .strict();
-
-const bloodPressureUpsert = z
+const bloodPressurePayload = z
   .object({
-    kind: z.literal("blood_pressure_upsert"),
-    sourceSampleKey: z.string().uuid(),
+    kind: z.literal("blood_pressure"),
+    /** HealthKit object UUID (HKCorrelation for BP). */
+    sourceObjectKey: uuid,
     measuredAtUtc: isoInstant,
     systolic: z.number().int().min(50).max(260),
     diastolic: z.number().int().min(30).max(180),
@@ -74,28 +67,19 @@ const bloodPressureUpsert = z
   })
   .strict();
 
-const bloodPressureDelete = z
+const bloodGlucosePayload = z
   .object({
-    kind: z.literal("blood_pressure_delete"),
-    sourceSampleKey: z.string().uuid()
-  })
-  .strict();
-
-const bloodGlucoseUpsert = z
-  .object({
-    kind: z.literal("blood_glucose_upsert"),
-    sourceSampleKey: z.string().uuid(),
+    kind: z.literal("blood_glucose"),
+    sourceSampleKey: uuid,
     measuredAtUtc: isoInstant,
     valueMgDl: z.number().min(20).max(700)
   })
   .strict();
 
-const bloodGlucoseDelete = z.object({ kind: z.literal("blood_glucose_delete"), sourceSampleKey: z.string().uuid() }).strict();
-
-const workoutUpsert = z
+const workoutPayload = z
   .object({
-    kind: z.literal("workout_upsert"),
-    sourceSampleKey: z.string().uuid(),
+    kind: z.literal("workout"),
+    sourceSampleKey: uuid,
     workoutType: z.string().trim().min(1).max(100),
     startedAtUtc: isoInstant,
     endedAtUtc: isoInstant,
@@ -107,24 +91,27 @@ const workoutUpsert = z
   })
   .strict();
 
-const workoutDelete = z.object({ kind: z.literal("workout_delete"), sourceSampleKey: z.string().uuid() }).strict();
-
-const operation = z.discriminatedUnion("kind", [
-  stepsHourUpsert,
-  stepsHourDelete,
-  sleepDayUpsert,
-  sleepDayDelete,
-  dailyMetricUpsert,
-  dailyMetricDelete,
-  bloodPressureUpsert,
-  bloodPressureDelete,
-  bloodGlucoseUpsert,
-  bloodGlucoseDelete,
-  workoutUpsert,
-  workoutDelete
+const eventPayload = z.discriminatedUnion("kind", [
+  stepsHourPayload,
+  sleepDayPayload,
+  dailyMetricPayload,
+  bloodPressurePayload,
+  bloodGlucosePayload,
+  workoutPayload
 ]);
 
-const MAX_OPERATIONS = 500;
+const syncEvent = z
+  .object({
+    eventId: uuid,
+    entityKey: z.string().min(1).max(256),
+    entityVersion: z.number().int().min(1),
+    group,
+    scopeKey: z.string().min(1).max(80),
+    op: z.enum(["upsert", "delete"]),
+    sessionId: uuid.nullable().optional(),
+    payload: eventPayload.nullable().optional()
+  })
+  .strict();
 
 const settingsBody = z
   .object({
@@ -137,92 +124,42 @@ const settingsBody = z
   })
   .strict();
 
-const syncBody = z
+const eventsBatchBody = z
   .object({
-    syncId: uuid,
     installationId: uuid,
     personId: uuid,
     timezoneVersion: z.number().int().min(1),
-    repairId: uuid.optional(),
-    chunkIndex: z.number().int().min(0).optional(),
-    operations: z.array(operation).max(MAX_OPERATIONS)
+    events: z.array(syncEvent).min(1).max(HEALTHKIT_EVENTS_BATCH_MAX)
   })
-  .strict()
-  .superRefine((value, ctx) => {
-    const hasRepair = value.repairId !== undefined;
-    const hasChunk = value.chunkIndex !== undefined;
-    if (hasRepair !== hasChunk) {
-      ctx.addIssue({
-        code: "custom",
-        message: "repairId and chunkIndex must be provided together.",
-        path: ["repairId"]
-      });
-    }
-  });
+  .strict();
 
-const repairBody = z
+const sessionBody = z
   .object({
     installationId: uuid,
     personId: uuid,
-    group,
-    timezoneVersion: z.number().int().min(1)
+    timezoneVersion: z.number().int().min(1),
+    group
   })
   .strict();
 
-const completeRepairBody = z
+const scopeManifestBody = z
   .object({
-    expectedChunkCount: z.number().int().min(0).max(10_000)
+    installationId: uuid,
+    personId: uuid,
+    timezoneVersion: z.number().int().min(1),
+    eventCount: z.number().int().min(0).max(1_000_000),
+    manifestHash: z.string().regex(/^[a-fA-F0-9]{64}$/)
   })
   .strict();
 
-function assertUtcHourBoundary(hourStartUtc: string) {
-  const date = new Date(hourStartUtc);
-  if (Number.isNaN(date.getTime())) {
-    throw new HttpError(400, "healthkit_operation_invalid", "hourStartUtc must be a valid UTC instant.");
-  }
-  if (
-    date.getUTCMinutes() !== 0 ||
-    date.getUTCSeconds() !== 0 ||
-    date.getUTCMilliseconds() !== 0
-  ) {
-    throw new HttpError(400, "healthkit_operation_invalid", "hourStartUtc must fall on a UTC hour boundary.");
-  }
-}
-
-function assertValidTimezone(timezone: string) {
-  try {
-    Intl.DateTimeFormat(undefined, { timeZone: timezone });
-  } catch {
-    throw new HttpError(400, "healthkit_operation_invalid", "healthTimezone must be a valid IANA time zone.");
-  }
-}
-
-function assertRegisteredOperation(input: z.infer<typeof operation>) {
-  if (input.kind !== "daily_metric_upsert" && input.kind !== "daily_metric_delete") return;
-  if (!isHealthKitMetricKey(input.healthMetric)) {
-    throw new HttpError(400, "healthkit_operation_invalid", "healthMetric is not allowlisted.");
-  }
-  const definition = HEALTHKIT_METRIC_REGISTRY[input.healthMetric];
-  if (definition.storage !== "daily_numeric" || !definition.aggregation) {
-    throw new HttpError(400, "healthkit_operation_invalid", "healthMetric does not use daily numeric storage.");
-  }
-  if (input.kind === "daily_metric_delete") return;
-
-  const provided = [input.sumValue, input.averageValue, input.minimumValue, input.maximumValue, input.latestValue]
-    .filter((value) => value !== undefined).length;
-  if (definition.aggregation === "sum" && (input.sumValue === undefined || provided !== 1 || input.sampleCount < 1)) {
-    throw new HttpError(400, "healthkit_operation_invalid", "Summed metric operations require sumValue and a positive sampleCount.");
-  }
-  if (
-    definition.aggregation === "statistics" &&
-    (input.averageValue === undefined || input.minimumValue === undefined || input.maximumValue === undefined || input.latestValue === undefined || provided !== 4 || input.sampleCount < 1)
-  ) {
-    throw new HttpError(400, "healthkit_operation_invalid", "Statistics metric operations require average, minimum, maximum, latest, and a positive sampleCount.");
-  }
-  if (definition.aggregation === "latest" && (input.latestValue === undefined || provided !== 1 || input.sampleCount < 1)) {
-    throw new HttpError(400, "healthkit_operation_invalid", "Latest metric operations require latestValue and a positive sampleCount.");
-  }
-}
+const sessionActionBody = z
+  .object({
+    installationId: uuid,
+    personId: uuid,
+    timezoneVersion: z.number().int().min(1),
+    reason: z.string().trim().min(1).max(200).optional()
+  })
+  .strict();
 
 export function createHealthKitRoutes(repository: HealthKitStore) {
   const healthKit = new Hono<{ Variables: AppVariables }>();
@@ -231,7 +168,7 @@ export function createHealthKitRoutes(repository: HealthKitStore) {
   healthKit.get("/settings", async (c) => {
     const personId = c.req.query("personId");
     if (personId && !z.string().uuid().safeParse(personId).success) {
-      throw new HttpError(400, "healthkit_operation_invalid", "personId must be a UUID.");
+      throw new HttpError(400, "payload_invalid", "personId must be a UUID.");
     }
     const data = await repository.getHealthKitSettings(c.get("user").id, personId);
     return c.json({ data });
@@ -239,38 +176,124 @@ export function createHealthKitRoutes(repository: HealthKitStore) {
 
   healthKit.put("/settings", zValidator("json", settingsBody), async (c) => {
     const body = c.req.valid("json");
-    assertValidTimezone(body.healthTimezone);
+    if (!isValidIanaTimezone(body.healthTimezone)) {
+      throw new HttpError(400, "payload_invalid", "healthTimezone must be a valid IANA time zone.");
+    }
     if (body.enabledGroups.length > 0 && !body.consentVersion) {
-      throw new HttpError(400, "healthkit_consent_required", "consentVersion is required when enabling metrics.");
+      throw new HttpError(400, "consent_withdrawn", "consentVersion is required when enabling metrics.");
     }
     const data = await repository.putHealthKitSettings(c.get("user").id, body);
     return c.json({ data });
   });
 
-  healthKit.post("/sync", zValidator("json", syncBody), async (c) => {
-    const body = c.req.valid("json");
-    for (const op of body.operations) {
-      if (op.kind === "steps_hour_upsert" || op.kind === "steps_hour_delete") {
-        assertUtcHourBoundary(op.hourStartUtc);
+  healthKit.post("/events:batch", zValidator("json", eventsBatchBody), async (c) => {
+    const body = c.req.valid("json") as HealthKitEventsBatchInput;
+    // Structural Zod validation first; deeper coherence runs in the store per-event
+    // so permanent rejections return per-event results instead of failing the batch.
+    for (const event of body.events) {
+      if (event.op === "upsert" && event.payload && event.payload.kind === "daily_metric") {
+        if (!isHealthKitMetricKey(event.payload.healthMetric)) {
+          // leave to store payload_invalid result
+        }
       }
-      assertRegisteredOperation(op);
+      // Lightweight pre-check so obviously broken events still enter the batch path.
+      try {
+        assertEventCoherent(event as HealthKitSyncEvent);
+      } catch {
+        // Store re-validates and records payload_invalid per event.
+      }
     }
-    const data = await repository.syncHealthKit(c.get("user").id, body as HealthKitSyncInput);
+    const data = await repository.applyHealthKitEvents(c.get("user").id, body);
     return c.json({ data });
   });
 
-  healthKit.post("/repairs", zValidator("json", repairBody), async (c) => {
-    const body = c.req.valid("json");
-    const data = await repository.createHealthKitRepair(c.get("user").id, body);
+  healthKit.post("/sessions", zValidator("json", sessionBody), async (c) => {
+    const data = await repository.createBackfillSession(c.get("user").id, c.req.valid("json"));
     return c.json({ data }, 201);
   });
 
-  healthKit.post("/repairs/:repairId/complete", zValidator("json", completeRepairBody), async (c) => {
-    const repairId = c.req.param("repairId");
-    if (!z.string().uuid().safeParse(repairId).success) {
-      throw new HttpError(400, "healthkit_repair_invalid", "repairId must be a UUID.");
+  healthKit.get("/sessions/:sessionId", async (c) => {
+    const sessionId = c.req.param("sessionId");
+    if (!z.string().uuid().safeParse(sessionId).success) {
+      throw new HttpError(400, "session_expired", "sessionId must be a UUID.");
     }
-    const data = await repository.completeHealthKitRepair(c.get("user").id, repairId, c.req.valid("json"));
+    const data = await repository.getBackfillSession(c.get("user").id, sessionId);
+    return c.json({ data });
+  });
+
+  healthKit.get("/sessions/:sessionId/pending", async (c) => {
+    const sessionId = c.req.param("sessionId");
+    if (!z.string().uuid().safeParse(sessionId).success) {
+      throw new HttpError(400, "session_expired", "sessionId must be a UUID.");
+    }
+    const cursor = c.req.query("cursor") ?? undefined;
+    const limitRaw = c.req.query("limit");
+    const limit = limitRaw ? Number(limitRaw) : 100;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new HttpError(400, "payload_invalid", "limit must be 1-100.");
+    }
+    const data = await repository.listBackfillPending(c.get("user").id, sessionId, cursor, limit);
+    return c.json({ data });
+  });
+
+  healthKit.put(
+    "/sessions/:sessionId/scopes/:scopeKey/manifest",
+    zValidator("json", scopeManifestBody),
+    async (c) => {
+      const sessionId = c.req.param("sessionId");
+      const scopeKey = c.req.param("scopeKey");
+      if (!z.string().uuid().safeParse(sessionId).success) {
+        throw new HttpError(400, "session_expired", "sessionId must be a UUID.");
+      }
+      if (!isHealthKitMetricKey(scopeKey)) {
+        throw new HttpError(400, "payload_invalid", "scopeKey is not allowlisted.");
+      }
+      const data = await repository.putScopeManifest(
+        c.get("user").id,
+        sessionId,
+        scopeKey,
+        c.req.valid("json")
+      );
+      return c.json({ data });
+    }
+  );
+
+  healthKit.post("/sessions/:sessionId/complete", zValidator("json", sessionActionBody), async (c) => {
+    const sessionId = c.req.param("sessionId");
+    if (!z.string().uuid().safeParse(sessionId).success) {
+      throw new HttpError(400, "session_expired", "sessionId must be a UUID.");
+    }
+    const data = await repository.completeBackfillSession(
+      c.get("user").id,
+      sessionId,
+      c.req.valid("json")
+    );
+    return c.json({ data });
+  });
+
+  healthKit.post("/sessions/:sessionId/abort", zValidator("json", sessionActionBody), async (c) => {
+    const sessionId = c.req.param("sessionId");
+    if (!z.string().uuid().safeParse(sessionId).success) {
+      throw new HttpError(400, "session_expired", "sessionId must be a UUID.");
+    }
+    const data = await repository.abortBackfillSession(c.get("user").id, sessionId, c.req.valid("json"));
+    return c.json({ data });
+  });
+
+  healthKit.get("/groups/:group/manifest", async (c) => {
+    const groupKey = c.req.param("group");
+    if (!group.safeParse(groupKey).success) {
+      throw new HttpError(400, "payload_invalid", "group is not allowlisted.");
+    }
+    const personId = c.req.query("personId");
+    if (personId && !z.string().uuid().safeParse(personId).success) {
+      throw new HttpError(400, "payload_invalid", "personId must be a UUID.");
+    }
+    const data = await repository.getGroupManifest(
+      c.get("user").id,
+      groupKey as (typeof HEALTHKIT_CONSENT_GROUPS)[number],
+      personId
+    );
     return c.json({ data });
   });
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { HEALTH_API_PREFIX } from "@family-os/shared";
 import { createApp } from "../src/app";
 import { InMemoryFamilyRepository } from "../src/repositories/families";
+import { bloodPressureEvent, seedHealthKitReadyGroup } from "./healthKitTestHelpers";
 
 const jwtSecret = "test-supabase-jwt-secret-with-enough-length";
 const supabaseUrl = "https://project.supabase.co";
@@ -58,25 +59,14 @@ async function setupHealthKitBp(api: ReturnType<typeof app>) {
       installationId
     })
   });
-  await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      syncId: "7afbe594-7e1d-4b31-a9a1-420b7fba42c1",
-      installationId,
-      personId: profileId,
-      timezoneVersion: 1,
-      operations: [
-        {
-          kind: "blood_pressure_upsert",
-          sourceSampleKey: "5e1ed621-4a6c-4e09-969e-31c6f0872c24",
-          measuredAtUtc: "2026-07-25T01:10:00.000Z",
-          systolic: 118,
-          diastolic: 76
-        }
-      ]
+  await seedHealthKitReadyGroup(api, token, profileId, installationId, "vitals", [
+    bloodPressureEvent({
+      sourceObjectKey: "5e1ed621-4a6c-4e09-969e-31c6f0872c24",
+      measuredAtUtc: "2026-07-25T01:10:00.000Z",
+      systolic: 118,
+      diastolic: 76
     })
-  });
+  ]);
   return { token, profileId };
 }
 

@@ -5,25 +5,28 @@ import type {
   BloodPressureReading,
   BloodGlucoseReading,
   BootstrapResponse,
-  CompleteHealthKitRepairInput,
-  CreateHealthKitRepairInput,
+  AbortHealthKitBackfillSessionInput,
+  CompleteHealthKitBackfillSessionInput,
+  CreateHealthKitBackfillSessionInput,
   FamilyMember,
+  HealthKitBackfillSession,
+  HealthKitBackfillSessionAbortResult,
+  HealthKitBackfillSessionCompleteResult,
+  HealthKitEventsBatchInput,
+  HealthKitEventsBatchResult,
+  HealthKitGroupManifest,
   HealthKitMetric,
   HealthKitMetricKey,
-  HealthKitRepair,
-  HealthKitRepairCompleteResult,
+  HealthKitScopeManifestResult,
   HealthKitSettings,
-  HealthKitSyncInput,
-  HealthKitSyncOperation,
-  HealthKitSyncResult,
   HealthDailyMetricRecord,
   HealthMetricFreshness,
-  HealthMetricSyncStatusCode,
   HealthSleepDayRecord,
   HealthStepHourRecord,
   HealthWorkoutRecord,
   McpCapability,
   McpConnectionGrant,
+  PutHealthKitScopeManifestInput,
   PutHealthKitSettingsInput,
   Reminder,
   NotificationDelivery,
@@ -41,7 +44,6 @@ import type {
   PersonStatus,
   PublicInviteResponse
 } from "@family-os/shared";
-import { HEALTHKIT_METRIC_REGISTRY } from "@family-os/shared";
 import { HttpError } from "../errors";
 import type {
   AuditLogStore,
@@ -57,19 +59,7 @@ import type {
   RecordAuditInput,
   ReminderStore
 } from "./contracts";
-import { localDateString } from "../mcp/timezone";
-import {
-  assertOperationInRepairRange,
-  assertSelfProfileMatch,
-  buildSyncResult,
-  HEALTHKIT_METRICS,
-  groupsAffected,
-  profileLocalSleepDayRange,
-  repairRangeStart,
-  REPAIR_TTL_MS,
-  toUtcIso,
-  type HealthKitRepairRange
-} from "./healthKitDomain";
+import { MemoryHealthKitEngine } from "./memoryHealthKit";
 
 export type CreateFamilyInput = {
   name: string;
@@ -152,69 +142,21 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     string,
     BloodPressureReading & { deletedAt?: string; sourceSampleKey?: string }
   >();
-  private readonly healthKitProfileSettings = new Map<
-    string,
-    {
-      personId: string;
-      familyId: string;
-      userId: string;
-      consentVersion?: string;
-      consentedAt?: string;
-      healthTimezone: string;
-      healthTimezoneVersion: number;
-    }
-  >();
-  private readonly healthKitMetricEnabled = new Map<string, boolean>();
-  private readonly healthMetricSyncState = new Map<
-    string,
-    {
-      personId: string;
-      familyId: string;
-      group: HealthKitMetric;
-      lastSuccessfulAt?: string;
-      lastAttemptAt?: string;
-      lastErrorCode?: string;
-      coverageStartAt?: string;
-      coverageEndAt?: string;
-      status: HealthMetricSyncStatusCode;
-    }
-  >();
-  private readonly healthKitInstallations = new Map<
-    string,
-    { personId: string; familyId: string; installationId: string; activatedAt: string; revokedAt?: string }
-  >();
-  private readonly healthStepHours = new Map<string, HealthStepHourRecord & { familyId: string }>();
-  private readonly healthSleepDays = new Map<string, HealthSleepDayRecord & { familyId: string }>();
-  private readonly healthDailyMetrics = new Map<string, {
-    familyId: string;
-    personId: string;
-    healthMetric: string;
-    localDay: string;
-    timezoneVersion: number;
-    sumValue?: number;
-    averageValue?: number;
-    minimumValue?: number;
-    maximumValue?: number;
-    latestValue?: number;
-    sampleCount: number;
-  }>();
-  private readonly healthBloodGlucoseReadings = new Map<string, { personId: string; sourceSampleKey: string; measuredAtUtc: string; valueMgDl: number }>();
-  private readonly healthWorkouts = new Map<string, { personId: string; sourceSampleKey: string; workoutType: string; startedAtUtc: string; endedAtUtc: string; durationSeconds: number; activeEnergyKcal?: number; distanceMeters?: number; averageHeartRateBpm?: number; maximumHeartRateBpm?: number }>();
-  private readonly healthKitSyncReceipts = new Map<string, HealthKitSyncResult>();
-  private readonly healthKitRepairs = new Map<
-    string,
-    HealthKitRepair & {
-      familyId: string;
-      expectedChunkCount?: number;
-      completedAt?: string;
-    }
-  >();
-  private readonly healthKitRepairChunks = new Map<string, { repairId: string; chunkIndex: number; syncId: string; response: HealthKitSyncResult }>();
+  private readonly healthKit: MemoryHealthKitEngine;
   private readonly reminders = new Map<string, Reminder & { deletedAt?: string }>();
   private readonly devices = new Map<string, NotificationDevice>();
   private readonly deliveries = new Map<string, NotificationDelivery>();
   private readonly auditLogs: AuditLog[] = [];
   private readonly mcpConnectionGrants = new Map<string, McpConnectionGrant>();
+
+  constructor() {
+    this.healthKit = new MemoryHealthKitEngine({
+      requireActiveMember: (userId) => this.requireActiveMember(userId),
+      getSelfProfile: (userId) => this.getSelfProfile(userId),
+      audit: (input) => this.audit(input),
+      bloodPressureReadings: this.bloodPressureReadings
+    });
+  }
 
   async createFamily(input: CreateFamilyInput): Promise<CurrentFamilyResponse> {
     const existing = await this.getCurrentFamily(input.userId);
@@ -480,11 +422,11 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     if (hasBloodPressure) {
       throw new HttpError(409, "unsafe_workspace_switch", "Workspace has blood pressure readings.");
     }
-    const hasSteps = [...this.healthStepHours.values()].some((row) => row.familyId === familyId);
+    const hasSteps = [...this.healthKit.stepHours.values()].some((row) => row.familyId === familyId);
     if (hasSteps) {
       throw new HttpError(409, "unsafe_workspace_switch", "Workspace has HealthKit step data.");
     }
-    const hasSleep = [...this.healthSleepDays.values()].some((row) => row.familyId === familyId);
+    const hasSleep = [...this.healthKit.sleepDays.values()].some((row) => row.familyId === familyId);
     if (hasSleep) {
       throw new HttpError(409, "unsafe_workspace_switch", "Workspace has HealthKit sleep data.");
     }
@@ -603,415 +545,68 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   }
 
   async getHealthKitSettings(actorUserId: string, personId?: string): Promise<HealthKitSettings> {
-    const current = this.requireActiveMember(actorUserId);
-    const selfProfile = await this.getSelfProfile(actorUserId);
-    if (!selfProfile) {
-      throw new HttpError(409, "healthkit_self_profile_required", "Create your self profile before using HealthKit sync.");
-    }
-    const targetPersonId = personId ?? selfProfile.id;
-    assertSelfProfileMatch({ selfProfileId: selfProfile.id, requestedPersonId: targetPersonId });
-    return this.buildHealthKitSettings(current.family.id, targetPersonId);
+    return this.healthKit.getHealthKitSettings(actorUserId, personId);
   }
 
   async putHealthKitSettings(actorUserId: string, input: PutHealthKitSettingsInput): Promise<HealthKitSettings> {
-    const current = this.requireActiveMember(actorUserId);
-    const selfProfile = await this.getSelfProfile(actorUserId);
-    assertSelfProfileMatch({ selfProfileId: selfProfile?.id, requestedPersonId: input.personId });
-
-    const uniqueGroups = [...new Set(input.enabledGroups)].filter((m): m is HealthKitMetric =>
-      (HEALTHKIT_METRICS as readonly string[]).includes(m)
-    );
-    const nowIso = new Date().toISOString();
-    const existing = this.healthKitProfileSettings.get(input.personId);
-    let timezoneVersion = existing?.healthTimezoneVersion ?? 1;
-    let timezoneChanged = false;
-    if (existing && existing.healthTimezone !== input.healthTimezone) {
-      timezoneVersion = existing.healthTimezoneVersion + 1;
-      timezoneChanged = true;
-    }
-    const consentActive = uniqueGroups.length > 0;
-    if (consentActive && !input.consentVersion) {
-      throw new HttpError(400, "healthkit_consent_required", "consentVersion is required when enabling metrics.");
-    }
-
-    this.healthKitProfileSettings.set(input.personId, {
-      personId: input.personId,
-      familyId: current.family.id,
-      userId: actorUserId,
-      consentVersion: consentActive ? input.consentVersion : existing?.consentVersion,
-      consentedAt: consentActive ? existing?.consentedAt ?? nowIso : undefined,
-      healthTimezone: input.healthTimezone,
-      healthTimezoneVersion: timezoneVersion
-    });
-
-    const active = this.activeInstallation(input.personId);
-    if (active && active.installationId !== input.installationId) {
-      if (!input.replaceActiveInstallation) {
-        throw new HttpError(
-          409,
-          "healthkit_installation_inactive",
-          "Replacing the active installation requires replaceActiveInstallation=true."
-        );
-      }
-      this.healthKitInstallations.set(`${input.personId}:${active.installationId}`, {
-        ...active,
-        revokedAt: nowIso
-      });
-    }
-    this.healthKitInstallations.set(`${input.personId}:${input.installationId}`, {
-      personId: input.personId,
-      familyId: current.family.id,
-      installationId: input.installationId,
-      activatedAt: nowIso,
-      revokedAt: undefined
-    });
-
-    for (const metric of HEALTHKIT_METRICS) {
-      const enabled = uniqueGroups.includes(metric);
-      this.healthKitMetricEnabled.set(`${input.personId}:${metric}`, enabled);
-      const stateKey = `${input.personId}:${metric}`;
-      const prev = this.healthMetricSyncState.get(stateKey);
-      let status: HealthMetricSyncStatusCode = enabled ? (prev?.status ?? "never_synced") : "disabled";
-      if (!enabled) status = "disabled";
-      else if (timezoneChanged) status = "repair_needed";
-      else if (prev?.status === "disabled") status = "never_synced";
-      this.healthMetricSyncState.set(stateKey, {
-        personId: input.personId,
-        familyId: current.family.id,
-        group: metric,
-        lastSuccessfulAt: prev?.lastSuccessfulAt,
-        lastAttemptAt: prev?.lastAttemptAt,
-        lastErrorCode: prev?.lastErrorCode,
-        coverageStartAt: prev?.coverageStartAt,
-        coverageEndAt: prev?.coverageEndAt,
-        status
-      });
-    }
-
-    this.audit({
-      familyId: current.family.id,
-      actorUserId,
-      action: "healthkit.settings_updated",
-      resourceType: "health_profile",
-      resourceId: input.personId,
-      metadata: {
-        enabledGroups: uniqueGroups,
-        healthTimezone: input.healthTimezone,
-        installationReplaced: Boolean(input.replaceActiveInstallation)
-      }
-    });
-    return this.buildHealthKitSettings(current.family.id, input.personId);
+    return this.healthKit.putHealthKitSettings(actorUserId, input);
   }
 
-  async syncHealthKit(actorUserId: string, input: HealthKitSyncInput): Promise<HealthKitSyncResult> {
-    const current = this.requireActiveMember(actorUserId);
-    const selfProfile = await this.getSelfProfile(actorUserId);
-    assertSelfProfileMatch({ selfProfileId: selfProfile?.id, requestedPersonId: input.personId });
-
-    const receiptKey = `${actorUserId}:${input.personId}:${input.syncId}`;
-    const existingReceipt = this.healthKitSyncReceipts.get(receiptKey);
-    if (existingReceipt) return existingReceipt;
-
-    const nowIso = new Date().toISOString();
-    const affected = groupsAffected(input.operations);
-
-    try {
-      const settings = this.healthKitProfileSettings.get(input.personId);
-      if (!settings?.consentedAt) {
-        throw new HttpError(403, "healthkit_consent_required", "HealthKit upload consent is required.");
-      }
-      const active = this.activeInstallation(input.personId);
-      if (!active || active.installationId !== input.installationId) {
-        throw new HttpError(403, "healthkit_installation_inactive", "Installation is not the active HealthKit installation.");
-      }
-      if (settings.healthTimezoneVersion !== input.timezoneVersion) {
-        throw new HttpError(409, "healthkit_timezone_version_invalid", "Timezone version is stale.");
-      }
-
-      let repair: (HealthKitRepair & { familyId: string; expectedChunkCount?: number; completedAt?: string }) | undefined;
-      if (input.repairId !== undefined) {
-        if (input.chunkIndex === undefined) {
-          throw new HttpError(400, "healthkit_repair_invalid", "chunkIndex is required with repairId.");
-        }
-        const chunkKey = `${input.repairId}:${input.chunkIndex}`;
-        const existingChunk = this.healthKitRepairChunks.get(chunkKey);
-        if (existingChunk) return existingChunk.response;
-
-        repair = this.healthKitRepairs.get(input.repairId);
-        if (!repair || repair.personId !== input.personId) {
-          throw new HttpError(400, "healthkit_repair_invalid", "Repair session is invalid.");
-        }
-        if (repair.completedAt || Date.parse(repair.expiresAt) <= Date.now()) {
-          throw new HttpError(400, "healthkit_repair_invalid", "Repair session is expired or already completed.");
-        }
-        if (repair.installationId !== input.installationId) {
-          throw new HttpError(400, "healthkit_repair_invalid", "Repair does not belong to this installation.");
-        }
-        if (repair.timezoneVersion !== input.timezoneVersion) {
-          throw new HttpError(409, "healthkit_timezone_version_invalid", "Timezone version is stale.");
-        }
-        if (affected.length !== 1 || affected[0] !== repair.group) {
-          throw new HttpError(400, "healthkit_repair_invalid", "Repair chunks may only include the repair metric.");
-        }
-        for (const op of input.operations) {
-          assertOperationInRepairRange(op, repairRangeFromMemory(repair));
-        }
-      }
-
-      for (const metric of affected) {
-        if (!this.healthKitMetricEnabled.get(`${input.personId}:${metric}`)) {
-          throw new HttpError(403, "healthkit_metric_disabled", `Metric ${metric} is not enabled.`);
-        }
-      }
-
-      this.applyHealthKitOperations({
-        familyId: current.family.id,
-        personId: input.personId,
-        actorUserId,
-        timezoneVersion: input.timezoneVersion,
-        operations: input.operations,
-        nowIso,
-        repairRange: repair !== undefined ? repairRangeFromMemory(repair) : undefined
-      });
-
-      for (const metric of affected) {
-        this.touchInMemoryMetricState({
-          familyId: current.family.id,
-          personId: input.personId,
-          group: metric,
-          nowIso,
-          success: true,
-          repairing: Boolean(repair),
-          coverageStartAt: repair?.rangeStart,
-          coverageEndAt: repair?.rangeEnd
-        });
-      }
-
-      const result = buildSyncResult({
-        syncId: input.syncId,
-        operationCount: input.operations.length,
-        groupsAffected: affected,
-        repairId: input.repairId,
-        chunkIndex: input.chunkIndex
-      });
-      this.healthKitSyncReceipts.set(receiptKey, result);
-      if (repair && input.chunkIndex !== undefined) {
-        this.healthKitRepairChunks.set(`${repair.repairId}:${input.chunkIndex}`, {
-          repairId: repair.repairId,
-          chunkIndex: input.chunkIndex,
-          syncId: input.syncId,
-          response: result
-        });
-      }
-
-      this.audit({
-        familyId: current.family.id,
-        actorUserId,
-        action: "healthkit.sync_accepted",
-        resourceType: "healthkit_sync",
-        resourceId: input.personId,
-        metadata: {
-          sync_id: input.syncId,
-          operation_count: input.operations.length,
-          metrics: affected,
-          repair_id: input.repairId,
-          status: "accepted"
-        }
-      });
-      return result;
-    } catch (error) {
-      if (error instanceof HttpError && error.status !== 500) {
-      for (const metric of affected) {
-          this.touchInMemoryMetricState({
-            familyId: current.family.id,
-            personId: input.personId,
-            group: metric,
-            nowIso,
-            success: false,
-            errorCode: error.code
-          });
-        }
-      }
-      throw error;
-    }
+  async applyHealthKitEvents(actorUserId: string, input: HealthKitEventsBatchInput): Promise<HealthKitEventsBatchResult> {
+    return this.healthKit.applyHealthKitEvents(actorUserId, input);
   }
 
-  async createHealthKitRepair(actorUserId: string, input: CreateHealthKitRepairInput): Promise<HealthKitRepair> {
-    const current = this.requireActiveMember(actorUserId);
-    const selfProfile = await this.getSelfProfile(actorUserId);
-    assertSelfProfileMatch({ selfProfileId: selfProfile?.id, requestedPersonId: input.personId });
-
-    const settings = this.healthKitProfileSettings.get(input.personId);
-    if (!settings?.consentedAt) {
-      throw new HttpError(403, "healthkit_consent_required", "HealthKit upload consent is required.");
-    }
-    const active = this.activeInstallation(input.personId);
-    if (!active || active.installationId !== input.installationId) {
-      throw new HttpError(403, "healthkit_installation_inactive", "Installation is not the active HealthKit installation.");
-    }
-    if (settings.healthTimezoneVersion !== input.timezoneVersion) {
-      throw new HttpError(409, "healthkit_timezone_version_invalid", "Timezone version is stale.");
-    }
-    if (!this.healthKitMetricEnabled.get(`${input.personId}:${input.group}`)) {
-      throw new HttpError(403, "healthkit_metric_disabled", `Metric ${input.group} is not enabled.`);
-    }
-
-    const now = new Date();
-    const nowIso = toUtcIso(now);
-    for (const repair of this.healthKitRepairs.values()) {
-      if (repair.personId === input.personId && repair.group === input.group && !repair.completedAt && Date.parse(repair.expiresAt) > now.getTime()) {
-        this.healthKitRepairs.set(repair.repairId, { ...repair, expiresAt: nowIso });
-      }
-    }
-
-    const localEndDay = localDateString(now, settings.healthTimezone);
-    const { rangeStartDay, rangeEndDay } = profileLocalSleepDayRange(localEndDay, 90);
-    const repair: HealthKitRepair & { familyId: string } = {
-      repairId: crypto.randomUUID(),
-      personId: input.personId,
-      familyId: current.family.id,
-      group: input.group,
-      installationId: input.installationId,
-      timezoneVersion: input.timezoneVersion,
-      rangeStart: toUtcIso(repairRangeStart(input.group, now)),
-      rangeEnd: nowIso,
-      rangeStartDay,
-      rangeEndDay,
-      expiresAt: toUtcIso(new Date(now.getTime() + REPAIR_TTL_MS))
-    };
-    this.healthKitRepairs.set(repair.repairId, repair);
-    this.touchInMemoryMetricState({
-      familyId: current.family.id,
-      personId: input.personId,
-      group: input.group,
-      nowIso,
-      success: false,
-      repairing: true
-    });
-    this.audit({
-      familyId: current.family.id,
-      actorUserId,
-      action: "healthkit.repair_created",
-      resourceType: "healthkit_repair",
-      resourceId: repair.repairId,
-      metadata: { group: input.group, status: "created" }
-    });
-    return {
-      repairId: repair.repairId,
-      personId: repair.personId,
-      group: repair.group,
-      installationId: repair.installationId,
-      timezoneVersion: repair.timezoneVersion,
-      rangeStart: repair.rangeStart,
-      rangeEnd: repair.rangeEnd,
-      rangeStartDay: repair.rangeStartDay,
-      rangeEndDay: repair.rangeEndDay,
-      expiresAt: repair.expiresAt
-    };
-  }
-
-  async completeHealthKitRepair(
+  async createBackfillSession(
     actorUserId: string,
-    repairId: string,
-    input: CompleteHealthKitRepairInput
-  ): Promise<HealthKitRepairCompleteResult> {
-    const current = this.requireActiveMember(actorUserId);
-    const selfProfile = await this.getSelfProfile(actorUserId);
-    if (!selfProfile) {
-      throw new HttpError(409, "healthkit_self_profile_required", "Create your self profile before using HealthKit sync.");
-    }
-    const repair = this.healthKitRepairs.get(repairId);
-    if (!repair || repair.personId !== selfProfile.id) {
-      throw new HttpError(400, "healthkit_repair_invalid", "Repair session is invalid.");
-    }
-    if (repair.completedAt) {
-      return {
-        repairId,
-        group: repair.group,
-        completed: true,
-        expectedChunkCount: repair.expectedChunkCount ?? input.expectedChunkCount,
-        completedChunkCount: repair.expectedChunkCount ?? input.expectedChunkCount
-      };
-    }
-    if (Date.parse(repair.expiresAt) <= Date.now()) {
-      throw new HttpError(400, "healthkit_repair_invalid", "Repair session is expired.");
-    }
-    const settings = this.healthKitProfileSettings.get(selfProfile.id);
-    if (!settings?.consentedAt) {
-      throw new HttpError(403, "healthkit_consent_required", "HealthKit upload consent is required.");
-    }
-    if (settings.healthTimezoneVersion !== repair.timezoneVersion) {
-      throw new HttpError(409, "healthkit_timezone_version_invalid", "Timezone version is stale.");
-    }
-    if (!this.healthKitMetricEnabled.get(`${selfProfile.id}:${repair.group}`)) {
-      throw new HttpError(403, "healthkit_metric_disabled", `Metric ${repair.group} is not enabled.`);
-    }
-    const active = this.activeInstallation(selfProfile.id);
-    if (!active || active.installationId !== repair.installationId) {
-      throw new HttpError(403, "healthkit_installation_inactive", "Installation is not the active HealthKit installation.");
-    }
+    input: CreateHealthKitBackfillSessionInput
+  ): Promise<HealthKitBackfillSession> {
+    return this.healthKit.createBackfillSession(actorUserId, input);
+  }
 
-    const chunks = [...this.healthKitRepairChunks.values()].filter((c) => c.repairId === repairId);
-    if (chunks.length !== input.expectedChunkCount) {
-      throw new HttpError(409, "healthkit_repair_incomplete", "Not all repair chunks are complete.");
-    }
-    for (let i = 0; i < input.expectedChunkCount; i += 1) {
-      if (!chunks.some((c) => c.chunkIndex === i)) {
-        throw new HttpError(409, "healthkit_repair_incomplete", "Not all repair chunks are complete.");
-      }
-    }
+  async putScopeManifest(
+    actorUserId: string,
+    sessionId: string,
+    scopeKey: string,
+    input: PutHealthKitScopeManifestInput
+  ): Promise<HealthKitScopeManifestResult> {
+    return this.healthKit.putScopeManifest(actorUserId, sessionId, scopeKey, input);
+  }
 
-    const nowIso = new Date().toISOString();
-    if (repair.group === "sleep") {
-      for (const [key, row] of this.healthSleepDays) {
-        if (
-          row.personId === selfProfile.id &&
-          row.timezoneVersion < repair.timezoneVersion &&
-          row.sleepDay >= repair.rangeStartDay &&
-          row.sleepDay <= repair.rangeEndDay
-        ) {
-          this.healthSleepDays.delete(key);
-        }
-      }
-    }
+  async completeBackfillSession(
+    actorUserId: string,
+    sessionId: string,
+    input: CompleteHealthKitBackfillSessionInput
+  ): Promise<HealthKitBackfillSessionCompleteResult> {
+    return this.healthKit.completeBackfillSession(actorUserId, sessionId, input);
+  }
 
-    this.healthKitRepairs.set(repairId, {
-      ...repair,
-      expectedChunkCount: input.expectedChunkCount,
-      completedAt: nowIso
-    });
-    this.healthMetricSyncState.set(`${selfProfile.id}:${repair.group}`, {
-      personId: selfProfile.id,
-      familyId: current.family.id,
-      group: repair.group,
-      lastSuccessfulAt: nowIso,
-      lastAttemptAt: nowIso,
-      lastErrorCode: undefined,
-      coverageStartAt: repair.rangeStart,
-      coverageEndAt: repair.rangeEnd,
-      status: "ready"
-    });
+  async abortBackfillSession(
+    actorUserId: string,
+    sessionId: string,
+    input: AbortHealthKitBackfillSessionInput
+  ): Promise<HealthKitBackfillSessionAbortResult> {
+    return this.healthKit.abortBackfillSession(actorUserId, sessionId, input);
+  }
 
-    this.audit({
-      familyId: current.family.id,
-      actorUserId,
-      action: "healthkit.repair_completed",
-      resourceType: "healthkit_repair",
-      resourceId: repairId,
-      metadata: {
-        group: repair.group,
-        expected_chunk_count: input.expectedChunkCount,
-        status: "completed"
-      }
-    });
+  async getBackfillSession(actorUserId: string, sessionId: string): Promise<HealthKitBackfillSession> {
+    return this.healthKit.getBackfillSession(actorUserId, sessionId);
+  }
 
-    return {
-      repairId,
-      group: repair.group,
-      completed: true,
-      expectedChunkCount: input.expectedChunkCount,
-      completedChunkCount: input.expectedChunkCount
-    };
+  async listBackfillPending(
+    actorUserId: string,
+    sessionId: string,
+    cursor?: string,
+    limit?: number
+  ): Promise<{ eventIds: string[]; nextCursor?: string }> {
+    return this.healthKit.listBackfillPending(actorUserId, sessionId, cursor, limit);
+  }
+
+  async getGroupManifest(
+    actorUserId: string,
+    group: HealthKitMetric,
+    personId?: string
+  ): Promise<HealthKitGroupManifest> {
+    return this.healthKit.getGroupManifest(actorUserId, group, personId);
   }
 
   async getHealthMetricFreshness(
@@ -1019,21 +614,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     personId: string,
     healthMetric: HealthKitMetricKey
   ): Promise<HealthMetricFreshness> {
-    const current = this.requireActiveMember(actorUserId);
-    this.assertProfileInFamily(personId, current.family.id);
-    const settings = this.healthKitProfileSettings.get(personId);
-    const group = HEALTHKIT_METRIC_REGISTRY[healthMetric].group;
-    const state = this.healthMetricSyncState.get(`${personId}:${group}`);
-    return {
-      healthMetric,
-      group,
-      healthTimezone: settings?.healthTimezone ?? "UTC",
-      healthTimezoneVersion: settings?.healthTimezoneVersion ?? 1,
-      lastSuccessfulAt: state?.lastSuccessfulAt,
-      status: state?.status ?? "never_synced",
-      coverageStartAt: state?.coverageStartAt,
-      coverageEndAt: state?.coverageEndAt
-    };
+    return this.healthKit.getHealthMetricFreshness(actorUserId, personId, healthMetric);
   }
 
   async listStepHours(
@@ -1042,18 +623,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     rangeStartUtc: string,
     rangeEndUtc: string
   ): Promise<HealthStepHourRecord[]> {
-    const current = this.requireActiveMember(actorUserId);
-    this.assertProfileInFamily(personId, current.family.id);
-    const start = Date.parse(rangeStartUtc);
-    const end = Date.parse(rangeEndUtc);
-    return [...this.healthStepHours.values()]
-      .filter((row) => row.familyId === current.family.id && row.personId === personId)
-      .filter((row) => {
-        const t = Date.parse(row.hourStartUtc);
-        return t >= start && t < end;
-      })
-      .sort((a, b) => a.hourStartUtc.localeCompare(b.hourStartUtc))
-      .map(({ personId: p, hourStartUtc, count }) => ({ personId: p, hourStartUtc, count }));
+    return this.healthKit.listStepHours(actorUserId, personId, rangeStartUtc, rangeEndUtc);
   }
 
   async listSleepDays(
@@ -1062,31 +632,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     rangeStartDay: string,
     rangeEndDay: string
   ): Promise<HealthSleepDayRecord[]> {
-    const current = this.requireActiveMember(actorUserId);
-    this.assertProfileInFamily(personId, current.family.id);
-    const byDay = new Map<string, HealthSleepDayRecord>();
-    for (const row of this.healthSleepDays.values()) {
-      if (row.familyId !== current.family.id || row.personId !== personId) continue;
-      if (row.sleepDay < rangeStartDay || row.sleepDay > rangeEndDay) continue;
-      const existing = byDay.get(row.sleepDay);
-      if (!existing || row.timezoneVersion > existing.timezoneVersion) {
-        byDay.set(row.sleepDay, {
-          personId: row.personId,
-          sleepDay: row.sleepDay,
-          timezoneVersion: row.timezoneVersion,
-          totalMinutes: row.totalMinutes,
-          coreMinutes: row.coreMinutes,
-          deepMinutes: row.deepMinutes,
-          remMinutes: row.remMinutes,
-          unspecifiedAsleepMinutes: row.unspecifiedAsleepMinutes,
-          awakeMinutes: row.awakeMinutes,
-          inBedMinutes: row.inBedMinutes,
-          wristTemperatureCelsius: row.wristTemperatureCelsius,
-          breathingDisturbanceCount: row.breathingDisturbanceCount
-        });
-      }
-    }
-    return [...byDay.values()].sort((a, b) => a.sleepDay.localeCompare(b.sleepDay));
+    return this.healthKit.listSleepDays(actorUserId, personId, rangeStartDay, rangeEndDay);
   }
 
   async listHealthKitBloodPressure(
@@ -1096,25 +642,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     rangeEndUtc: string,
     limit: number
   ): Promise<BloodPressureReading[]> {
-    const current = this.requireActiveMember(actorUserId);
-    this.assertProfileInFamily(personId, current.family.id);
-    const start = Date.parse(rangeStartUtc);
-    const end = Date.parse(rangeEndUtc);
-    return [...this.bloodPressureReadings.values()]
-      .filter((reading) => !reading.deletedAt)
-      .filter(
-        (reading) =>
-          reading.familyId === current.family.id &&
-          reading.personId === personId &&
-          reading.source === "healthkit"
-      )
-      .filter((reading) => {
-        const t = Date.parse(reading.measuredAt);
-        return t >= start && t <= end;
-      })
-      .sort((a, b) => Date.parse(a.measuredAt) - Date.parse(b.measuredAt))
-      .slice(0, limit)
-      .map(stripDeleted);
+    return this.healthKit.listHealthKitBloodPressure(actorUserId, personId, rangeStartUtc, rangeEndUtc, limit);
   }
 
   async listDailyMetrics(
@@ -1124,19 +652,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     rangeStartDay: string,
     rangeEndDay: string
   ): Promise<HealthDailyMetricRecord[]> {
-    const current = this.requireActiveMember(actorUserId);
-    this.assertProfileInFamily(personId, current.family.id);
-    const definition = HEALTHKIT_METRIC_REGISTRY[healthMetric];
-    if (definition.storage !== "daily_numeric") {
-      throw new HttpError(400, "healthkit_metric_not_daily", "The requested metric is not stored as a daily aggregate.");
-    }
-    const timezoneVersion = this.healthKitProfileSettings.get(personId)?.healthTimezoneVersion ?? 1;
-    return [...this.healthDailyMetrics.values()]
-      .filter((row) => row.familyId === current.family.id && row.personId === personId)
-      .filter((row) => row.healthMetric === healthMetric && row.timezoneVersion === timezoneVersion)
-      .filter((row) => row.localDay >= rangeStartDay && row.localDay <= rangeEndDay)
-      .sort((a, b) => a.localDay.localeCompare(b.localDay))
-      .map((row) => ({ ...row, healthMetric, unit: definition.unit }));
+    return this.healthKit.listDailyMetrics(actorUserId, personId, healthMetric, rangeStartDay, rangeEndDay);
   }
 
   async listHealthKitBloodGlucose(
@@ -1146,31 +662,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     rangeEndUtc: string,
     limit: number
   ): Promise<BloodGlucoseReading[]> {
-    const current = this.requireActiveMember(actorUserId);
-    this.assertProfileInFamily(personId, current.family.id);
-    const start = Date.parse(rangeStartUtc);
-    const end = Date.parse(rangeEndUtc);
-    const syncUserId = this.healthKitProfileSettings.get(personId)?.userId ?? actorUserId;
-    return [...this.healthBloodGlucoseReadings.values()]
-      .filter((reading) => reading.personId === personId)
-      .filter((reading) => {
-        const time = Date.parse(reading.measuredAtUtc);
-        return time >= start && time <= end;
-      })
-      .sort((a, b) => Date.parse(a.measuredAtUtc) - Date.parse(b.measuredAtUtc))
-      .slice(0, limit)
-      .map((reading) => ({
-        id: reading.sourceSampleKey,
-        familyId: current.family.id,
-        personId,
-        recordedByUserId: syncUserId,
-        value: reading.valueMgDl,
-        unit: "mg/dL" as const,
-        measuredAt: reading.measuredAtUtc,
-        source: "healthkit" as const,
-        createdAt: reading.measuredAtUtc,
-        updatedAt: reading.measuredAtUtc
-      }));
+    return this.healthKit.listHealthKitBloodGlucose(actorUserId, personId, rangeStartUtc, rangeEndUtc, limit);
   }
 
   async listHealthKitWorkouts(
@@ -1180,229 +672,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     rangeEndUtc: string,
     limit: number
   ): Promise<HealthWorkoutRecord[]> {
-    const current = this.requireActiveMember(actorUserId);
-    this.assertProfileInFamily(personId, current.family.id);
-    const start = Date.parse(rangeStartUtc);
-    const end = Date.parse(rangeEndUtc);
-    return [...this.healthWorkouts.values()]
-      .filter((workout) => workout.personId === personId)
-      .filter((workout) => {
-        const time = Date.parse(workout.startedAtUtc);
-        return time >= start && time <= end;
-      })
-      .sort((a, b) => Date.parse(a.startedAtUtc) - Date.parse(b.startedAtUtc))
-      .slice(0, limit)
-      .map((workout) => ({
-        id: workout.sourceSampleKey,
-        personId,
-        workoutType: workout.workoutType,
-        startedAtUtc: workout.startedAtUtc,
-        endedAtUtc: workout.endedAtUtc,
-        durationSeconds: workout.durationSeconds,
-        activeEnergyKcal: workout.activeEnergyKcal,
-        distanceMeters: workout.distanceMeters,
-        averageHeartRateBpm: workout.averageHeartRateBpm,
-        maximumHeartRateBpm: workout.maximumHeartRateBpm
-      }));
-  }
-
-  private buildHealthKitSettings(familyId: string, personId: string): HealthKitSettings {
-    const settings = this.healthKitProfileSettings.get(personId);
-    const enabledGroups = HEALTHKIT_METRICS.filter((group) => this.healthKitMetricEnabled.get(`${personId}:${group}`));
-    const groups = HEALTHKIT_METRICS.map((group) => {
-      const state = this.healthMetricSyncState.get(`${personId}:${group}`);
-      const enabled = enabledGroups.includes(group);
-      return {
-        group,
-        enabled,
-        lastSuccessfulAt: state?.lastSuccessfulAt,
-        lastAttemptAt: state?.lastAttemptAt,
-        lastErrorCode: state?.lastErrorCode,
-        coverageStartAt: state?.coverageStartAt,
-        coverageEndAt: state?.coverageEndAt,
-        status: state?.status ?? (enabled ? "never_synced" : "disabled")
-      };
-    });
-    return {
-      personId,
-      consentVersion: settings?.consentVersion,
-      consentedAt: settings?.consentedAt,
-      healthTimezone: settings?.healthTimezone ?? "UTC",
-      healthTimezoneVersion: settings?.healthTimezoneVersion ?? 1,
-      enabledGroups,
-      activeInstallationId: this.activeInstallation(personId)?.installationId,
-      groups
-    };
-  }
-
-  private activeInstallation(personId: string) {
-    return [...this.healthKitInstallations.values()].find((row) => row.personId === personId && !row.revokedAt);
-  }
-
-  private applyHealthKitOperations(input: {
-    familyId: string;
-    personId: string;
-    actorUserId: string;
-    timezoneVersion: number;
-    operations: HealthKitSyncOperation[];
-    nowIso: string;
-    repairRange?: HealthKitRepairRange;
-  }) {
-    for (const op of input.operations) {
-      switch (op.kind) {
-        case "steps_hour_upsert":
-          this.healthStepHours.set(`${input.personId}:${op.hourStartUtc}`, {
-            familyId: input.familyId,
-            personId: input.personId,
-            hourStartUtc: op.hourStartUtc,
-            count: op.count
-          });
-          break;
-        case "steps_hour_delete":
-          this.healthStepHours.delete(`${input.personId}:${op.hourStartUtc}`);
-          break;
-        case "sleep_day_upsert":
-          this.healthSleepDays.set(`${input.personId}:${op.sleepDay}:${input.timezoneVersion}`, {
-            familyId: input.familyId,
-            personId: input.personId,
-            sleepDay: op.sleepDay,
-            timezoneVersion: input.timezoneVersion,
-            totalMinutes: op.totalMinutes,
-            coreMinutes: op.coreMinutes,
-            deepMinutes: op.deepMinutes,
-            remMinutes: op.remMinutes,
-            unspecifiedAsleepMinutes: op.unspecifiedAsleepMinutes,
-            awakeMinutes: op.awakeMinutes,
-            inBedMinutes: op.inBedMinutes,
-            wristTemperatureCelsius: op.wristTemperatureCelsius,
-            breathingDisturbanceCount: op.breathingDisturbanceCount
-          });
-          break;
-        case "sleep_day_delete":
-          this.healthSleepDays.delete(`${input.personId}:${op.sleepDay}:${input.timezoneVersion}`);
-          break;
-        case "daily_metric_upsert":
-          this.healthDailyMetrics.set(`${input.personId}:${op.healthMetric}:${op.localDay}:${input.timezoneVersion}`, {
-            familyId: input.familyId,
-            personId: input.personId,
-            healthMetric: op.healthMetric,
-            localDay: op.localDay,
-            timezoneVersion: input.timezoneVersion,
-            sumValue: op.sumValue,
-            averageValue: op.averageValue,
-            minimumValue: op.minimumValue,
-            maximumValue: op.maximumValue,
-            latestValue: op.latestValue,
-            sampleCount: op.sampleCount
-          });
-          break;
-        case "daily_metric_delete":
-          this.healthDailyMetrics.delete(`${input.personId}:${op.healthMetric}:${op.localDay}:${input.timezoneVersion}`);
-          break;
-        case "blood_pressure_upsert": {
-          const existing = [...this.bloodPressureReadings.values()].find(
-            (reading) =>
-              reading.personId === input.personId &&
-              reading.source === "healthkit" &&
-              reading.sourceSampleKey === op.sourceSampleKey
-          );
-          const storeKey =
-            [...this.bloodPressureReadings.entries()].find(([, reading]) => {
-              return (
-                reading.personId === input.personId &&
-                reading.source === "healthkit" &&
-                reading.sourceSampleKey === op.sourceSampleKey
-              );
-            })?.[0] ?? crypto.randomUUID();
-          const reading: BloodPressureReading & { sourceSampleKey?: string; deletedAt?: string } = {
-            id: existing?.id ?? storeKey,
-            familyId: input.familyId,
-            personId: input.personId,
-            recordedByUserId: input.actorUserId,
-            systolic: op.systolic,
-            diastolic: op.diastolic,
-            pulse: op.pulse,
-            measuredAt: op.measuredAtUtc,
-            source: "healthkit",
-            sourceSampleKey: op.sourceSampleKey,
-            createdAt: existing?.createdAt ?? input.nowIso,
-            updatedAt: input.nowIso,
-            deletedAt: undefined
-          };
-          this.bloodPressureReadings.set(storeKey, reading);
-          break;
-        }
-        case "blood_pressure_delete": {
-          for (const [key, reading] of this.bloodPressureReadings) {
-            if (
-              reading.personId === input.personId &&
-              reading.source === "healthkit" &&
-              reading.sourceSampleKey === op.sourceSampleKey
-            ) {
-              if (input.repairRange) {
-                const t = Date.parse(reading.measuredAt);
-                const start = Date.parse(input.repairRange.rangeStartIso);
-                const end = Date.parse(input.repairRange.rangeEndIso);
-                if (t < start || t > end) {
-                  throw new HttpError(
-                    400,
-                    "healthkit_operation_invalid",
-                    "blood pressure deletion is outside the repair range."
-                  );
-                }
-              }
-              this.bloodPressureReadings.delete(key);
-            }
-          }
-          break;
-        }
-        case "blood_glucose_upsert":
-          this.healthBloodGlucoseReadings.set(`${input.personId}:${op.sourceSampleKey}`, { ...op, personId: input.personId });
-          break;
-        case "blood_glucose_delete":
-          this.healthBloodGlucoseReadings.delete(`${input.personId}:${op.sourceSampleKey}`);
-          break;
-        case "workout_upsert":
-          this.healthWorkouts.set(`${input.personId}:${op.sourceSampleKey}`, { ...op, personId: input.personId });
-          break;
-        case "workout_delete":
-          this.healthWorkouts.delete(`${input.personId}:${op.sourceSampleKey}`);
-          break;
-      }
-    }
-  }
-
-  private touchInMemoryMetricState(input: {
-    familyId: string;
-    personId: string;
-    group: HealthKitMetric;
-    nowIso: string;
-    success: boolean;
-    repairing?: boolean;
-    errorCode?: string;
-    coverageStartAt?: string;
-    coverageEndAt?: string;
-  }) {
-    const key = `${input.personId}:${input.group}`;
-    const prev = this.healthMetricSyncState.get(key);
-    let status: HealthMetricSyncStatusCode = prev?.status ?? "never_synced";
-    if (input.repairing) status = "repairing";
-    else if (input.success) {
-      if (status === "error" || status === "repair_needed" || status === "never_synced") status = "ready";
-    } else if (status !== "repairing" && status !== "disabled") {
-      status = "error";
-    }
-    this.healthMetricSyncState.set(key, {
-      personId: input.personId,
-      familyId: input.familyId,
-      group: input.group,
-      lastSuccessfulAt: input.success ? input.nowIso : prev?.lastSuccessfulAt,
-      lastAttemptAt: input.nowIso,
-      lastErrorCode: input.success ? undefined : input.errorCode ?? prev?.lastErrorCode,
-      coverageStartAt: prev?.coverageStartAt ?? input.coverageStartAt,
-      coverageEndAt: input.success && !input.repairing ? input.nowIso : prev?.coverageEndAt ?? input.coverageEndAt,
-      status
-    });
+    return this.healthKit.listHealthKitWorkouts(actorUserId, personId, rangeStartUtc, rangeEndUtc, limit);
   }
 
   async createConnection(input: CreateMcpConnectionInput): Promise<McpConnectionGrant> {
@@ -1795,14 +1065,6 @@ function currentInviteStatus(invite: FamilyInvite): FamilyInvite["status"] {
   return invite.status;
 }
 
-function repairRangeFromMemory(repair: HealthKitRepair): HealthKitRepairRange {
-  return {
-    rangeStartIso: repair.rangeStart,
-    rangeEndIso: repair.rangeEnd,
-    rangeStartDay: repair.rangeStartDay,
-    rangeEndDay: repair.rangeEndDay
-  };
-}
 
 function normalizeMcpCapabilities(capabilities: McpCapability[]): McpCapability[] {
   const allowed = new Set<McpCapability>(["health_read"]);

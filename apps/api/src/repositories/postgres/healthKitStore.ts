@@ -1,50 +1,90 @@
 import type {
-  BloodPressureReading,
+  AbortHealthKitBackfillSessionInput,
   BloodGlucoseReading,
-  CompleteHealthKitRepairInput,
-  CreateHealthKitRepairInput,
+  BloodPressureReading,
+  CompleteHealthKitBackfillSessionInput,
+  CreateHealthKitBackfillSessionInput,
+  HealthDailyMetricRecord,
+  HealthKitBackfillSession,
+  HealthKitBackfillSessionAbortResult,
+  HealthKitBackfillSessionCompleteResult,
+  HealthKitEventApplyResult,
+  HealthKitEventsBatchInput,
+  HealthKitEventsBatchResult,
+  HealthKitGroupManifest,
   HealthKitMetric,
   HealthKitMetricKey,
-  HealthKitRepair,
-  HealthKitRepairCompleteResult,
+  HealthKitScopeManifestResult,
   HealthKitSettings,
-  HealthKitSyncInput,
-  HealthKitSyncOperation,
-  HealthKitSyncResult,
-  HealthDailyMetricRecord,
+  HealthKitSyncEvent,
   HealthMetricFreshness,
   HealthMetricSyncStatusCode,
   HealthSleepDayRecord,
   HealthStepHourRecord,
   HealthWorkoutRecord,
+  PutHealthKitScopeManifestInput,
   PutHealthKitSettingsInput
 } from "@family-os/shared";
-import { HEALTHKIT_METRIC_REGISTRY } from "@family-os/shared";
+import {
+  BACKFILL_SESSION_TTL_MS,
+  HEALTHKIT_METRIC_REGISTRY,
+  fingerprintHealthEvent,
+  fingerprintScopeManifest,
+  requiredScopeKeysForGroup
+} from "@family-os/shared";
+import { createHash } from "node:crypto";
 import { HttpError } from "../../errors";
 import { localDateString } from "../../mcp/timezone";
 import {
-  assertOperationInRepairRange,
+  assertEventCoherent,
+  assertEventInBackfillRange,
   assertSelfProfileMatch,
-  buildSyncResult,
+  backfillRangeStart,
   HEALTHKIT_METRICS,
-  groupsAffected,
-  profileLocalSleepDayRange,
-  repairRangeStart,
-  REPAIR_TTL_MS,
+  profileLocalDayRange,
   toUtcIso,
-  type HealthKitRepairRange
+  type HealthKitBackfillRange
 } from "../healthKitDomain";
 import { PostgresRepositoryContext } from "./context";
 import { toDateString, toIso } from "./dateUtils";
 import { mapBloodGlucose, mapBloodPressure } from "./mappers";
 import type { Row } from "./types";
 
-function repairRangeFromRow(row: Row): HealthKitRepairRange {
+function nodeSha256(data: Uint8Array): Uint8Array {
+  return createHash("sha256").update(data).digest();
+}
+
+function sessionRangeFromRow(row: Row): HealthKitBackfillRange {
   return {
     rangeStartIso: toIso(row.range_start),
     rangeEndIso: toIso(row.range_end),
     rangeStartDay: toDateString(row.range_start_day) ?? String(row.range_start_day).slice(0, 10),
     rangeEndDay: toDateString(row.range_end_day) ?? String(row.range_end_day).slice(0, 10)
+  };
+}
+
+function mapSession(row: Row, pendingCount?: number): HealthKitBackfillSession {
+  const required = Array.isArray(row.required_scope_keys)
+    ? (row.required_scope_keys as string[])
+    : String(row.required_scope_keys ?? "")
+        .replace(/^{|}$/g, "")
+        .split(",")
+        .filter(Boolean);
+  const range = sessionRangeFromRow(row);
+  return {
+    sessionId: row.session_id,
+    personId: row.person_id,
+    group: row.group_key as HealthKitMetric,
+    installationId: row.installation_id,
+    timezoneVersion: Number(row.timezone_version),
+    rangeStart: range.rangeStartIso,
+    rangeEnd: range.rangeEndIso,
+    rangeStartDay: range.rangeStartDay,
+    rangeEndDay: range.rangeEndDay,
+    requiredScopeKeys: required,
+    status: row.status,
+    expiresAt: toIso(row.expires_at),
+    pendingCount
   };
 }
 
@@ -83,7 +123,7 @@ export class PostgresHealthKitStore {
 
       const consentActive = uniqueGroups.length > 0;
       if (consentActive && !input.consentVersion) {
-        throw new HttpError(400, "healthkit_consent_required", "consentVersion is required when enabling metrics.");
+        throw new HttpError(400, "consent_withdrawn", "consentVersion is required when enabling metrics.");
       }
 
       await tx`
@@ -118,7 +158,7 @@ export class PostgresHealthKitStore {
         if (!input.replaceActiveInstallation) {
           throw new HttpError(
             409,
-            "healthkit_installation_inactive",
+            "installation_inactive",
             "Replacing the active installation requires replaceActiveInstallation=true."
           );
         }
@@ -151,7 +191,7 @@ export class PostgresHealthKitStore {
         `;
         let status: HealthMetricSyncStatusCode = enabled ? (state?.status ?? "never_synced") : "disabled";
         if (!enabled) status = "disabled";
-        else if (timezoneChanged) status = "repair_needed";
+        else if (timezoneChanged) status = "never_synced";
         else if (state?.status === "disabled") status = "never_synced";
 
         await tx`
@@ -160,12 +200,19 @@ export class PostgresHealthKitStore {
             last_error_code, coverage_start_at, coverage_end_at, updated_at
           ) values (
             ${input.personId}, ${current.family.id}, ${metric}, ${status},
-            ${state?.last_successful_at ?? null}, ${state?.last_attempt_at ?? null},
-            ${state?.last_error_code ?? null}, ${state?.coverage_start_at ?? null},
-            ${state?.coverage_end_at ?? null}, ${nowIso}
+            ${timezoneChanged ? null : state?.last_successful_at ?? null},
+            ${state?.last_attempt_at ?? null},
+            ${timezoneChanged ? null : state?.last_error_code ?? null},
+            ${timezoneChanged ? null : state?.coverage_start_at ?? null},
+            ${timezoneChanged ? null : state?.coverage_end_at ?? null},
+            ${nowIso}
           )
           on conflict (person_id, group_key) do update set
             status = excluded.status,
+            last_successful_at = excluded.last_successful_at,
+            last_error_code = excluded.last_error_code,
+            coverage_start_at = excluded.coverage_start_at,
+            coverage_end_at = excluded.coverage_end_at,
             updated_at = excluded.updated_at
         `;
       }
@@ -187,166 +234,130 @@ export class PostgresHealthKitStore {
     return this.loadSettings(actorUserId, current.family.id, input.personId);
   }
 
-  async syncHealthKit(actorUserId: string, input: HealthKitSyncInput): Promise<HealthKitSyncResult> {
+  async applyHealthKitEvents(actorUserId: string, input: HealthKitEventsBatchInput): Promise<HealthKitEventsBatchResult> {
+    if (input.events.length === 0) {
+      throw new HttpError(400, "payload_invalid", "events batch must not be empty.");
+    }
+
     const current = await this.context.requireActiveMember(actorUserId);
     const selfId = await this.requireLinkedSelfProfileId(actorUserId, current.family.id);
     assertSelfProfileMatch({ selfProfileId: selfId, requestedPersonId: input.personId });
 
-    const [receipt] = await this.context.sql`
-      select response_json from healthkit_sync_receipts
-      where user_id = ${actorUserId} and person_id = ${input.personId} and sync_id = ${input.syncId}
-    `;
-    if (receipt) {
-      return receipt.response_json as HealthKitSyncResult;
-    }
+    const nowIso = toUtcIso(new Date());
+    const results: HealthKitEventApplyResult[] = [];
 
-    const now = new Date();
-    const nowIso = toUtcIso(now);
-    const affected = groupsAffected(input.operations);
+    await this.context.sql.begin(async (tx: any) => {
+      const authority = await this.loadWriteAuthority(tx, actorUserId, current.family.id, input.personId);
+      if (!authority.settings?.consented_at) {
+        throw new HttpError(403, "consent_withdrawn", "HealthKit upload consent is required.");
+      }
+      if (authority.activeInstallationId !== input.installationId) {
+        throw new HttpError(403, "installation_inactive", "Installation is not the active HealthKit installation.");
+      }
+      if (authority.settings.health_timezone_version !== input.timezoneVersion) {
+        throw new HttpError(409, "timezone_stale", "Timezone version is stale.");
+      }
 
-    try {
-      const result = await this.context.sql.begin(async (tx: any) => {
-        const authority = await this.loadWriteAuthority(tx, actorUserId, current.family.id, input.personId);
-        if (!authority.settings?.consented_at) {
-          throw new HttpError(403, "healthkit_consent_required", "HealthKit upload consent is required.");
-        }
-        if (authority.activeInstallationId !== input.installationId) {
-          throw new HttpError(403, "healthkit_installation_inactive", "Installation is not the active HealthKit installation.");
-        }
-        if (authority.settings.health_timezone_version !== input.timezoneVersion) {
-          throw new HttpError(409, "healthkit_timezone_version_invalid", "Timezone version is stale.");
-        }
+      const sessionCache = new Map<string, Row>();
 
-        let repair: Row | undefined;
-        if (input.repairId !== undefined) {
-          if (input.chunkIndex === undefined) {
-            throw new HttpError(400, "healthkit_repair_invalid", "chunkIndex is required with repairId.");
-          }
-          const [chunk] = await tx`
-            select response_json from healthkit_repair_chunks
-            where repair_id = ${input.repairId} and chunk_index = ${input.chunkIndex}
-          `;
-          if (chunk) {
-            return chunk.response_json as HealthKitSyncResult;
-          }
-          const [row] = await tx`
-            select * from healthkit_repairs where repair_id = ${input.repairId}
-          `;
-          if (!row || row.person_id !== input.personId) {
-            throw new HttpError(400, "healthkit_repair_invalid", "Repair session is invalid.");
-          }
-          if (row.completed_at || Date.parse(String(row.expires_at)) <= now.getTime()) {
-            throw new HttpError(400, "healthkit_repair_invalid", "Repair session is expired or already completed.");
-          }
-          if (row.installation_id !== input.installationId) {
-            throw new HttpError(400, "healthkit_repair_invalid", "Repair does not belong to this installation.");
-          }
-          if (row.timezone_version !== input.timezoneVersion) {
-            throw new HttpError(409, "healthkit_timezone_version_invalid", "Timezone version is stale.");
-          }
-          if (affected.length !== 1 || affected[0] !== row.group) {
-            throw new HttpError(400, "healthkit_repair_invalid", "Repair chunks may only include the repair metric.");
-          }
-          for (const op of input.operations) {
-            assertOperationInRepairRange(op, repairRangeFromRow(row));
-          }
-          repair = row;
-        }
+      for (const event of input.events) {
+        // One savepoint per event so a single DB failure does not roll back prior applied rows.
+        const savepoint = `ev_${event.eventId.replace(/-/g, "").slice(0, 24)}`;
+        try {
+          await tx.unsafe(`savepoint ${savepoint}`);
+          assertEventCoherent(event);
 
-        for (const metric of affected) {
-          if (!authority.enabledGroups.has(metric)) {
-            throw new HttpError(403, "healthkit_metric_disabled", `Metric ${metric} is not enabled.`);
+          if (!authority.enabledGroups.has(event.group)) {
+            throw new HttpError(403, "group_disabled", `Group ${event.group} is not enabled.`);
           }
-        }
 
-        await this.applyOperations(tx, {
-          familyId: current.family.id,
-          personId: input.personId,
-          actorUserId,
-          timezoneVersion: input.timezoneVersion,
-          operations: input.operations,
-          nowIso,
-          repairRange: repair ? repairRangeFromRow(repair) : undefined
-        });
+          if (event.sessionId) {
+            let sessionRow = sessionCache.get(event.sessionId) as Row | undefined;
+            if (!sessionRow) {
+              const [row] = await tx`
+                select * from healthkit_backfill_sessions where session_id = ${event.sessionId}
+              `;
+              if (!row) {
+                throw new HttpError(400, "session_expired", "Backfill session is invalid.");
+              }
+              sessionCache.set(event.sessionId, row);
+              sessionRow = row as Row;
+            }
+            const openSession = sessionRow as Row;
+            this.assertOpenSession(openSession, input, event.group);
+            assertEventInBackfillRange(event, sessionRangeFromRow(openSession));
+            if (openSession.group_key !== event.group) {
+              throw new HttpError(400, "payload_invalid", "Event group does not match session group.");
+            }
+          }
 
-        for (const metric of affected) {
-          await this.touchMetricState(tx, {
+          const fingerprint = fingerprintHealthEvent(event, nodeSha256);
+          const result = await this.applyOneEvent(tx, {
             familyId: current.family.id,
             personId: input.personId,
-            group: metric,
-            nowIso,
-            success: true,
-            repairing: Boolean(repair),
-            coverageStartAt: repair ? toIso(repair.range_start) : undefined,
-            coverageEndAt: repair ? toIso(repair.range_end) : undefined
+            installationId: input.installationId,
+            timezoneVersion: input.timezoneVersion,
+            event,
+            fingerprint,
+            nowIso
           });
-        }
-
-        const result = buildSyncResult({
-          syncId: input.syncId,
-          operationCount: input.operations.length,
-          groupsAffected: affected,
-          repairId: input.repairId,
-          chunkIndex: input.chunkIndex
-        });
-
-        await tx`
-          insert into healthkit_sync_receipts (user_id, person_id, family_id, sync_id, response_json)
-          values (${actorUserId}, ${input.personId}, ${current.family.id}, ${input.syncId}, ${tx.json(result)})
-        `;
-
-        if (repair && input.chunkIndex !== undefined) {
-          await tx`
-            insert into healthkit_repair_chunks (repair_id, chunk_index, sync_id, response_json)
-            values (${repair.repair_id}, ${input.chunkIndex}, ${input.syncId}, ${tx.json(result)})
-          `;
-        }
-
-        return result;
-      });
-
-      await this.context.audit({
-        familyId: current.family.id,
-        actorUserId,
-        action: "healthkit.sync_accepted",
-        resourceType: "healthkit_sync",
-        resourceId: input.personId,
-        metadata: {
-          sync_id: input.syncId,
-          operation_count: input.operations.length,
-          metrics: affected,
-          repair_id: input.repairId,
-          status: "accepted"
-        }
-      });
-
-      return result;
-    } catch (error) {
-      if (error instanceof HttpError && error.status !== 500) {
-        for (const metric of affected) {
-          await this.context.sql`
-            insert into healthkit_sync_state (
-              person_id, family_id, group_key, last_attempt_at, last_error_code, status, updated_at
-            ) values (
-              ${input.personId}, ${current.family.id}, ${metric}, ${nowIso}, ${error.code}, 'error', ${nowIso}
-            )
-            on conflict (person_id, group_key) do update set
-              last_attempt_at = excluded.last_attempt_at,
-              last_error_code = excluded.last_error_code,
-              status = case
-                when healthkit_sync_state.status = 'repairing' then 'repairing'
-                when healthkit_sync_state.status = 'disabled' then 'disabled'
-                else 'error'
-              end,
-              updated_at = excluded.updated_at
-          `;
+          await tx.unsafe(`release savepoint ${savepoint}`);
+          results.push(result);
+        } catch (error) {
+          try {
+            await tx.unsafe(`rollback to savepoint ${savepoint}`);
+            await tx.unsafe(`release savepoint ${savepoint}`);
+          } catch {
+            // Savepoint may not exist if begin failed before savepoint.
+          }
+          if (error instanceof HttpError && (error.code === "payload_invalid" || error.code === "event_conflict")) {
+            results.push({
+              eventId: event.eventId,
+              result: error.code,
+              errorCode: error.code,
+              errorMessage: error.message
+            });
+            continue;
+          }
+          // Batch-level fencing errors must fail the whole request.
+          if (
+            error instanceof HttpError &&
+            (error.code === "consent_withdrawn" ||
+              error.code === "installation_inactive" ||
+              error.code === "timezone_stale" ||
+              error.code === "group_disabled" ||
+              error.code === "session_expired")
+          ) {
+            throw error;
+          }
+          // Unexpected DB/runtime failures stay isolated to this event as payload_invalid
+          // only when they are validation-shaped; otherwise rethrow to fail the batch.
+          throw error;
         }
       }
-      throw error;
-    }
+    });
+
+    await this.context.audit({
+      familyId: current.family.id,
+      actorUserId,
+      action: "healthkit.events_batch",
+      resourceType: "healthkit_sync",
+      resourceId: input.personId,
+      metadata: {
+        event_count: input.events.length,
+        applied: results.filter((r) => r.result === "applied").length,
+        superseded: results.filter((r) => r.result === "superseded").length,
+        duplicate: results.filter((r) => r.result === "duplicate").length
+      }
+    });
+
+    return { results };
   }
 
-  async createHealthKitRepair(actorUserId: string, input: CreateHealthKitRepairInput): Promise<HealthKitRepair> {
+  async createBackfillSession(
+    actorUserId: string,
+    input: CreateHealthKitBackfillSessionInput
+  ): Promise<HealthKitBackfillSession> {
     const group = input.group;
     const current = await this.context.requireActiveMember(actorUserId);
     const selfId = await this.requireLinkedSelfProfileId(actorUserId, current.family.id);
@@ -355,56 +366,58 @@ export class PostgresHealthKitStore {
     const now = new Date();
     const nowIso = toUtcIso(now);
     const rangeEnd = now;
-    const rangeStart = repairRangeStart(group, now);
-    const expiresAt = new Date(now.getTime() + REPAIR_TTL_MS);
+    const rangeStart = backfillRangeStart(group, now);
+    const expiresAt = new Date(now.getTime() + BACKFILL_SESSION_TTL_MS);
+    const requiredScopeKeys = requiredScopeKeysForGroup(group);
 
-    const repair = await this.context.sql.begin(async (tx: any) => {
+    const session = await this.context.sql.begin(async (tx: any) => {
       const authority = await this.loadWriteAuthority(tx, actorUserId, current.family.id, input.personId);
       if (!authority.settings?.consented_at) {
-        throw new HttpError(403, "healthkit_consent_required", "HealthKit upload consent is required.");
+        throw new HttpError(403, "consent_withdrawn", "HealthKit upload consent is required.");
       }
       if (authority.activeInstallationId !== input.installationId) {
-        throw new HttpError(403, "healthkit_installation_inactive", "Installation is not the active HealthKit installation.");
+        throw new HttpError(403, "installation_inactive", "Installation is not the active HealthKit installation.");
       }
       if (authority.settings.health_timezone_version !== input.timezoneVersion) {
-        throw new HttpError(409, "healthkit_timezone_version_invalid", "Timezone version is stale.");
+        throw new HttpError(409, "timezone_stale", "Timezone version is stale.");
       }
       if (!authority.enabledGroups.has(group)) {
-        throw new HttpError(403, "healthkit_metric_disabled", `Metric ${group} is not enabled.`);
+        throw new HttpError(403, "group_disabled", `Group ${group} is not enabled.`);
       }
 
       const healthTimezone = String(authority.settings.health_timezone ?? "UTC");
       const localEndDay = localDateString(now, healthTimezone);
-      const { rangeStartDay, rangeEndDay } = profileLocalSleepDayRange(localEndDay, 90);
+      const { rangeStartDay, rangeEndDay } = profileLocalDayRange(localEndDay, 90);
 
       await tx`
-        update healthkit_repairs
-        set expires_at = ${nowIso}
+        update healthkit_backfill_sessions
+        set status = 'expired', expires_at = ${nowIso}
         where person_id = ${input.personId}
           and group_key = ${group}
-          and completed_at is null
+          and status = 'open'
           and expires_at > ${nowIso}
       `;
 
       const [row] = await tx`
-        insert into healthkit_repairs (
+        insert into healthkit_backfill_sessions (
           person_id, family_id, group_key, installation_id, timezone_version,
-          range_start, range_end, range_start_day, range_end_day, expires_at
+          range_start, range_end, range_start_day, range_end_day,
+          required_scope_keys, status, expires_at
         ) values (
           ${input.personId}, ${current.family.id}, ${group}, ${input.installationId},
           ${input.timezoneVersion}, ${toUtcIso(rangeStart)}, ${toUtcIso(rangeEnd)},
-          ${rangeStartDay}::date, ${rangeEndDay}::date, ${toUtcIso(expiresAt)}
+          ${rangeStartDay}::date, ${rangeEndDay}::date,
+          ${requiredScopeKeys}, 'open', ${toUtcIso(expiresAt)}
         )
         returning *
       `;
 
-      await this.touchMetricState(tx, {
+      await this.touchGroupState(tx, {
         familyId: current.family.id,
         personId: input.personId,
         group,
         nowIso,
-        success: false,
-        repairing: true
+        status: "backfilling"
       });
 
       return row;
@@ -413,135 +426,347 @@ export class PostgresHealthKitStore {
     await this.context.audit({
       familyId: current.family.id,
       actorUserId,
-      action: "healthkit.repair_created",
-      resourceType: "healthkit_repair",
-      resourceId: repair.repair_id,
-      metadata: { group, status: "created" }
+      action: "healthkit.session_created",
+      resourceType: "healthkit_backfill_session",
+      resourceId: session.session_id,
+      metadata: { group, status: "open" }
     });
 
-    const range = repairRangeFromRow(repair);
-    return {
-      repairId: repair.repair_id,
-      personId: repair.person_id,
-      group,
-      installationId: repair.installation_id,
-      timezoneVersion: repair.timezone_version,
-      rangeStart: range.rangeStartIso,
-      rangeEnd: range.rangeEndIso,
-      rangeStartDay: range.rangeStartDay,
-      rangeEndDay: range.rangeEndDay,
-      expiresAt: toIso(repair.expires_at)
-    };
+    return mapSession(session, 0);
   }
 
-  async completeHealthKitRepair(
+  async putScopeManifest(
     actorUserId: string,
-    repairId: string,
-    input: CompleteHealthKitRepairInput
-  ): Promise<HealthKitRepairCompleteResult> {
+    sessionId: string,
+    scopeKey: string,
+    input: PutHealthKitScopeManifestInput
+  ): Promise<HealthKitScopeManifestResult> {
     const current = await this.context.requireActiveMember(actorUserId);
     const selfId = await this.requireLinkedSelfProfileId(actorUserId, current.family.id);
+    assertSelfProfileMatch({ selfProfileId: selfId, requestedPersonId: input.personId });
+
+    return this.context.sql.begin(async (tx: any) => {
+      const [session] = await tx`select * from healthkit_backfill_sessions where session_id = ${sessionId}`;
+      if (!session || session.person_id !== input.personId) {
+        throw new HttpError(400, "session_expired", "Backfill session is invalid.");
+      }
+      this.assertOpenSession(session, input, session.group_key as HealthKitMetric);
+
+      const required: string[] = session.required_scope_keys ?? [];
+      if (!required.includes(scopeKey)) {
+        throw new HttpError(400, "payload_invalid", "scopeKey is not required for this session.");
+      }
+
+      const [existing] = await tx`
+        select * from healthkit_backfill_scope_manifests
+        where session_id = ${sessionId} and scope_key = ${scopeKey}
+      `;
+      if (existing) {
+        if (existing.manifest_hash === input.manifestHash && Number(existing.event_count) === input.eventCount) {
+          return {
+            sessionId,
+            scopeKey,
+            status: "duplicate" as const,
+            eventCount: Number(existing.event_count)
+          };
+        }
+        throw new HttpError(409, "event_conflict", "Scope manifest conflicts with a previous upload.");
+      }
+
+      const eventRows = await tx`
+        select event_id from healthkit_sync_events
+        where session_id = ${sessionId} and scope_key = ${scopeKey}
+        order by event_id asc
+      `;
+      const eventIds = eventRows.map((r: Row) => String(r.event_id).toLowerCase());
+      if (eventIds.length !== input.eventCount) {
+        throw new HttpError(
+          409,
+          "session_incomplete",
+          `Manifest eventCount ${input.eventCount} does not match received ${eventIds.length}.`
+        );
+      }
+
+      const expectedHash = fingerprintScopeManifest(
+        { sessionId, scopeKey, eventIds },
+        nodeSha256
+      );
+      if (expectedHash !== input.manifestHash.toLowerCase()) {
+        throw new HttpError(409, "manifest_incomplete", "Scope manifest hash does not match received events.");
+      }
+
+      await tx`
+        insert into healthkit_backfill_scope_manifests (
+          session_id, scope_key, event_count, manifest_hash, status
+        ) values (
+          ${sessionId}, ${scopeKey}, ${input.eventCount}, ${expectedHash}, 'accepted'
+        )
+      `;
+
+      return {
+        sessionId,
+        scopeKey,
+        status: "accepted" as const,
+        eventCount: input.eventCount
+      };
+    });
+  }
+
+  async completeBackfillSession(
+    actorUserId: string,
+    sessionId: string,
+    input: CompleteHealthKitBackfillSessionInput
+  ): Promise<HealthKitBackfillSessionCompleteResult> {
+    const current = await this.context.requireActiveMember(actorUserId);
+    const selfId = await this.requireLinkedSelfProfileId(actorUserId, current.family.id);
+    assertSelfProfileMatch({ selfProfileId: selfId, requestedPersonId: input.personId });
     const nowIso = toUtcIso(new Date());
 
     const result = await this.context.sql.begin(async (tx: any) => {
-      const [repair] = await tx`select * from healthkit_repairs where repair_id = ${repairId}`;
-      if (!repair || repair.person_id !== selfId) {
-        throw new HttpError(400, "healthkit_repair_invalid", "Repair session is invalid.");
+      const [session] = await tx`select * from healthkit_backfill_sessions where session_id = ${sessionId}`;
+      if (!session || session.person_id !== input.personId) {
+        throw new HttpError(400, "session_expired", "Backfill session is invalid.");
       }
-      if (repair.completed_at) {
+      if (session.status === "completed") {
         return {
-          repairId,
-          group: repair.group_key as HealthKitMetric,
-          completed: true as const,
-          expectedChunkCount: repair.expected_chunk_count ?? input.expectedChunkCount,
-          completedChunkCount: repair.expected_chunk_count ?? input.expectedChunkCount
+          sessionId,
+          group: session.group_key as HealthKitMetric,
+          completed: true as const
         };
       }
-      if (Date.parse(String(repair.expires_at)) <= Date.now()) {
-        throw new HttpError(400, "healthkit_repair_invalid", "Repair session is expired.");
-      }
+      this.assertOpenSession(session, input, session.group_key as HealthKitMetric);
 
-      const authority = await this.loadWriteAuthority(tx, actorUserId, current.family.id, selfId);
-      if (!authority.settings?.consented_at) {
-        throw new HttpError(403, "healthkit_consent_required", "HealthKit upload consent is required.");
-      }
-      if (authority.activeInstallationId !== repair.installation_id) {
-        throw new HttpError(403, "healthkit_installation_inactive", "Installation is not the active HealthKit installation.");
-      }
-      if (authority.settings.health_timezone_version !== repair.timezone_version) {
-        throw new HttpError(409, "healthkit_timezone_version_invalid", "Timezone version is stale.");
-      }
-      if (!authority.enabledGroups.has(repair.group_key as HealthKitMetric)) {
-        throw new HttpError(403, "healthkit_metric_disabled", `Metric ${repair.group_key} is not enabled.`);
-      }
-
-      const chunks = await tx`
-        select chunk_index from healthkit_repair_chunks
-        where repair_id = ${repairId}
-        order by chunk_index asc
+      const required: string[] = session.required_scope_keys ?? [];
+      const manifests = await tx`
+        select scope_key from healthkit_backfill_scope_manifests where session_id = ${sessionId}
       `;
-      if (chunks.length !== input.expectedChunkCount) {
-        throw new HttpError(409, "healthkit_repair_incomplete", "Not all repair chunks are complete.");
-      }
-      for (let i = 0; i < input.expectedChunkCount; i += 1) {
-        if (!chunks.some((c: Row) => c.chunk_index === i)) {
-          throw new HttpError(409, "healthkit_repair_incomplete", "Not all repair chunks are complete.");
+      const accepted = new Set(manifests.map((m: Row) => m.scope_key as string));
+      for (const scope of required) {
+        if (!accepted.has(scope)) {
+          throw new HttpError(409, "session_incomplete", `Missing scope manifest for ${scope}.`);
         }
       }
 
-      if (repair.group_key === "sleep") {
-        const range = repairRangeFromRow(repair);
+      // Stale timezone-version rows for sleep/daily after successful backfill.
+      if (session.group_key === "sleep") {
+        const range = sessionRangeFromRow(session);
         await tx`
           delete from health_sleep_days
           where person_id = ${selfId}
-            and timezone_version < ${repair.timezone_version}
+            and timezone_version < ${session.timezone_version}
             and sleep_day >= ${range.rangeStartDay}::date
             and sleep_day <= ${range.rangeEndDay}::date
         `;
       }
 
       await tx`
-        update healthkit_repairs
-        set expected_chunk_count = ${input.expectedChunkCount}, completed_at = ${nowIso}
-        where repair_id = ${repairId}
+        update healthkit_backfill_sessions
+        set status = 'completed', completed_at = ${nowIso}
+        where session_id = ${sessionId}
       `;
 
-      await tx`
-        update healthkit_sync_state
-        set
-          status = 'ready',
-          last_successful_at = ${nowIso},
-          last_attempt_at = ${nowIso},
-          last_error_code = null,
-          coverage_start_at = ${toIso(repair.range_start)},
-          coverage_end_at = ${toIso(repair.range_end)},
-          updated_at = ${nowIso}
-        where person_id = ${selfId} and group_key = ${repair.group_key}
-      `;
+      await this.touchGroupState(tx, {
+        familyId: current.family.id,
+        personId: input.personId,
+        group: session.group_key as HealthKitMetric,
+        nowIso,
+        status: "ready",
+        success: true,
+        coverageStartAt: toIso(session.range_start),
+        coverageEndAt: toIso(session.range_end)
+      });
 
       return {
-        repairId,
-        group: repair.group_key as HealthKitMetric,
-        completed: true as const,
-        expectedChunkCount: input.expectedChunkCount,
-        completedChunkCount: input.expectedChunkCount
+        sessionId,
+        group: session.group_key as HealthKitMetric,
+        completed: true as const
       };
     });
 
     await this.context.audit({
       familyId: current.family.id,
       actorUserId,
-      action: "healthkit.repair_completed",
-      resourceType: "healthkit_repair",
-      resourceId: repairId,
-      metadata: {
-        group: result.group,
-        expected_chunk_count: result.expectedChunkCount,
-        status: "completed"
-      }
+      action: "healthkit.session_completed",
+      resourceType: "healthkit_backfill_session",
+      resourceId: sessionId,
+      metadata: { group: result.group, status: "completed" }
     });
 
     return result;
+  }
+
+  async abortBackfillSession(
+    actorUserId: string,
+    sessionId: string,
+    input: AbortHealthKitBackfillSessionInput
+  ): Promise<HealthKitBackfillSessionAbortResult> {
+    const current = await this.context.requireActiveMember(actorUserId);
+    const selfId = await this.requireLinkedSelfProfileId(actorUserId, current.family.id);
+    assertSelfProfileMatch({ selfProfileId: selfId, requestedPersonId: input.personId });
+    const nowIso = toUtcIso(new Date());
+
+    const result = await this.context.sql.begin(async (tx: any) => {
+      const [session] = await tx`select * from healthkit_backfill_sessions where session_id = ${sessionId}`;
+      if (!session || session.person_id !== input.personId) {
+        throw new HttpError(400, "session_expired", "Backfill session is invalid.");
+      }
+      if (session.status === "aborted" || session.status === "completed") {
+        return {
+          sessionId,
+          group: session.group_key as HealthKitMetric,
+          aborted: true as const
+        };
+      }
+
+      const authority = await this.loadWriteAuthority(tx, actorUserId, current.family.id, input.personId);
+      if (authority.activeInstallationId !== input.installationId) {
+        throw new HttpError(403, "installation_inactive", "Installation is not the active HealthKit installation.");
+      }
+
+      await tx`
+        update healthkit_backfill_sessions
+        set status = 'aborted', aborted_at = ${nowIso}, abort_reason = ${input.reason ?? null}
+        where session_id = ${sessionId}
+      `;
+
+      await this.touchGroupState(tx, {
+        familyId: current.family.id,
+        personId: input.personId,
+        group: session.group_key as HealthKitMetric,
+        nowIso,
+        status: "error",
+        lastErrorCode: input.reason ?? "session_aborted"
+      });
+
+      return {
+        sessionId,
+        group: session.group_key as HealthKitMetric,
+        aborted: true as const
+      };
+    });
+
+    return result;
+  }
+
+  async getBackfillSession(actorUserId: string, sessionId: string): Promise<HealthKitBackfillSession> {
+    const current = await this.context.requireActiveMember(actorUserId);
+    const selfId = await this.requireLinkedSelfProfileId(actorUserId, current.family.id);
+    const [session] = await this.context.sql`
+      select * from healthkit_backfill_sessions where session_id = ${sessionId}
+    `;
+    if (!session || session.person_id !== selfId) {
+      throw new HttpError(404, "session_expired", "Backfill session not found.");
+    }
+    const [{ count }] = await this.context.sql`
+      select count(*)::int as count from healthkit_sync_events where session_id = ${sessionId}
+    `;
+    return mapSession(session, Number(count));
+  }
+
+  async listBackfillPending(
+    actorUserId: string,
+    sessionId: string,
+    cursor?: string,
+    limit = 100
+  ): Promise<{ eventIds: string[]; nextCursor?: string }> {
+    const current = await this.context.requireActiveMember(actorUserId);
+    const selfId = await this.requireLinkedSelfProfileId(actorUserId, current.family.id);
+    const [session] = await this.context.sql`
+      select person_id from healthkit_backfill_sessions where session_id = ${sessionId}
+    `;
+    if (!session || session.person_id !== selfId) {
+      throw new HttpError(404, "session_expired", "Backfill session not found.");
+    }
+    const safeLimit = Math.min(Math.max(limit, 1), 100);
+    const rows = cursor
+      ? await this.context.sql`
+          select event_id from healthkit_sync_events
+          where session_id = ${sessionId} and event_id > ${cursor}::uuid
+          order by event_id asc
+          limit ${safeLimit}
+        `
+      : await this.context.sql`
+          select event_id from healthkit_sync_events
+          where session_id = ${sessionId}
+          order by event_id asc
+          limit ${safeLimit}
+        `;
+    const eventIds = rows.map((r: Row) => String(r.event_id));
+    return {
+      eventIds,
+      nextCursor: eventIds.length === safeLimit ? eventIds[eventIds.length - 1] : undefined
+    };
+  }
+
+  async getGroupManifest(
+    actorUserId: string,
+    group: HealthKitMetric,
+    personId?: string
+  ): Promise<HealthKitGroupManifest> {
+    const current = await this.context.requireActiveMember(actorUserId);
+    const selfId = await this.requireLinkedSelfProfileId(actorUserId, current.family.id);
+    const target = personId ?? selfId;
+    assertSelfProfileMatch({ selfProfileId: selfId, requestedPersonId: target });
+
+    const [active] = await this.context.sql`
+      select installation_id from healthkit_sync_installations
+      where person_id = ${target} and revoked_at is null
+      limit 1
+    `;
+    if (!active) {
+      return { personId: target, group, entityCount: 0, entities: [] };
+    }
+
+    const scopes = requiredScopeKeysForGroup(group);
+    // Filter by group scopes in SQL before the limit so large installations do not
+    // silently omit a group's entity rows that fall past a global 10k cap.
+    const likePatterns = scopes.flatMap((scope) => {
+      switch (scope) {
+        case "steps":
+          return ["steps_hour:%"];
+        case "sleep":
+          return ["sleep_day:%"];
+        case "blood_pressure":
+          return ["blood_pressure:%"];
+        case "blood_glucose":
+          return ["blood_glucose:%"];
+        case "workout":
+          return ["workout:%"];
+        default:
+          return [`daily_metric:${scope}:%`];
+      }
+    });
+
+    let rows: Row[] = [];
+    if (likePatterns.length > 0) {
+      // Build OR of LIKE patterns for this group's entity key prefixes.
+      const conditions = likePatterns.map((_, i) => `entity_key like $${i + 3}`).join(" or ");
+      rows = await this.context.sql.unsafe(
+        `select entity_key, entity_version, fingerprint, op
+         from healthkit_sync_entities
+         where person_id = $1
+           and installation_id = $2
+           and (${conditions})
+         order by entity_key asc
+         limit 10000`,
+        [target, active.installation_id, ...likePatterns]
+      );
+    }
+
+    const entities = rows.map((row: Row) => ({
+      entityKey: row.entity_key as string,
+      entityVersion: Number(row.entity_version),
+      fingerprint: row.fingerprint as string,
+      op: row.op as "upsert" | "delete"
+    }));
+
+    return {
+      personId: target,
+      group,
+      installationId: active.installation_id,
+      entityCount: entities.length,
+      entities
+    };
   }
 
   async getHealthMetricFreshness(
@@ -666,7 +891,7 @@ export class PostgresHealthKitStore {
   ): Promise<HealthDailyMetricRecord[]> {
     const definition = HEALTHKIT_METRIC_REGISTRY[healthMetric];
     if (definition.storage !== "daily_numeric") {
-      throw new HttpError(400, "healthkit_metric_not_daily", "The requested metric is not stored as a daily aggregate.");
+      throw new HttpError(400, "payload_invalid", "The requested metric is not stored as a daily aggregate.");
     }
     const current = await this.context.requireActiveMember(actorUserId);
     await this.context.requireProfileInFamily(personId, current.family.id);
@@ -759,6 +984,293 @@ export class PostgresHealthKitStore {
     }));
   }
 
+  private assertOpenSession(
+    session: Row,
+    input: { installationId: string; timezoneVersion: number },
+    group: HealthKitMetric
+  ) {
+    if (session.status !== "open") {
+      throw new HttpError(400, "session_expired", "Backfill session is not open.");
+    }
+    if (Date.parse(String(session.expires_at)) <= Date.now()) {
+      throw new HttpError(400, "session_expired", "Backfill session is expired.");
+    }
+    if (session.installation_id !== input.installationId) {
+      throw new HttpError(403, "installation_inactive", "Session does not belong to this installation.");
+    }
+    if (Number(session.timezone_version) !== input.timezoneVersion) {
+      throw new HttpError(409, "timezone_stale", "Timezone version is stale.");
+    }
+    if (session.group_key !== group && group) {
+      // group check optional when session already carries group
+    }
+  }
+
+  private async applyOneEvent(
+    tx: any,
+    input: {
+      familyId: string;
+      personId: string;
+      installationId: string;
+      timezoneVersion: number;
+      event: HealthKitSyncEvent;
+      fingerprint: string;
+      nowIso: string;
+    }
+  ): Promise<HealthKitEventApplyResult> {
+    const { event, fingerprint } = input;
+
+    const [existingEvent] = await tx`
+      select fingerprint, apply_result from healthkit_sync_events where event_id = ${event.eventId}
+    `;
+    if (existingEvent) {
+      if (existingEvent.fingerprint !== fingerprint) {
+        throw new HttpError(409, "event_conflict", "Event id was reused with a different fingerprint.");
+      }
+      return { eventId: event.eventId, result: "duplicate" };
+    }
+
+    const [entity] = await tx`
+      select entity_version, fingerprint from healthkit_sync_entities
+      where person_id = ${input.personId}
+        and installation_id = ${input.installationId}
+        and entity_key = ${event.entityKey}
+    `;
+
+    if (entity) {
+      const latestVersion = Number(entity.entity_version);
+      if (event.entityVersion < latestVersion) {
+        await tx`
+          insert into healthkit_sync_events (
+            event_id, person_id, family_id, installation_id, entity_key, entity_version,
+            group_key, scope_key, op, session_id, fingerprint, apply_result, received_at
+          ) values (
+            ${event.eventId}, ${input.personId}, ${input.familyId}, ${input.installationId},
+            ${event.entityKey}, ${event.entityVersion}, ${event.group}, ${event.scopeKey},
+            ${event.op}, ${event.sessionId ?? null}, ${fingerprint}, 'superseded', ${input.nowIso}
+          )
+        `;
+        return { eventId: event.eventId, result: "superseded" };
+      }
+      if (event.entityVersion === latestVersion) {
+        if (entity.fingerprint !== fingerprint) {
+          throw new HttpError(409, "event_conflict", "Entity version reused with a different fingerprint.");
+        }
+        await tx`
+          insert into healthkit_sync_events (
+            event_id, person_id, family_id, installation_id, entity_key, entity_version,
+            group_key, scope_key, op, session_id, fingerprint, apply_result, received_at
+          ) values (
+            ${event.eventId}, ${input.personId}, ${input.familyId}, ${input.installationId},
+            ${event.entityKey}, ${event.entityVersion}, ${event.group}, ${event.scopeKey},
+            ${event.op}, ${event.sessionId ?? null}, ${fingerprint}, 'duplicate', ${input.nowIso}
+          )
+        `;
+        return { eventId: event.eventId, result: "duplicate" };
+      }
+    }
+
+    // Higher version (or first version): apply canonical write + entity row.
+    await this.applyCanonical(tx, {
+      familyId: input.familyId,
+      personId: input.personId,
+      timezoneVersion: input.timezoneVersion,
+      event,
+      nowIso: input.nowIso
+    });
+
+    await tx`
+      insert into healthkit_sync_entities (
+        person_id, family_id, installation_id, entity_key, entity_version,
+        fingerprint, op, last_event_id, updated_at
+      ) values (
+        ${input.personId}, ${input.familyId}, ${input.installationId}, ${event.entityKey},
+        ${event.entityVersion}, ${fingerprint}, ${event.op}, ${event.eventId}, ${input.nowIso}
+      )
+      on conflict (person_id, installation_id, entity_key) do update set
+        entity_version = excluded.entity_version,
+        fingerprint = excluded.fingerprint,
+        op = excluded.op,
+        last_event_id = excluded.last_event_id,
+        updated_at = excluded.updated_at
+    `;
+
+    await tx`
+      insert into healthkit_sync_events (
+        event_id, person_id, family_id, installation_id, entity_key, entity_version,
+        group_key, scope_key, op, session_id, fingerprint, apply_result, received_at
+      ) values (
+        ${event.eventId}, ${input.personId}, ${input.familyId}, ${input.installationId},
+        ${event.entityKey}, ${event.entityVersion}, ${event.group}, ${event.scopeKey},
+        ${event.op}, ${event.sessionId ?? null}, ${fingerprint}, 'applied', ${input.nowIso}
+      )
+    `;
+
+    // Incremental success does not flip never_synced/backfilling to ready.
+    if (!event.sessionId) {
+      await this.touchGroupState(tx, {
+        familyId: input.familyId,
+        personId: input.personId,
+        group: event.group,
+        nowIso: input.nowIso,
+        success: true,
+        touchOnly: true
+      });
+    }
+
+    return { eventId: event.eventId, result: "applied" };
+  }
+
+  private async applyCanonical(
+    tx: any,
+    input: {
+      familyId: string;
+      personId: string;
+      timezoneVersion: number;
+      event: HealthKitSyncEvent;
+      nowIso: string;
+    }
+  ) {
+    const { event } = input;
+    if (event.op === "delete") {
+      await this.applyDelete(tx, input.personId, event.entityKey, input.timezoneVersion);
+      return;
+    }
+
+    const payload = event.payload!;
+    switch (payload.kind) {
+      case "steps_hour":
+        await tx`
+          insert into health_step_hours (family_id, person_id, hour_start_utc, count, updated_at)
+          values (${input.familyId}, ${input.personId}, ${payload.hourStartUtc}, ${payload.count}, ${input.nowIso})
+          on conflict (person_id, hour_start_utc) do update set
+            count = excluded.count, updated_at = excluded.updated_at
+        `;
+        return;
+      case "sleep_day":
+        await tx`
+          insert into health_sleep_days (
+            family_id, person_id, sleep_day, timezone_version, total_minutes, core_minutes,
+            deep_minutes, rem_minutes, unspecified_asleep_minutes, awake_minutes, in_bed_minutes,
+            wrist_temperature_celsius, breathing_disturbance_count, updated_at
+          ) values (
+            ${input.familyId}, ${input.personId}, ${payload.sleepDay}, ${input.timezoneVersion},
+            ${payload.totalMinutes}, ${payload.coreMinutes}, ${payload.deepMinutes}, ${payload.remMinutes},
+            ${payload.unspecifiedAsleepMinutes}, ${payload.awakeMinutes}, ${payload.inBedMinutes},
+            ${payload.wristTemperatureCelsius ?? null}, ${payload.breathingDisturbanceCount ?? null}, ${input.nowIso}
+          )
+          on conflict (person_id, sleep_day, timezone_version) do update set
+            total_minutes = excluded.total_minutes, core_minutes = excluded.core_minutes,
+            deep_minutes = excluded.deep_minutes, rem_minutes = excluded.rem_minutes,
+            unspecified_asleep_minutes = excluded.unspecified_asleep_minutes,
+            awake_minutes = excluded.awake_minutes, in_bed_minutes = excluded.in_bed_minutes,
+            wrist_temperature_celsius = excluded.wrist_temperature_celsius,
+            breathing_disturbance_count = excluded.breathing_disturbance_count,
+            updated_at = excluded.updated_at
+        `;
+        return;
+      case "daily_metric":
+        await tx`
+          insert into health_daily_metrics (
+            family_id, person_id, metric_key, local_day, timezone_version, unit,
+            sum_value, average_value, minimum_value, maximum_value, latest_value, sample_count, updated_at
+          ) values (
+            ${input.familyId}, ${input.personId}, ${payload.healthMetric}, ${payload.localDay},
+            ${input.timezoneVersion}, ${HEALTHKIT_METRIC_REGISTRY[payload.healthMetric].unit},
+            ${payload.sumValue ?? null}, ${payload.averageValue ?? null}, ${payload.minimumValue ?? null},
+            ${payload.maximumValue ?? null}, ${payload.latestValue ?? null}, ${payload.sampleCount}, ${input.nowIso}
+          )
+          on conflict (person_id, metric_key, local_day, timezone_version) do update set
+            unit = excluded.unit, sum_value = excluded.sum_value, average_value = excluded.average_value,
+            minimum_value = excluded.minimum_value, maximum_value = excluded.maximum_value,
+            latest_value = excluded.latest_value, sample_count = excluded.sample_count,
+            updated_at = excluded.updated_at
+        `;
+        return;
+      case "blood_pressure":
+        await tx`
+          insert into health_blood_pressure_readings (
+            family_id, person_id, source_sample_key, measured_at, systolic, diastolic, pulse, updated_at
+          ) values (
+            ${input.familyId}, ${input.personId}, ${payload.sourceObjectKey}, ${payload.measuredAtUtc},
+            ${payload.systolic}, ${payload.diastolic}, ${payload.pulse ?? null}, ${input.nowIso}
+          )
+          on conflict (person_id, source_sample_key) do update set
+            measured_at = excluded.measured_at, systolic = excluded.systolic,
+            diastolic = excluded.diastolic, pulse = excluded.pulse, updated_at = excluded.updated_at
+        `;
+        return;
+      case "blood_glucose":
+        await tx`
+          insert into health_blood_glucose_readings (
+            family_id, person_id, source_sample_key, measured_at, value_mg_dl, updated_at
+          ) values (
+            ${input.familyId}, ${input.personId}, ${payload.sourceSampleKey}, ${payload.measuredAtUtc},
+            ${payload.valueMgDl}, ${input.nowIso}
+          )
+          on conflict (person_id, source_sample_key) do update set
+            measured_at = excluded.measured_at, value_mg_dl = excluded.value_mg_dl, updated_at = excluded.updated_at
+        `;
+        return;
+      case "workout":
+        await tx`
+          insert into health_workouts (
+            family_id, person_id, source_sample_key, workout_type, started_at, ended_at,
+            duration_seconds, active_energy_kcal, distance_meters, average_heart_rate_bpm,
+            maximum_heart_rate_bpm, updated_at
+          ) values (
+            ${input.familyId}, ${input.personId}, ${payload.sourceSampleKey}, ${payload.workoutType},
+            ${payload.startedAtUtc}, ${payload.endedAtUtc}, ${payload.durationSeconds},
+            ${payload.activeEnergyKcal ?? null}, ${payload.distanceMeters ?? null},
+            ${payload.averageHeartRateBpm ?? null}, ${payload.maximumHeartRateBpm ?? null}, ${input.nowIso}
+          )
+          on conflict (person_id, source_sample_key) do update set
+            workout_type = excluded.workout_type, started_at = excluded.started_at, ended_at = excluded.ended_at,
+            duration_seconds = excluded.duration_seconds, active_energy_kcal = excluded.active_energy_kcal,
+            distance_meters = excluded.distance_meters, average_heart_rate_bpm = excluded.average_heart_rate_bpm,
+            maximum_heart_rate_bpm = excluded.maximum_heart_rate_bpm, updated_at = excluded.updated_at
+        `;
+        return;
+    }
+  }
+
+  private async applyDelete(tx: any, personId: string, entityKey: string, timezoneVersion: number) {
+    if (entityKey.startsWith("steps_hour:")) {
+      const hour = entityKey.slice("steps_hour:".length);
+      await tx`delete from health_step_hours where person_id = ${personId} and hour_start_utc = ${hour}::timestamptz`;
+      return;
+    }
+    if (entityKey.startsWith("sleep_day:")) {
+      const day = entityKey.slice("sleep_day:".length);
+      await tx`delete from health_sleep_days where person_id = ${personId} and sleep_day = ${day}::date and timezone_version = ${timezoneVersion}`;
+      return;
+    }
+    if (entityKey.startsWith("daily_metric:")) {
+      const rest = entityKey.slice("daily_metric:".length);
+      const idx = rest.lastIndexOf(":");
+      const metric = rest.slice(0, idx);
+      const day = rest.slice(idx + 1);
+      await tx`delete from health_daily_metrics where person_id = ${personId} and metric_key = ${metric} and local_day = ${day}::date and timezone_version = ${timezoneVersion}`;
+      return;
+    }
+    if (entityKey.startsWith("blood_pressure:")) {
+      const key = entityKey.slice("blood_pressure:".length);
+      await tx`delete from health_blood_pressure_readings where person_id = ${personId} and source_sample_key = ${key}::uuid`;
+      return;
+    }
+    if (entityKey.startsWith("blood_glucose:")) {
+      const key = entityKey.slice("blood_glucose:".length);
+      await tx`delete from health_blood_glucose_readings where person_id = ${personId} and source_sample_key = ${key}::uuid`;
+      return;
+    }
+    if (entityKey.startsWith("workout:")) {
+      const key = entityKey.slice("workout:".length);
+      await tx`delete from health_workouts where person_id = ${personId} and source_sample_key = ${key}::uuid`;
+      return;
+    }
+    throw new HttpError(400, "payload_invalid", "Unknown entity key for delete.");
+  }
+
   private async loadSettings(actorUserId: string, familyId: string, personId: string): Promise<HealthKitSettings> {
     const [settings] = await this.context.sql`
       select * from healthkit_sync_profile_settings where person_id = ${personId}
@@ -823,134 +1335,41 @@ export class PostgresHealthKitStore {
     };
   }
 
-  private async applyOperations(
-    tx: any,
-    input: {
-      familyId: string;
-      personId: string;
-      actorUserId: string;
-      timezoneVersion: number;
-      operations: HealthKitSyncOperation[];
-      nowIso: string;
-      repairRange?: HealthKitRepairRange;
-    }
-  ) {
-    const steps = input.operations.filter((op): op is Extract<HealthKitSyncOperation, { kind: "steps_hour_upsert" }> => op.kind === "steps_hour_upsert");
-    if (steps.length) {
-      await tx`
-        insert into health_step_hours ${tx(
-          steps.map((op) => ({
-            family_id: input.familyId,
-            person_id: input.personId,
-            hour_start_utc: op.hourStartUtc,
-            count: op.count,
-            updated_at: input.nowIso
-          })),
-          "family_id",
-          "person_id",
-          "hour_start_utc",
-          "count",
-          "updated_at"
-        )}
-        on conflict (person_id, hour_start_utc) do update set
-          count = excluded.count,
-          updated_at = excluded.updated_at
-      `;
-    }
-
-    const sleepDays = input.operations.filter((op): op is Extract<HealthKitSyncOperation, { kind: "sleep_day_upsert" }> => op.kind === "sleep_day_upsert");
-    if (sleepDays.length) await tx`
-      insert into health_sleep_days ${tx(sleepDays.map((op) => ({
-        family_id: input.familyId, person_id: input.personId, sleep_day: op.sleepDay, timezone_version: input.timezoneVersion,
-        total_minutes: op.totalMinutes, core_minutes: op.coreMinutes, deep_minutes: op.deepMinutes, rem_minutes: op.remMinutes,
-        unspecified_asleep_minutes: op.unspecifiedAsleepMinutes, awake_minutes: op.awakeMinutes, in_bed_minutes: op.inBedMinutes,
-        wrist_temperature_celsius: op.wristTemperatureCelsius ?? null, breathing_disturbance_count: op.breathingDisturbanceCount ?? null, updated_at: input.nowIso
-      })), "family_id", "person_id", "sleep_day", "timezone_version", "total_minutes", "core_minutes", "deep_minutes", "rem_minutes", "unspecified_asleep_minutes", "awake_minutes", "in_bed_minutes", "wrist_temperature_celsius", "breathing_disturbance_count", "updated_at")}
-      on conflict (person_id, sleep_day, timezone_version) do update set
-        total_minutes = excluded.total_minutes, core_minutes = excluded.core_minutes, deep_minutes = excluded.deep_minutes,
-        rem_minutes = excluded.rem_minutes, unspecified_asleep_minutes = excluded.unspecified_asleep_minutes,
-        awake_minutes = excluded.awake_minutes, in_bed_minutes = excluded.in_bed_minutes,
-        wrist_temperature_celsius = excluded.wrist_temperature_celsius, breathing_disturbance_count = excluded.breathing_disturbance_count,
-        updated_at = excluded.updated_at
-    `;
-
-    const daily = input.operations.filter((op): op is Extract<HealthKitSyncOperation, { kind: "daily_metric_upsert" }> => op.kind === "daily_metric_upsert");
-    if (daily.length) await tx`
-      insert into health_daily_metrics ${tx(daily.map((op) => ({
-        family_id: input.familyId, person_id: input.personId, metric_key: op.healthMetric, local_day: op.localDay, timezone_version: input.timezoneVersion,
-        unit: HEALTHKIT_METRIC_REGISTRY[op.healthMetric].unit, sum_value: op.sumValue ?? null, average_value: op.averageValue ?? null,
-        minimum_value: op.minimumValue ?? null, maximum_value: op.maximumValue ?? null, latest_value: op.latestValue ?? null,
-        sample_count: op.sampleCount, updated_at: input.nowIso
-      })), "family_id", "person_id", "metric_key", "local_day", "timezone_version", "unit", "sum_value", "average_value", "minimum_value", "maximum_value", "latest_value", "sample_count", "updated_at")}
-      on conflict (person_id, metric_key, local_day, timezone_version) do update set
-        unit = excluded.unit, sum_value = excluded.sum_value, average_value = excluded.average_value,
-        minimum_value = excluded.minimum_value, maximum_value = excluded.maximum_value, latest_value = excluded.latest_value,
-        sample_count = excluded.sample_count, updated_at = excluded.updated_at
-    `;
-
-    const bp = input.operations.filter((op): op is Extract<HealthKitSyncOperation, { kind: "blood_pressure_upsert" }> => op.kind === "blood_pressure_upsert");
-    if (bp.length) await tx`
-      insert into health_blood_pressure_readings ${tx(bp.map((op) => ({ family_id: input.familyId, person_id: input.personId, source_sample_key: op.sourceSampleKey, measured_at: op.measuredAtUtc, systolic: op.systolic, diastolic: op.diastolic, pulse: op.pulse ?? null, updated_at: input.nowIso })), "family_id", "person_id", "source_sample_key", "measured_at", "systolic", "diastolic", "pulse", "updated_at")}
-      on conflict (person_id, source_sample_key) do update set systolic = excluded.systolic, diastolic = excluded.diastolic, pulse = excluded.pulse, measured_at = excluded.measured_at, updated_at = excluded.updated_at
-    `;
-
-    const glucose = input.operations.filter((op): op is Extract<HealthKitSyncOperation, { kind: "blood_glucose_upsert" }> => op.kind === "blood_glucose_upsert");
-    if (glucose.length) await tx`
-      insert into health_blood_glucose_readings ${tx(glucose.map((op) => ({ family_id: input.familyId, person_id: input.personId, source_sample_key: op.sourceSampleKey, measured_at: op.measuredAtUtc, value_mg_dl: op.valueMgDl, updated_at: input.nowIso })), "family_id", "person_id", "source_sample_key", "measured_at", "value_mg_dl", "updated_at")}
-      on conflict (person_id, source_sample_key) do update set measured_at = excluded.measured_at, value_mg_dl = excluded.value_mg_dl, updated_at = excluded.updated_at
-    `;
-
-    const workouts = input.operations.filter((op): op is Extract<HealthKitSyncOperation, { kind: "workout_upsert" }> => op.kind === "workout_upsert");
-    if (workouts.length) await tx`
-      insert into health_workouts ${tx(workouts.map((op) => ({ family_id: input.familyId, person_id: input.personId, source_sample_key: op.sourceSampleKey, workout_type: op.workoutType, started_at: op.startedAtUtc, ended_at: op.endedAtUtc, duration_seconds: op.durationSeconds, active_energy_kcal: op.activeEnergyKcal ?? null, distance_meters: op.distanceMeters ?? null, average_heart_rate_bpm: op.averageHeartRateBpm ?? null, maximum_heart_rate_bpm: op.maximumHeartRateBpm ?? null, updated_at: input.nowIso })), "family_id", "person_id", "source_sample_key", "workout_type", "started_at", "ended_at", "duration_seconds", "active_energy_kcal", "distance_meters", "average_heart_rate_bpm", "maximum_heart_rate_bpm", "updated_at")}
-      on conflict (person_id, source_sample_key) do update set workout_type = excluded.workout_type, started_at = excluded.started_at, ended_at = excluded.ended_at, duration_seconds = excluded.duration_seconds, active_energy_kcal = excluded.active_energy_kcal, distance_meters = excluded.distance_meters, average_heart_rate_bpm = excluded.average_heart_rate_bpm, maximum_heart_rate_bpm = excluded.maximum_heart_rate_bpm, updated_at = excluded.updated_at
-    `;
-
-    for (const op of input.operations) {
-      if (op.kind === "steps_hour_delete") await tx`delete from health_step_hours where person_id = ${input.personId} and hour_start_utc = ${op.hourStartUtc}::timestamptz`;
-      if (op.kind === "sleep_day_delete") await tx`delete from health_sleep_days where person_id = ${input.personId} and sleep_day = ${op.sleepDay}::date and timezone_version = ${input.timezoneVersion}`;
-      if (op.kind === "daily_metric_delete") await tx`delete from health_daily_metrics where person_id = ${input.personId} and metric_key = ${op.healthMetric} and local_day = ${op.localDay}::date and timezone_version = ${input.timezoneVersion}`;
-      if (op.kind === "blood_pressure_delete") await this.deleteClinicalRow(tx, "health_blood_pressure_readings", input, op.sourceSampleKey);
-      if (op.kind === "blood_glucose_delete") await this.deleteClinicalRow(tx, "health_blood_glucose_readings", input, op.sourceSampleKey);
-      if (op.kind === "workout_delete") await this.deleteClinicalRow(tx, "health_workouts", input, op.sourceSampleKey, "started_at");
-    }
-  }
-
-  private async deleteClinicalRow(tx: any, table: "health_blood_pressure_readings" | "health_blood_glucose_readings" | "health_workouts", input: { personId: string; repairRange?: HealthKitRepairRange }, sourceSampleKey: string, instantColumn = "measured_at") {
-    const rows = await tx.unsafe(`select ${instantColumn} from ${table} where person_id = $1 and source_sample_key = $2`, [input.personId, sourceSampleKey]);
-    const existing = rows[0];
-    if (existing && input.repairRange) {
-      const instant = Date.parse(String(existing[instantColumn]));
-      if (instant < Date.parse(input.repairRange.rangeStartIso) || instant > Date.parse(input.repairRange.rangeEndIso)) {
-        throw new HttpError(400, "healthkit_operation_invalid", "clinical deletion is outside the repair range.");
-      }
-    }
-    await tx.unsafe(`delete from ${table} where person_id = $1 and source_sample_key = $2`, [input.personId, sourceSampleKey]);
-  }
-
-  private async touchMetricState(
+  private async touchGroupState(
     tx: any,
     input: {
       familyId: string;
       personId: string;
       group: HealthKitMetric;
       nowIso: string;
-      success: boolean;
-      repairing?: boolean;
+      status?: HealthMetricSyncStatusCode;
+      success?: boolean;
+      touchOnly?: boolean;
       coverageStartAt?: string;
       coverageEndAt?: string;
+      lastErrorCode?: string;
     }
   ) {
     const [existing] = await tx`
       select * from healthkit_sync_state where person_id = ${input.personId} and group_key = ${input.group}
     `;
-    let status: HealthMetricSyncStatusCode = existing?.status ?? "never_synced";
-    if (input.repairing) {
-      status = "repairing";
-    } else if (input.success) {
-      status = existing?.status === "ready" || existing?.coverage_start_at ? "ready" : status === "never_synced" ? "ready" : status;
-      if (status === "error" || status === "repair_needed") status = "ready";
+    let status: HealthMetricSyncStatusCode =
+      input.status ?? (existing?.status as HealthMetricSyncStatusCode) ?? "never_synced";
+
+    if (input.touchOnly) {
+      // Keep backfilling / never_synced until session completes.
+      if (status === "error" && input.success) {
+        // leave error until explicit recovery; still record attempt
+      }
     }
+
+    const success = Boolean(input.success);
+    const lastSuccessfulAt = success ? input.nowIso : (existing?.last_successful_at ?? null);
+    const lastErrorCode =
+      input.lastErrorCode ?? (success ? null : (existing?.last_error_code ?? null));
+    const coverageStartAt = input.coverageStartAt ?? existing?.coverage_start_at ?? null;
+    const coverageEndAt = input.coverageEndAt ?? existing?.coverage_end_at ?? null;
+    const explicitError = input.lastErrorCode ?? null;
 
     await tx`
       insert into healthkit_sync_state (
@@ -960,25 +1379,24 @@ export class PostgresHealthKitStore {
         ${input.personId},
         ${input.familyId},
         ${input.group},
-        ${input.success ? input.nowIso : existing?.last_successful_at ?? null},
+        ${lastSuccessfulAt},
         ${input.nowIso},
-        ${input.success ? null : existing?.last_error_code ?? null},
-        ${existing?.coverage_start_at ?? input.coverageStartAt ?? null},
-        ${input.success && !input.repairing
-          ? toUtcIso(new Date())
-          : existing?.coverage_end_at ?? input.coverageEndAt ?? null},
+        ${lastErrorCode},
+        ${coverageStartAt},
+        ${coverageEndAt},
         ${status},
         ${input.nowIso}
       )
       on conflict (person_id, group_key) do update set
-        last_successful_at = case when ${input.success} then ${input.nowIso}::timestamptz else healthkit_sync_state.last_successful_at end,
+        last_successful_at = case when ${success} then ${input.nowIso}::timestamptz else healthkit_sync_state.last_successful_at end,
         last_attempt_at = ${input.nowIso}::timestamptz,
-        last_error_code = case when ${input.success} then null else healthkit_sync_state.last_error_code end,
-        coverage_end_at = case
-          when ${input.success} and ${!input.repairing} then ${input.nowIso}::timestamptz
-          else healthkit_sync_state.coverage_end_at
+        last_error_code = case
+          when ${explicitError !== null} then ${explicitError}
+          when ${success} then null
+          else healthkit_sync_state.last_error_code
         end,
-        coverage_start_at = coalesce(healthkit_sync_state.coverage_start_at, ${input.coverageStartAt ?? null}::timestamptz),
+        coverage_start_at = coalesce(${coverageStartAt}::timestamptz, healthkit_sync_state.coverage_start_at),
+        coverage_end_at = coalesce(${coverageEndAt}::timestamptz, healthkit_sync_state.coverage_end_at),
         status = ${status},
         updated_at = ${input.nowIso}::timestamptz
     `;

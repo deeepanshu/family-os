@@ -1,20 +1,24 @@
 import type {
+  AbortHealthKitBackfillSessionInput,
   AuditLog,
   BloodPressureReading,
   BootstrapResponse,
-  CompleteHealthKitRepairInput,
-  CreateHealthKitRepairInput,
+  CompleteHealthKitBackfillSessionInput,
+  CreateHealthKitBackfillSessionInput,
   CreateInviteResponse,
   CurrentFamilyResponse,
   FamilyMember,
   FamilyMembership,
+  HealthKitBackfillSession,
+  HealthKitBackfillSessionAbortResult,
+  HealthKitBackfillSessionCompleteResult,
+  HealthKitEventsBatchInput,
+  HealthKitEventsBatchResult,
+  HealthKitGroupManifest,
   HealthKitMetric,
   HealthKitMetricKey,
-  HealthKitRepair,
-  HealthKitRepairCompleteResult,
+  HealthKitScopeManifestResult,
   HealthKitSettings,
-  HealthKitSyncInput,
-  HealthKitSyncResult,
   HealthDailyMetricRecord,
   HealthMetricFreshness,
   HealthProfile,
@@ -27,6 +31,7 @@ import type {
   NotificationDelivery,
   NotificationDevice,
   PublicInviteResponse,
+  PutHealthKitScopeManifestInput,
   PutHealthKitSettingsInput,
   Reminder,
   ReminderRecipient
@@ -82,13 +87,39 @@ export interface ReadingStore {
 export interface HealthKitStore {
   getHealthKitSettings(actorUserId: string, personId?: string): Promise<HealthKitSettings>;
   putHealthKitSettings(actorUserId: string, input: PutHealthKitSettingsInput): Promise<HealthKitSettings>;
-  syncHealthKit(actorUserId: string, input: HealthKitSyncInput): Promise<HealthKitSyncResult>;
-  createHealthKitRepair(actorUserId: string, input: CreateHealthKitRepairInput): Promise<HealthKitRepair>;
-  completeHealthKitRepair(
+  applyHealthKitEvents(actorUserId: string, input: HealthKitEventsBatchInput): Promise<HealthKitEventsBatchResult>;
+  createBackfillSession(
     actorUserId: string,
-    repairId: string,
-    input: CompleteHealthKitRepairInput
-  ): Promise<HealthKitRepairCompleteResult>;
+    input: CreateHealthKitBackfillSessionInput
+  ): Promise<HealthKitBackfillSession>;
+  putScopeManifest(
+    actorUserId: string,
+    sessionId: string,
+    scopeKey: string,
+    input: PutHealthKitScopeManifestInput
+  ): Promise<HealthKitScopeManifestResult>;
+  completeBackfillSession(
+    actorUserId: string,
+    sessionId: string,
+    input: CompleteHealthKitBackfillSessionInput
+  ): Promise<HealthKitBackfillSessionCompleteResult>;
+  abortBackfillSession(
+    actorUserId: string,
+    sessionId: string,
+    input: AbortHealthKitBackfillSessionInput
+  ): Promise<HealthKitBackfillSessionAbortResult>;
+  getBackfillSession(actorUserId: string, sessionId: string): Promise<HealthKitBackfillSession>;
+  listBackfillPending(
+    actorUserId: string,
+    sessionId: string,
+    cursor?: string,
+    limit?: number
+  ): Promise<{ eventIds: string[]; nextCursor?: string }>;
+  getGroupManifest(
+    actorUserId: string,
+    group: HealthKitMetric,
+    personId?: string
+  ): Promise<HealthKitGroupManifest>;
   getHealthMetricFreshness(actorUserId: string, personId: string, healthMetric: HealthKitMetricKey): Promise<HealthMetricFreshness>;
   listStepHours(
     actorUserId: string,

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { HEALTH_API_PREFIX } from "@family-os/shared";
 import { createApp } from "../src/app";
 import { InMemoryFamilyRepository } from "../src/repositories/families";
+import { seedHealthKitReadyGroup, stepsHourEvent } from "./healthKitTestHelpers";
 
 const jwtSecret = "test-supabase-jwt-secret-with-enough-length";
 const supabaseUrl = "https://project.supabase.co";
@@ -357,25 +358,23 @@ describe("solo-first bootstrap", () => {
         installationId
       })
     });
-    await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${secondToken}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        syncId: "7afbe594-7e1d-4b31-a9a1-420b7fba42d1",
-        installationId,
-        personId: secondSelfProfile.data.id,
-        timezoneVersion: 1,
-        operations: [
-          {
-            kind: "blood_pressure_upsert",
-            sourceSampleKey: "5e1ed621-4a6c-4e09-969e-31c6f0872c24",
-            measuredAtUtc: "2026-06-21T10:00:00.000Z",
-            systolic: 120,
-            diastolic: 80
-          }
-        ]
-      })
-    });
+    await seedHealthKitReadyGroup(api, secondToken, secondSelfProfile.data.id, installationId, "vitals", [
+      {
+        eventId: crypto.randomUUID(),
+        entityKey: "blood_pressure:5e1ed621-4a6c-4e09-969e-31c6f0872c24",
+        entityVersion: 1,
+        group: "vitals",
+        scopeKey: "blood_pressure",
+        op: "upsert",
+        payload: {
+          kind: "blood_pressure",
+          sourceObjectKey: "5e1ed621-4a6c-4e09-969e-31c6f0872c24",
+          measuredAtUtc: "2026-06-21T10:00:00.000Z",
+          systolic: 120,
+          diastolic: 80
+        }
+      }
+    ]);
 
     const response = await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {
       method: "POST",
@@ -486,21 +485,20 @@ describe("solo-first bootstrap", () => {
     });
     expect(settings.status).toBe(200);
 
-    const response = await api.request(`${HEALTH_API_PREFIX}/healthkit/sync`, {
+    const event = stepsHourEvent("2026-06-30T00:00:00.000Z", 8000);
+    const response = await api.request(`${HEALTH_API_PREFIX}/healthkit/events:batch`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({
-        syncId: "7afbe594-7e1d-4b31-a9a1-420b7fba42b0",
         installationId,
         personId: profile.data.id,
         timezoneVersion: 1,
-        operations: [{ kind: "steps_hour_upsert", hourStartUtc: "2026-06-30T00:00:00.000Z", count: 8000 }]
+        events: [event]
       })
     });
 
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.data.accepted).toBe(true);
-    expect(body.data.operationCount).toBe(1);
+    expect(body.data.results[0].result).toBe("applied");
   });
 });

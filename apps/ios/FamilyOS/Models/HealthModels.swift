@@ -274,7 +274,10 @@ enum HealthKitDataMetric: String, CaseIterable, Sendable {
         case .walkingSpeed: HKUnit.meter().unitDivided(by: .second())
         case .activeEnergyBurned, .dietaryEnergy: .kilocalorie()
         case .exerciseTime, .standTime: .minute()
-        case .vo2Max: HKUnit(from: "mL/kg/min")
+        case .vo2Max:
+            HKUnit.literUnit(with: .milli).unitDivided(
+                by: HKUnit.gramUnit(with: .kilo).unitMultiplied(by: .minute())
+            )
         case .sleepingWristTemperature, .bodyTemperature, .basalBodyTemperature: .degreeCelsius()
         case .heartRate, .restingHeartRate, .walkingHeartRateAverage: HKUnit.count().unitDivided(by: .minute())
         case .heartRateVariabilitySDNN: .secondUnit(with: .milli)
@@ -301,8 +304,7 @@ enum HealthKitDataMetric: String, CaseIterable, Sendable {
 enum HealthKitMetricSyncStatus: String, Codable {
     case neverSynced = "never_synced"
     case ready
-    case repairing
-    case repairNeeded = "repair_needed"
+    case backfilling
     case error
     case disabled
 
@@ -312,10 +314,8 @@ enum HealthKitMetricSyncStatus: String, Codable {
             return "Not started"
         case .ready:
             return "Ready"
-        case .repairing:
-            return "Repairing"
-        case .repairNeeded:
-            return "Repair needed"
+        case .backfilling:
+            return "Backfilling"
         case .error:
             return "Error"
         case .disabled:
@@ -358,17 +358,19 @@ struct HealthKitSyncStatus: Decodable {
     var metrics: [HealthKitMetricState] { groups }
 }
 
-struct HealthKitSyncResult: Decodable {
-    let syncId: String
-    let accepted: Bool
-    let operationCount: Int
-    let groupsAffected: [HealthKitSyncMetric]
-    let repairId: String?
-    let chunkIndex: Int?
+struct HealthKitEventApplyResult: Decodable {
+    let eventId: String
+    let result: String
+    let errorCode: String?
+    let errorMessage: String?
 }
 
-struct HealthKitRepair: Decodable {
-    let repairId: String
+struct HealthKitEventsBatchResult: Decodable {
+    let results: [HealthKitEventApplyResult]
+}
+
+struct HealthKitBackfillSession: Decodable {
+    let sessionId: String
     let personId: String
     let group: HealthKitSyncMetric
     let installationId: String
@@ -377,28 +379,166 @@ struct HealthKitRepair: Decodable {
     let rangeEnd: String
     let rangeStartDay: String
     let rangeEndDay: String
+    let requiredScopeKeys: [String]
+    let status: String
     let expiresAt: String
+    let pendingCount: Int?
 
     var metric: HealthKitSyncMetric { group }
 }
 
-struct HealthKitRepairCompleteResult: Decodable {
-    let repairId: String
+struct HealthKitScopeManifestResult: Decodable {
+    let sessionId: String
+    let scopeKey: String
+    let status: String
+    let eventCount: Int
+}
+
+struct HealthKitBackfillSessionCompleteResult: Decodable {
+    let sessionId: String
     let group: HealthKitSyncMetric
     let completed: Bool
-    let expectedChunkCount: Int
-    let completedChunkCount: Int
 
     var metric: HealthKitSyncMetric { group }
+}
+
+struct HealthKitBackfillSessionAbortResult: Decodable {
+    let sessionId: String
+    let group: HealthKitSyncMetric
+    let aborted: Bool
+}
+
+/// Wire event for POST /healthkit/events:batch.
+struct HealthKitWireEvent: Encodable {
+    let eventId: String
+    let entityKey: String
+    let entityVersion: Int
+    let group: HealthKitSyncMetric
+    let scopeKey: String
+    let op: String
+    let sessionId: String?
+    let payload: HealthKitEventPayload?
+}
+
+enum HealthKitEventPayload: Encodable {
+    case stepsHour(hourStartUtc: String, count: Int)
+    case sleepDay(
+        sleepDay: String,
+        totalMinutes: Int,
+        coreMinutes: Int,
+        deepMinutes: Int,
+        remMinutes: Int,
+        unspecifiedAsleepMinutes: Int,
+        awakeMinutes: Int,
+        inBedMinutes: Int,
+        wristTemperatureCelsius: Double?,
+        breathingDisturbanceCount: Int?
+    )
+    case dailyMetric(
+        healthMetric: HealthKitDataMetric,
+        localDay: String,
+        sumValue: Double?,
+        averageValue: Double?,
+        minimumValue: Double?,
+        maximumValue: Double?,
+        latestValue: Double?,
+        sampleCount: Int
+    )
+    case bloodPressure(sourceObjectKey: String, measuredAtUtc: String, systolic: Int, diastolic: Int, pulse: Int?)
+    case bloodGlucose(sourceSampleKey: String, measuredAtUtc: String, valueMgDl: Double)
+    case workout(
+        sourceSampleKey: String,
+        workoutType: String,
+        startedAtUtc: String,
+        endedAtUtc: String,
+        durationSeconds: Int,
+        activeEnergyKcal: Double?,
+        distanceMeters: Double?,
+        averageHeartRateBpm: Double?,
+        maximumHeartRateBpm: Double?
+    )
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .stepsHour(hourStartUtc, count):
+            try container.encode("steps_hour", forKey: .kind)
+            try container.encode(hourStartUtc, forKey: .hourStartUtc)
+            try container.encode(count, forKey: .count)
+        case let .sleepDay(
+            sleepDay, totalMinutes, coreMinutes, deepMinutes, remMinutes,
+            unspecifiedAsleepMinutes, awakeMinutes, inBedMinutes,
+            wristTemperatureCelsius, breathingDisturbanceCount
+        ):
+            try container.encode("sleep_day", forKey: .kind)
+            try container.encode(sleepDay, forKey: .sleepDay)
+            try container.encode(totalMinutes, forKey: .totalMinutes)
+            try container.encode(coreMinutes, forKey: .coreMinutes)
+            try container.encode(deepMinutes, forKey: .deepMinutes)
+            try container.encode(remMinutes, forKey: .remMinutes)
+            try container.encode(unspecifiedAsleepMinutes, forKey: .unspecifiedAsleepMinutes)
+            try container.encode(awakeMinutes, forKey: .awakeMinutes)
+            try container.encode(inBedMinutes, forKey: .inBedMinutes)
+            try container.encodeIfPresent(wristTemperatureCelsius, forKey: .wristTemperatureCelsius)
+            try container.encodeIfPresent(breathingDisturbanceCount, forKey: .breathingDisturbanceCount)
+        case let .dailyMetric(healthMetric, localDay, sumValue, averageValue, minimumValue, maximumValue, latestValue, sampleCount):
+            try container.encode("daily_metric", forKey: .kind)
+            try container.encode(healthMetric.rawValue, forKey: .healthMetric)
+            try container.encode(localDay, forKey: .localDay)
+            try container.encodeIfPresent(sumValue, forKey: .sumValue)
+            try container.encodeIfPresent(averageValue, forKey: .averageValue)
+            try container.encodeIfPresent(minimumValue, forKey: .minimumValue)
+            try container.encodeIfPresent(maximumValue, forKey: .maximumValue)
+            try container.encodeIfPresent(latestValue, forKey: .latestValue)
+            try container.encode(sampleCount, forKey: .sampleCount)
+        case let .bloodPressure(sourceObjectKey, measuredAtUtc, systolic, diastolic, pulse):
+            try container.encode("blood_pressure", forKey: .kind)
+            try container.encode(sourceObjectKey, forKey: .sourceObjectKey)
+            try container.encode(measuredAtUtc, forKey: .measuredAtUtc)
+            try container.encode(systolic, forKey: .systolic)
+            try container.encode(diastolic, forKey: .diastolic)
+            try container.encodeIfPresent(pulse, forKey: .pulse)
+        case let .bloodGlucose(sourceSampleKey, measuredAtUtc, valueMgDl):
+            try container.encode("blood_glucose", forKey: .kind)
+            try container.encode(sourceSampleKey, forKey: .sourceSampleKey)
+            try container.encode(measuredAtUtc, forKey: .measuredAtUtc)
+            try container.encode(valueMgDl, forKey: .valueMgDl)
+        case let .workout(
+            sourceSampleKey, workoutType, startedAtUtc, endedAtUtc, durationSeconds,
+            activeEnergyKcal, distanceMeters, averageHeartRateBpm, maximumHeartRateBpm
+        ):
+            try container.encode("workout", forKey: .kind)
+            try container.encode(sourceSampleKey, forKey: .sourceSampleKey)
+            try container.encode(workoutType, forKey: .workoutType)
+            try container.encode(startedAtUtc, forKey: .startedAtUtc)
+            try container.encode(endedAtUtc, forKey: .endedAtUtc)
+            try container.encode(durationSeconds, forKey: .durationSeconds)
+            try container.encodeIfPresent(activeEnergyKcal, forKey: .activeEnergyKcal)
+            try container.encodeIfPresent(distanceMeters, forKey: .distanceMeters)
+            try container.encodeIfPresent(averageHeartRateBpm, forKey: .averageHeartRateBpm)
+            try container.encodeIfPresent(maximumHeartRateBpm, forKey: .maximumHeartRateBpm)
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, hourStartUtc, count, sleepDay, totalMinutes, coreMinutes, deepMinutes, remMinutes
+        case unspecifiedAsleepMinutes, awakeMinutes, inBedMinutes, wristTemperatureCelsius, breathingDisturbanceCount
+        case healthMetric, localDay, sumValue, averageValue, minimumValue, maximumValue, latestValue, sampleCount
+        case sourceSampleKey, sourceObjectKey, measuredAtUtc, systolic, diastolic, pulse, valueMgDl
+        case workoutType, startedAtUtc, endedAtUtc, durationSeconds, activeEnergyKcal, distanceMeters
+        case averageHeartRateBpm, maximumHeartRateBpm
+    }
 }
 
 enum HealthKitSyncOperation: Encodable {
     case stepsHourUpsert(hourStartUtc: String, count: Int)
+    case stepsHourDelete(hourStartUtc: String)
     case sleepDayUpsert(sleepDay: String, totalMinutes: Int, coreMinutes: Int, deepMinutes: Int, remMinutes: Int, unspecifiedAsleepMinutes: Int, awakeMinutes: Int, inBedMinutes: Int, wristTemperatureCelsius: Double? = nil, breathingDisturbanceCount: Int? = nil)
+    case sleepDayDelete(sleepDay: String)
     case dailyMetricUpsert(healthMetric: HealthKitDataMetric, localDay: String, sumValue: Double?, averageValue: Double?, minimumValue: Double?, maximumValue: Double?, latestValue: Double?, sampleCount: Int)
     case dailyMetricDelete(healthMetric: HealthKitDataMetric, localDay: String)
-    case bloodPressureUpsert(sourceSampleKey: String, measuredAtUtc: String, systolic: Int, diastolic: Int, pulse: Int?)
-    case bloodPressureDelete(sourceSampleKey: String)
+    case bloodPressureUpsert(sourceObjectKey: String, measuredAtUtc: String, systolic: Int, diastolic: Int, pulse: Int?)
+    case bloodPressureDelete(sourceObjectKey: String)
     case bloodGlucoseUpsert(sourceSampleKey: String, measuredAtUtc: String, valueMgDl: Double)
     case bloodGlucoseDelete(sourceSampleKey: String)
     case workoutUpsert(sourceSampleKey: String, workoutType: String, startedAtUtc: String, endedAtUtc: String, durationSeconds: Int, activeEnergyKcal: Double?, distanceMeters: Double?, averageHeartRateBpm: Double?, maximumHeartRateBpm: Double?)
@@ -427,6 +567,7 @@ enum HealthKitSyncOperation: Encodable {
         case latestValue
         case sampleCount
         case sourceSampleKey
+        case sourceObjectKey
         case measuredAtUtc
         case systolic
         case diastolic
@@ -449,6 +590,9 @@ enum HealthKitSyncOperation: Encodable {
             try container.encode("steps_hour_upsert", forKey: .kind)
             try container.encode(hourStartUtc, forKey: .hourStartUtc)
             try container.encode(count, forKey: .count)
+        case let .stepsHourDelete(hourStartUtc):
+            try container.encode("steps_hour_delete", forKey: .kind)
+            try container.encode(hourStartUtc, forKey: .hourStartUtc)
         case let .sleepDayUpsert(sleepDay, totalMinutes, coreMinutes, deepMinutes, remMinutes, unspecifiedAsleepMinutes, awakeMinutes, inBedMinutes, wristTemperatureCelsius, breathingDisturbanceCount):
             try container.encode("sleep_day_upsert", forKey: .kind)
             try container.encode(sleepDay, forKey: .sleepDay)
@@ -461,6 +605,9 @@ enum HealthKitSyncOperation: Encodable {
             try container.encode(inBedMinutes, forKey: .inBedMinutes)
             try container.encodeIfPresent(wristTemperatureCelsius, forKey: .wristTemperatureCelsius)
             try container.encodeIfPresent(breathingDisturbanceCount, forKey: .breathingDisturbanceCount)
+        case let .sleepDayDelete(sleepDay):
+            try container.encode("sleep_day_delete", forKey: .kind)
+            try container.encode(sleepDay, forKey: .sleepDay)
         case let .dailyMetricUpsert(healthMetric, localDay, sumValue, averageValue, minimumValue, maximumValue, latestValue, sampleCount):
             try container.encode("daily_metric_upsert", forKey: .kind)
             try container.encode(healthMetric.rawValue, forKey: .healthMetric)
@@ -475,16 +622,16 @@ enum HealthKitSyncOperation: Encodable {
             try container.encode("daily_metric_delete", forKey: .kind)
             try container.encode(healthMetric.rawValue, forKey: .healthMetric)
             try container.encode(localDay, forKey: .localDay)
-        case let .bloodPressureUpsert(sourceSampleKey, measuredAtUtc, systolic, diastolic, pulse):
+        case let .bloodPressureUpsert(sourceObjectKey, measuredAtUtc, systolic, diastolic, pulse):
             try container.encode("blood_pressure_upsert", forKey: .kind)
-            try container.encode(sourceSampleKey, forKey: .sourceSampleKey)
+            try container.encode(sourceObjectKey, forKey: .sourceObjectKey)
             try container.encode(measuredAtUtc, forKey: .measuredAtUtc)
             try container.encode(systolic, forKey: .systolic)
             try container.encode(diastolic, forKey: .diastolic)
             try container.encodeIfPresent(pulse, forKey: .pulse)
-        case let .bloodPressureDelete(sourceSampleKey):
+        case let .bloodPressureDelete(sourceObjectKey):
             try container.encode("blood_pressure_delete", forKey: .kind)
-            try container.encode(sourceSampleKey, forKey: .sourceSampleKey)
+            try container.encode(sourceObjectKey, forKey: .sourceObjectKey)
         case let .bloodGlucoseUpsert(sourceSampleKey, measuredAtUtc, valueMgDl):
             try container.encode("blood_glucose_upsert", forKey: .kind)
             try container.encode(sourceSampleKey, forKey: .sourceSampleKey)
@@ -512,9 +659,9 @@ enum HealthKitSyncOperation: Encodable {
 
     var metric: HealthKitSyncMetric {
         switch self {
-        case .stepsHourUpsert:
+        case .stepsHourUpsert, .stepsHourDelete:
             return .steps
-        case .sleepDayUpsert:
+        case .sleepDayUpsert, .sleepDayDelete:
             return .sleep
         case let .dailyMetricUpsert(healthMetric, _, _, _, _, _, _, _):
             return healthMetric.group
@@ -534,16 +681,20 @@ enum HealthKitSyncOperation: Encodable {
         switch self {
         case let .stepsHourUpsert(hourStartUtc, _):
             return "steps:\(hourStartUtc)"
+        case let .stepsHourDelete(hourStartUtc):
+            return "steps_del:\(hourStartUtc)"
         case let .sleepDayUpsert(sleepDay, _, _, _, _, _, _, _, _, _):
             return "sleep:\(sleepDay)"
+        case let .sleepDayDelete(sleepDay):
+            return "sleep_del:\(sleepDay)"
         case let .dailyMetricUpsert(healthMetric, localDay, _, _, _, _, _, _):
             return "daily:\(healthMetric.rawValue):\(localDay)"
         case let .dailyMetricDelete(healthMetric, localDay):
             return "daily_delete:\(healthMetric.rawValue):\(localDay)"
-        case let .bloodPressureUpsert(sourceSampleKey, _, _, _, _):
-            return "bp_up:\(sourceSampleKey)"
-        case let .bloodPressureDelete(sourceSampleKey):
-            return "bp_del:\(sourceSampleKey)"
+        case let .bloodPressureUpsert(sourceObjectKey, _, _, _, _):
+            return "bp_up:\(sourceObjectKey)"
+        case let .bloodPressureDelete(sourceObjectKey):
+            return "bp_del:\(sourceObjectKey)"
         case let .bloodGlucoseUpsert(sourceSampleKey, _, _):
             return "glucose_up:\(sourceSampleKey)"
         case let .bloodGlucoseDelete(sourceSampleKey):

@@ -1,6 +1,6 @@
 # HealthKit Sync Implementation Plan
 
-Status: draft, pre-launch rewrite
+Status: implemented (server + iOS outbox path); remaining: dirty-bucket materialization polish, retention job, TestFlight soak
 
 ## Goal
 
