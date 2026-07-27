@@ -5,6 +5,7 @@ enum HealthKitSyncEngineError: LocalizedError {
     case missingSession
     case missingConfiguration
     case backfillRequired(String)
+    case backfillEventsPending
 
     var errorDescription: String? {
         switch self {
@@ -14,6 +15,8 @@ enum HealthKitSyncEngineError: LocalizedError {
             return "HealthKit sync is not configured."
         case .backfillRequired:
             return "A foreground HealthKit backfill is required."
+        case .backfillEventsPending:
+            return "HealthKit backfill events are waiting to upload."
         }
     }
 }
@@ -302,6 +305,7 @@ actor HealthKitSyncEngine {
     ) async throws {
         // Drain session events before manifests.
         await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL) { context.accessToken }
+        try requireDrainedSessionEvents(session.sessionId)
 
         do {
             try await uploadManifestsAndComplete(
@@ -388,6 +392,7 @@ actor HealthKitSyncEngine {
             try outbox.markScopeManifestUploaded(sessionId: session.sessionId, scopeKey: scope)
         }
         await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL) { context.accessToken }
+        try requireDrainedSessionEvents(session.sessionId)
         _ = try await api.completeHealthKitBackfillSession(
             baseURL: context.baseURL,
             accessToken: context.accessToken,
@@ -396,6 +401,12 @@ actor HealthKitSyncEngine {
             personId: context.personId,
             timezoneVersion: context.timezoneVersion
         )
+    }
+
+    private func requireDrainedSessionEvents(_ sessionId: String) throws {
+        guard try outbox.pendingCount(sessionId: sessionId) == 0 else {
+            throw HealthKitSyncEngineError.backfillEventsPending
+        }
     }
 
     private func isTransientAPIError(_ error: HealthAPIError) -> Bool {

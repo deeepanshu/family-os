@@ -8,6 +8,7 @@ actor HealthKitSyncWorker {
     private let api = HealthAPIClient()
     private let store = HealthKitOutboxStore.shared
     private var isDraining = false
+    private var drainWaiters: [CheckedContinuation<Void, Never>] = []
     private var authRefreshInFlight: Task<String?, Never>?
 
     func start() {
@@ -19,9 +20,19 @@ actor HealthKitSyncWorker {
         baseURL: String,
         accessTokenProvider: @escaping @Sendable () async -> String?
     ) async {
-        guard !isDraining else { return }
+        if isDraining {
+            await withCheckedContinuation { continuation in
+                drainWaiters.append(continuation)
+            }
+            return
+        }
         isDraining = true
-        defer { isDraining = false }
+        defer {
+            isDraining = false
+            let waiters = drainWaiters
+            drainWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+        }
 
         do {
             try store.resetInFlightToPending()

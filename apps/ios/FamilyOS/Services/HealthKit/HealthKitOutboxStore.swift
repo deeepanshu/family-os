@@ -327,6 +327,16 @@ final class HealthKitOutboxStore: Sendable {
         }
     }
 
+    func pendingCount(sessionId: String) throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM outbox_events WHERE session_id = ? AND status IN ('pending', 'in_flight')",
+                arguments: [sessionId]
+            ) ?? 0
+        }
+    }
+
     func nextRetryDate() throws -> Date? {
         try dbQueue.read { db in
             guard let ts = try Double.fetchOne(
