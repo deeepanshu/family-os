@@ -15,16 +15,16 @@ actor HealthKitSyncWorker {
         Task { try? store.resetInFlightToPending() }
     }
 
-    /// Nudge the worker. Concurrent callers coalesce into one drain pass.
+    /// Nudge the worker. A caller that arrives during a drain waits, then runs
+    /// its own pass so work enqueued at the previous pass's tail is not missed.
     func nudge(
         baseURL: String,
         accessTokenProvider: @escaping @Sendable () async -> String?
     ) async {
-        if isDraining {
+        while isDraining {
             await withCheckedContinuation { continuation in
                 drainWaiters.append(continuation)
             }
-            return
         }
         isDraining = true
         defer {
