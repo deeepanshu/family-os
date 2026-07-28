@@ -216,9 +216,6 @@ function assertPayloadValid(payload: HealthKitEventPayload, event: HealthKitSync
       if (payload.totalMinutes > asleep) {
         throw new HttpError(400, "payload_invalid", "totalMinutes cannot exceed the sleep stage total.");
       }
-      if (payload.inBedMinutes < payload.totalMinutes) {
-        throw new HttpError(400, "payload_invalid", "inBedMinutes must be >= totalMinutes.");
-      }
       if (
         payload.wristTemperatureCelsius !== undefined &&
         (payload.wristTemperatureCelsius < 25 || payload.wristTemperatureCelsius > 45)

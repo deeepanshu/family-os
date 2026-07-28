@@ -422,6 +422,46 @@ describe("HealthKit outbox sync API", () => {
     expect(body.data.results[0].result).toBe("applied");
   });
 
+  it("accepts staged sleep when HealthKit has no in-bed sample", async () => {
+    const api = app();
+    const { token, profileId } = await setup(api);
+    await putSettings(api, token, profileId);
+
+    const event: HealthKitSyncEvent = {
+      eventId: crypto.randomUUID(),
+      entityKey: "sleep_day:2026-07-25",
+      entityVersion: 1,
+      group: "sleep",
+      scopeKey: "sleep",
+      op: "upsert",
+      payload: {
+        kind: "sleep_day",
+        sleepDay: "2026-07-25",
+        totalMinutes: 420,
+        coreMinutes: 220,
+        deepMinutes: 100,
+        remMinutes: 100,
+        unspecifiedAsleepMinutes: 0,
+        awakeMinutes: 20,
+        // Sleep stages do not guarantee a separate in-bed category sample.
+        inBedMinutes: 0
+      }
+    };
+
+    const res = await api.request(`${HEALTH_API_PREFIX}/healthkit/events:batch`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        installationId,
+        personId: profileId,
+        timezoneVersion: 1,
+        events: [event]
+      })
+    });
+    const body = await res.json();
+    expect(body.data.results[0].result).toBe("applied");
+  });
+
   it("server fingerprint matches shared serializer", () => {
     const event = stepsEvent({
       eventId: "11111111-1111-4111-8111-111111111111",
