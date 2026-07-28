@@ -11,7 +11,22 @@ ghcr.io/deeepanshu/family-os-health-api:main
 ```
 
 The Pi deploys via **rpi-manager** (`POST /hooks/deploy/family-os`), which sets
-`IMAGE_TAG` and runs `docker compose pull && up -d` (no build on the Pi).
+`IMAGE_TAG` and runs:
+
+1. `docker compose pull`
+2. **migrate** (one-shot `migrate` service — no-op if nothing pending)
+3. `docker compose up -d` for API + MCP
+
+No image **build** on the Pi. Migrations use `DATABASE_URL` from `.env`
+(e.g. Supabase) inside the same release image as the API.
+
+### Manual migrate (same image tag as the running app)
+
+```sh
+cd <repo>
+export IMAGE_TAG=<git-sha-or-main>
+docker compose --env-file .env -f infra/docker/compose.prod.yml --profile migrate run --rm migrate
+```
 
 The `.env` file must keep `APNS_PRIVATE_KEY_PATH` aligned with the container
 mount:

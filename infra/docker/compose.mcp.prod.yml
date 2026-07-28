@@ -22,3 +22,4 @@ services:
     restart: unless-stopped
     volumes:
       - ${FAMILY_OS_SECRETS_DIR:?set FAMILY_OS_SECRETS_DIR in .env}:/run/secrets/family-os:ro
+    # Migrations run once via compose.prod.yml `migrate` service during deploy — not on MCP start.

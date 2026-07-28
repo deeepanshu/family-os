@@ -6,6 +6,9 @@ on:
     paths:
       - "apps/api/**"
       - "packages/shared/**"
+      - "db/**"
+      - "drizzle.config.ts"
+      - "scripts/docker-migrate.sh"
       - "package.json"
       - "package-lock.json"
       - "Dockerfile"

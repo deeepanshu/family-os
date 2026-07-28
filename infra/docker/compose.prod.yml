@@ -4,14 +4,27 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "3"
 
+x-family-os-image: &family-os-image
+  image: ghcr.io/deeepanshu/family-os-health-api:${IMAGE_TAG:-local}
+  build:
+    context: ../..
+    dockerfile: Dockerfile
+
 services:
-  health-api:
+  # One-shot: docker compose --profile migrate run --rm migrate
+  # Safe no-op when schema is already up to date.
+  migrate:
+    <<: *family-os-image
     logging: *default-logging
-    image: ghcr.io/deeepanshu/family-os-health-api:${IMAGE_TAG:-local}
-    # Local/dev only: docker compose build still works when IMAGE_TAG=local and you add --build
-    build:
-      context: ../..
-      dockerfile: Dockerfile
+    profiles: ["migrate"]
+    env_file:
+      - ../../.env
+    entrypoint: ["/app/scripts/docker-migrate.sh"]
+    restart: "no"
+
+  health-api:
+    <<: *family-os-image
+    logging: *default-logging
     container_name: family-os-health-api
     env_file:
       - ../../.env
