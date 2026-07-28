@@ -55,8 +55,9 @@ final class HealthKitBackgroundSyncCoordinator {
         }
         for (_, registration) in observedTypes {
             let type = registration.type
-            let query = healthKit.observe(type: type) {
+            let query = healthKit.observe(type: type) { completionHandler in
                 Task { @MainActor in
+                    defer { completionHandler() }
                     if let dataMetric = registration.dataMetric {
                         switch dataMetric.storage {
                         case .dailyNumeric, .bloodGlucose, .workout:

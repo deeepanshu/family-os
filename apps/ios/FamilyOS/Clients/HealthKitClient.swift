@@ -1,6 +1,20 @@
 import Foundation
 import HealthKit
 
+/// HealthKit invokes this completion exactly once to release its background wake.
+/// The API does not annotate it as Sendable, but this wrapper only forwards it.
+private final class HealthKitObserverCompletion: @unchecked Sendable {
+    private let handler: () -> Void
+
+    init(_ handler: @escaping () -> Void) {
+        self.handler = handler
+    }
+
+    func call() {
+        handler()
+    }
+}
+
 enum HealthKitClientError: LocalizedError {
     case unavailable
     case sampleTypeUnavailable
@@ -97,10 +111,13 @@ struct HealthKitClient {
         }
     }
 
-    func observe(type: HKSampleType, handler: @escaping @Sendable () -> Void) -> HKObserverQuery {
+    func observe(
+        type: HKSampleType,
+        handler: @escaping @Sendable (@escaping @Sendable () -> Void) -> Void
+    ) -> HKObserverQuery {
         let query = HKObserverQuery(sampleType: type, predicate: nil) { _, completionHandler, _ in
-            handler()
-            completionHandler()
+            let completion = HealthKitObserverCompletion(completionHandler)
+            handler { completion.call() }
         }
         store.execute(query)
         return query
