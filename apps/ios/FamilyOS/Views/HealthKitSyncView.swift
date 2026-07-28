@@ -52,11 +52,9 @@ struct HealthKitSyncView: View {
                     Text("Resuming sync")
                 }
             }
+        }
 
-            Text("Sync diagnostics")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-
+        Section("Sync diagnostics") {
             LabeledContent("Queued locally", value: "\(viewModel.healthKit.outboxDiagnostics.pendingEventCount)")
             LabeledContent("Uploading", value: "\(viewModel.healthKit.outboxDiagnostics.inFlightEventCount)")
             LabeledContent("Local failures", value: "\(viewModel.healthKit.outboxDiagnostics.failedEventCount)")
