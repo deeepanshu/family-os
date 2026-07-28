@@ -21,6 +21,7 @@ import { createDependencies, repositoriesFromFamilyRepository } from "./dependen
 import type { AppRepositories } from "./repositories/contracts";
 import { createMcpRoutes, createMcpWellKnownRoutes } from "./mcp/routes";
 import { mcpOAuthPath, mcpPublicPath } from "./mcp/publicUrl";
+import { configureOtelLogs, logError, logInfo } from "./logging/otelLogs";
 
 export type AppOptions = {
   /** Env-like values parsed by `loadConfig` (strings, not pre-parsed arrays). */
@@ -29,8 +30,38 @@ export type AppOptions = {
   repositories?: AppRepositories;
 };
 
+function deploymentEnvironmentFromResourceAttributes(raw: string | undefined, nodeEnv: string): string {
+  if (raw) {
+    for (const part of raw.split(",")) {
+      const [key, ...rest] = part.trim().split("=");
+      if (key === "deployment.environment" && rest.length > 0) {
+        return rest.join("=").trim() || nodeEnv;
+      }
+    }
+  }
+  return nodeEnv === "production" ? "prod" : nodeEnv;
+}
+
 export function createApp(options: AppOptions = {}) {
   const config = options.config ? loadConfig(options.config) : loadConfig();
+  if (config.NODE_ENV !== "test") {
+    configureOtelLogs({
+      endpoint: config.OTEL_EXPORTER_OTLP_ENDPOINT,
+      serviceName: config.OTEL_SERVICE_NAME,
+      environment: deploymentEnvironmentFromResourceAttributes(
+        config.OTEL_RESOURCE_ATTRIBUTES,
+        config.NODE_ENV
+      ),
+      serviceVersion: "0.1.0",
+      enabled: Boolean(config.OTEL_EXPORTER_OTLP_ENDPOINT)
+    });
+    if (config.OTEL_EXPORTER_OTLP_ENDPOINT) {
+      logInfo("otel logs configured", {
+        endpoint: config.OTEL_EXPORTER_OTLP_ENDPOINT,
+        service: config.OTEL_SERVICE_NAME
+      });
+    }
+  }
   const dependencies = options.repositories
     ? { repositories: options.repositories }
     : options.familyRepository
@@ -96,7 +127,11 @@ export function createApp(options: AppOptions = {}) {
     if (error instanceof HttpError) {
       return jsonError(c, error);
     }
-    console.error(error);
+    logError("unhandled request error", {
+      path: c.req.path,
+      method: c.req.method,
+      error: error instanceof Error ? error.message : String(error)
+    });
     return c.json(
       {
         error: {

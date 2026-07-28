@@ -4,6 +4,7 @@ import { createMiddleware } from "hono/factory";
 import type { AppConfig } from "../config";
 import { HttpError } from "../errors";
 import type { AppVariables } from "../auth";
+import { logInfo } from "../logging/otelLogs";
 
 const writeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
@@ -30,15 +31,13 @@ export function requestLoggingMiddleware() {
         return;
       }
       const durationMs = Date.now() - startedAt;
-      console.info(
-        JSON.stringify({
-          requestId,
-          method: c.req.method,
-          path: c.req.path,
-          status: c.res.status,
-          durationMs
-        })
-      );
+      logInfo("http_request", {
+        requestId,
+        method: c.req.method,
+        path: c.req.path,
+        status: c.res.status,
+        durationMs
+      });
     }
   });
 }

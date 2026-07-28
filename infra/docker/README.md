@@ -67,4 +67,25 @@ runtime as a separate container, bound only to Pi loopback port `3002`.
 The Cloudflare Tunnel ingress for `familyos.deepanshujain.me` must route to
 `http://localhost:3002`.
 
+## Observability (OTLP → Grafana)
+
+Production compose attaches both API and MCP to the external Docker network
+`observability` and sets:
+
+```text
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+OTEL_SERVICE_NAME=family-os-health-api   # or family-os-mcp
+OTEL_RESOURCE_ATTRIBUTES=deployment.environment=prod
+```
+
+Request logs and errors are exported as OTLP logs (and still printed to
+stdout). In Grafana/Loki:
+
+```logql
+{service_name="family-os-health-api"}
+{service_name="family-os-mcp"}
+```
+
+Requires the shared stack from `rpi-observability` to be up first (`make network && make up`).
+
 See also: [rpi-manager](https://github.com/deeepanshu/rpi-manager).

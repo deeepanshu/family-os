@@ -49,7 +49,15 @@ const envSchema = z.object({
   MCP_MAX_RESULT_CHARS: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(32_000)),
   MCP_RATE_LIMIT_WINDOW_MS: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(60_000)),
   MCP_RATE_LIMIT_MAX_CALLS: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(60)),
-  HEALTH_API_MCP_DEV_OAUTH_CLIENT_ID: z.preprocess(emptyToUndefined, z.string().default("family-os-dev"))
+  HEALTH_API_MCP_DEV_OAUTH_CLIENT_ID: z.preprocess(emptyToUndefined, z.string().default("family-os-dev")),
+  /** OTLP HTTP base URL (e.g. http://otel-collector:4318). Empty disables export. */
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.preprocess(emptyToUndefined, z.string().optional()),
+  OTEL_SERVICE_NAME: z.preprocess(emptyToUndefined, z.string().default("family-os-health-api")),
+  /**
+   * Comma-separated resource attributes, e.g. deployment.environment=prod
+   * Only deployment.environment is applied today (see logging/otelLogs).
+   */
+  OTEL_RESOURCE_ATTRIBUTES: z.preprocess(emptyToUndefined, z.string().optional())
 });
 
 type ParsedAppConfig = z.infer<typeof envSchema>;

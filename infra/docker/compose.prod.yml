@@ -31,8 +31,18 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 3001
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME_API:-family-os-health-api}
+      OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-deployment.environment=prod}
     ports:
       - "3001:3001"
     restart: unless-stopped
     volumes:
       - ${FAMILY_OS_SECRETS_DIR:?set FAMILY_OS_SECRETS_DIR in .env}:/run/secrets/family-os:ro
+    networks:
+      - default
+      - observability
+
+networks:
+  observability:
+    external: true
