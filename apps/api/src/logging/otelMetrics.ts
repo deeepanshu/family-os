@@ -103,13 +103,18 @@ export function recordHttpRequest(input: {
   const seconds = Math.max(0, input.durationMs) / 1000;
   hist.count += 1;
   hist.sum += seconds;
-  // Cumulative bucket counts: each bound is count of observations <= bound; last is +Inf.
+  // Non-cumulative per-bucket counts (collector converts to Prometheus cumulative le=).
+  let placed = false;
   for (let i = 0; i < DURATION_BOUNDS.length; i++) {
     if (seconds <= DURATION_BOUNDS[i]!) {
       hist.buckets[i]! += 1;
+      placed = true;
+      break;
     }
   }
-  hist.buckets[DURATION_BOUNDS.length]! += 1;
+  if (!placed) {
+    hist.buckets[DURATION_BOUNDS.length]! += 1;
+  }
 }
 
 export function httpRequestStarted(): void {
