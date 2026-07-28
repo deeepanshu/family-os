@@ -1,9 +1,16 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   family-os-mcp:
+    logging: *default-logging
+    image: ghcr.io/deeepanshu/family-os-health-api:${IMAGE_TAG:-local}
     build:
       context: ../..
       dockerfile: Dockerfile
-    image: family-os-health-api:local
     container_name: family-os-mcp
     env_file:
       - ../../.env
