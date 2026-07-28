@@ -400,7 +400,10 @@ final class HealthKitOutboxStore: Sendable {
                 db,
                 sql: "SELECT COUNT(*) FROM outbox_events WHERE status = 'in_flight'"
             ) ?? 0
-            let failed = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM failed_events") ?? 0
+            let failed = try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM failed_events WHERE error_code NOT LIKE '%_session_mate'"
+            ) ?? 0
             let rows = try Row.fetchAll(
                 db,
                 sql: """
@@ -418,6 +421,7 @@ final class HealthKitOutboxStore: Sendable {
                     SELECT COUNT(*)
                     FROM failed_events AS failures
                     WHERE failures.session_id = sessions.session_id
+                      AND failures.error_code NOT LIKE '%_session_mate'
                   ), 0) AS failed_count
                 FROM backfill_sessions AS sessions
                 LEFT JOIN outbox_events AS events ON events.session_id = sessions.session_id
@@ -684,6 +688,18 @@ final class HealthKitOutboxStore: Sendable {
                 sql: "UPDATE backfill_sessions SET status = ? WHERE session_id = ?",
                 arguments: [status, sessionId]
             )
+        }
+    }
+
+    /// Returns true only for the first transition from an open session to an
+    /// aborted session. This gates the corresponding remote abort request.
+    func abortBackfillSessionIfOpen(sessionId: String) throws -> Bool {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE backfill_sessions SET status = 'aborted' WHERE session_id = ? AND status = 'open'",
+                arguments: [sessionId]
+            )
+            return db.changesCount > 0
         }
     }
 

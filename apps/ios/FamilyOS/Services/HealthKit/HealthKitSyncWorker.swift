@@ -251,8 +251,8 @@ actor HealthKitSyncWorker {
         errorCode: String
     ) async throws {
         guard let sessionId = row.sessionId else { return }
+        guard try store.abortBackfillSessionIfOpen(sessionId: sessionId) else { return }
         try store.setGroupStatus(groupKey: row.groupKey, status: "error", lastErrorCode: errorCode)
-        try store.updateBackfillSessionStatus(sessionId: sessionId, status: "aborted")
         // Atomically retire all local events for this dead session; keep one redacted diagnostic row.
         try store.retireSessionEvents(sessionId: sessionId, keepEventId: row.eventId, errorCode: errorCode)
 

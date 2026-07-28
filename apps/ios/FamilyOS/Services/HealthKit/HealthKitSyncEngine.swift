@@ -986,7 +986,13 @@ actor HealthKitSyncEngine {
         // A repair is authorized for one consent group only. Keep the boundary
         // client-side as well, so a registry or aggregation regression cannot
         // send a mixed chunk that the API correctly rejects.
-        return operations.filter { $0.metric == metric }
+        let window = HealthKitBackfillWindow(
+            rangeStart: rangeStart,
+            rangeEnd: rangeEnd,
+            rangeStartDay: rangeStartDay,
+            rangeEndDay: rangeEndDay
+        )
+        return operations.filter { $0.metric == metric && window.includes($0) }
     }
 
     private func seedLedgerAfterRepair(

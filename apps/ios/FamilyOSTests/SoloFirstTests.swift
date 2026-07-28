@@ -178,6 +178,38 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertFalse(AccessTokenExpiry.requiresRefresh("dev-token"))
     }
 
+    func testBackfillWindowExcludesDailyMetricBeforeFirstAllowedDay() {
+        let window = HealthKitBackfillWindow(
+            rangeStart: Date(timeIntervalSince1970: 1_777_000_000),
+            rangeEnd: Date(timeIntervalSince1970: 1_784_800_000),
+            rangeStartDay: "2026-04-30",
+            rangeEndDay: "2026-07-28"
+        )
+        let beforeWindow = HealthKitSyncOperation.dailyMetricUpsert(
+            healthMetric: .walkingSpeed,
+            localDay: "2026-04-29",
+            sumValue: nil,
+            averageValue: 1.0,
+            minimumValue: 0.8,
+            maximumValue: 1.2,
+            latestValue: 1.1,
+            sampleCount: 3
+        )
+        let firstAllowedDay = HealthKitSyncOperation.dailyMetricUpsert(
+            healthMetric: .walkingSpeed,
+            localDay: "2026-04-30",
+            sumValue: nil,
+            averageValue: 1.0,
+            minimumValue: 0.8,
+            maximumValue: 1.2,
+            latestValue: 1.1,
+            sampleCount: 3
+        )
+
+        XCTAssertFalse(window.includes(beforeWindow))
+        XCTAssertTrue(window.includes(firstAllowedDay))
+    }
+
     func testOutboxDiagnosticsReportsBackfillProgress() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("FamilyOSOutboxTests-\(UUID().uuidString)", isDirectory: true)
@@ -242,6 +274,56 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertEqual(diagnostics.backfills.first?.pendingEventCount, 1)
         XCTAssertEqual(diagnostics.backfills.first?.inFlightEventCount, 0)
         XCTAssertEqual(diagnostics.backfills.first?.acknowledgedEventCount, 1)
+    }
+
+    func testOutboxDiagnosticsCountsOnlyTheRootSessionFailure() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FamilyOSOutboxFailures-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = HealthKitOutboxStore(directoryURL: directory)
+        let sessionId = "session-1"
+
+        try store.saveBackfillSession(
+            sessionId: sessionId,
+            groupKey: "sleep",
+            rangeStart: .now.addingTimeInterval(-3600),
+            rangeEnd: .now,
+            status: "open"
+        )
+        for index in 1...3 {
+            try store.enqueueEvent(
+                eventId: "event-\(index)",
+                entityKey: "sleep:\(index)",
+                entityVersion: index,
+                groupKey: "sleep",
+                scopeKey: "sleep",
+                op: "upsert",
+                sessionId: sessionId,
+                payloadJson: Data("{}".utf8)
+            )
+        }
+
+        try store.retireSessionEvents(sessionId: sessionId, keepEventId: "event-1", errorCode: "payload_invalid")
+
+        XCTAssertEqual(try store.diagnostics().failedEventCount, 1)
+    }
+
+    func testBackfillSessionTransitionsToAbortedOnlyOnce() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FamilyOSOutboxAbort-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = HealthKitOutboxStore(directoryURL: directory)
+
+        try store.saveBackfillSession(
+            sessionId: "session-1",
+            groupKey: "sleep",
+            rangeStart: .now.addingTimeInterval(-3600),
+            rangeEnd: .now,
+            status: "open"
+        )
+
+        XCTAssertTrue(try store.abortBackfillSessionIfOpen(sessionId: "session-1"))
+        XCTAssertFalse(try store.abortBackfillSessionIfOpen(sessionId: "session-1"))
     }
 
     func testStartupRefreshesExpiredSessionBeforeBootstrap() async {

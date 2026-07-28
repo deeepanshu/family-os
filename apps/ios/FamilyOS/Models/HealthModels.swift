@@ -707,6 +707,45 @@ enum HealthKitSyncOperation: Encodable {
     }
 }
 
+/// Server-issued bounds for one backfill session. Bucketed records use the
+/// profile-local calendar range; instant records use the UTC instant range.
+struct HealthKitBackfillWindow {
+    let rangeStart: Date
+    let rangeEnd: Date
+    let rangeStartDay: String
+    let rangeEndDay: String
+
+    func includes(_ operation: HealthKitSyncOperation) -> Bool {
+        switch operation {
+        case let .stepsHourUpsert(hourStartUtc, _):
+            return includesInstant(hourStartUtc)
+        case let .sleepDayUpsert(sleepDay, _, _, _, _, _, _, _, _, _):
+            return includesDay(sleepDay)
+        case let .dailyMetricUpsert(_, localDay, _, _, _, _, _, _):
+            return includesDay(localDay)
+        case let .bloodPressureUpsert(_, measuredAtUtc, _, _, _),
+             let .bloodGlucoseUpsert(_, measuredAtUtc, _):
+            return includesInstant(measuredAtUtc)
+        case let .workoutUpsert(_, _, startedAtUtc, _, _, _, _, _, _):
+            return includesInstant(startedAtUtc)
+        case .stepsHourDelete, .sleepDayDelete, .dailyMetricDelete,
+             .bloodPressureDelete, .bloodGlucoseDelete, .workoutDelete:
+            // A delete proves a previously observed source disappeared. The
+            // API deliberately treats its time range as soft.
+            return true
+        }
+    }
+
+    private func includesDay(_ day: String) -> Bool {
+        day >= rangeStartDay && day <= rangeEndDay
+    }
+
+    private func includesInstant(_ value: String) -> Bool {
+        guard let instant = ISO8601DateFormatter().date(from: value) else { return false }
+        return instant >= rangeStart && instant <= rangeEnd
+    }
+}
+
 enum HealthKitConsent {
     /// Must match the server's accepted consent version for enabling metrics.
     static let version = "2026-07-25"

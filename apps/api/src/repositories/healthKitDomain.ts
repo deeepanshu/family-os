@@ -210,8 +210,11 @@ function assertPayloadValid(payload: HealthKitEventPayload, event: HealthKitSync
       }
       const asleep =
         payload.coreMinutes + payload.deepMinutes + payload.remMinutes + payload.unspecifiedAsleepMinutes;
-      if (payload.totalMinutes !== asleep) {
-        throw new HttpError(400, "payload_invalid", "sleep stage minutes must sum to totalMinutes.");
+      // The iOS client merges overlapping asleep intervals from separate
+      // HealthKit sources. Stage totals retain the source values, so their raw
+      // sum can be greater than the merged total duration.
+      if (payload.totalMinutes > asleep) {
+        throw new HttpError(400, "payload_invalid", "totalMinutes cannot exceed the sleep stage total.");
       }
       if (payload.inBedMinutes < payload.totalMinutes) {
         throw new HttpError(400, "payload_invalid", "inBedMinutes must be >= totalMinutes.");

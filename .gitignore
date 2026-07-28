@@ -18,3 +18,4 @@ coverage/
 apps/ios/Config/*.private.xcconfig
 !apps/ios/Config/*.private.xcconfig.example
 apps/ios/FamilyOS/Resources/GoogleService-Info.plist
+tmp/healthkit-outbox-*/
