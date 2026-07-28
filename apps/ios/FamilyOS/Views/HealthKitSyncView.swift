@@ -4,16 +4,11 @@ struct HealthKitSyncView: View {
     @ObservedObject var viewModel: HealthBootstrapViewModel
 
     var body: some View {
-        Section("HealthKit Settings") {
+        Section("Health Data") {
             Toggle(isOn: $viewModel.healthKit.consentGranted) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Upload HealthKit data")
-                    Text("Selected activity, sleep, vitals, body, mobility, workout, mindfulness, environmental, and nutrition data is uploaded to Family OS for health history and MCP access you authorize. Turn off to withdraw consent.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text("Upload HealthKit data")
             }
-            .disabled(viewModel.selfProfile == nil)
+                .disabled(viewModel.selfProfile == nil)
 
             if viewModel.healthKit.consentGranted {
                 ForEach(HealthKitSyncMetric.allCases) { metric in
@@ -32,7 +27,7 @@ struct HealthKitSyncView: View {
                 }
             }
 
-            Button("Save HealthKit Settings") {
+            Button("Save changes") {
                 Task {
                     if let current = viewModel.healthKit.status?.healthTimezone,
                        current != viewModel.healthKit.selectedTimezone {
@@ -43,54 +38,33 @@ struct HealthKitSyncView: View {
                 }
             }
             .disabled(viewModel.selfProfile == nil)
-        }
 
-        Section("HealthKit Sync") {
-            Button(viewModel.healthKit.isSyncing ? "Syncing..." : "Sync HealthKit Now") {
+            Button(viewModel.healthKit.isSyncing ? "Syncing..." : "Sync now") {
                 Task { await viewModel.syncHealthKitNow() }
             }
-            .disabled(
-                !viewModel.healthKit.isAvailable
-                    || viewModel.selfProfile == nil
-                    || viewModel.healthKit.isSyncing
-                    || viewModel.healthKit.isAutomaticallySyncing
-            )
+            .disabled(syncDisabled)
 
             if viewModel.healthKit.isAutomaticallySyncing {
-                HStack(spacing: 8) {
+                HStack {
                     ProgressView()
-                    Text("Resuming HealthKit sync")
+                    Text("Resuming sync")
                 }
             }
 
-            Text("Background delivery is best effort. iOS may delay updates. Opening the app resumes pending work.")
-                .font(.caption)
+            if !viewModel.healthKit.metricRows.isEmpty {
+                Text("Sync status")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                ForEach(viewModel.healthKit.metricRows) { metric in
+                    metricStatusRow(metric)
+                }
+            }
+
+            Text("Sync diagnostics")
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
 
-            ForEach(viewModel.healthKit.metricRows) { metric in
-                VStack(alignment: .leading, spacing: 4) {
-                    LabeledContent(metric.metric.displayName, value: metric.status.displayName)
-                    if let last = metric.lastSuccessfulAt {
-                        Text("Last success: \(last)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let code = metric.lastErrorCode {
-                        Text("Status: \(code)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
-        .task {
-            while !Task.isCancelled {
-                viewModel.refreshHealthKitOutboxDiagnostics()
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-            }
-        }
-
-        Section("Sync Activity") {
             LabeledContent("Queued locally", value: "\(viewModel.healthKit.outboxDiagnostics.pendingEventCount)")
             LabeledContent("Uploading", value: "\(viewModel.healthKit.outboxDiagnostics.inFlightEventCount)")
             LabeledContent("Local failures", value: "\(viewModel.healthKit.outboxDiagnostics.failedEventCount)")
@@ -110,6 +84,41 @@ struct HealthKitSyncView: View {
                 }
             }
         }
+        .task {
+            while !Task.isCancelled {
+                viewModel.refreshHealthKitOutboxDiagnostics()
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+    }
+
+    private var syncDisabled: Bool {
+        !viewModel.healthKit.isAvailable
+            || viewModel.selfProfile == nil
+            || viewModel.healthKit.isSyncing
+            || viewModel.healthKit.isAutomaticallySyncing
+    }
+
+    @ViewBuilder
+    private func metricStatusRow(_ metric: HealthKitMetricState) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            LabeledContent(metric.metric.displayName, value: metric.status.displayName)
+            if let detail = metricStatusDetail(metric) {
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func metricStatusDetail(_ metric: HealthKitMetricState) -> String? {
+        if let code = metric.lastErrorCode {
+            return "Status: \(code)"
+        }
+        if let last = metric.lastSuccessfulAt {
+            return "Last synced: \(last)"
+        }
+        return nil
     }
 
     private func binding(for metric: HealthKitSyncMetric) -> Binding<Bool> {
