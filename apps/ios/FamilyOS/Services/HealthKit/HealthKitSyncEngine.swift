@@ -162,8 +162,9 @@ actor HealthKitSyncEngine {
     }
 
     func runBackfill(metric: HealthKitSyncMetric, context: SessionContext) async throws {
-        // Clear any stale local open session bookkeeping before starting a new one.
-        try outbox.clearOpenBackfillSession(groupKey: metric.rawValue)
+        // A replacement backfill invalidates the old server session. Discard its
+        // local work before creating the replacement so it cannot reach the worker.
+        try outbox.discardOpenBackfillSessions(groupKey: metric.rawValue)
         try outbox.setGroupStatus(groupKey: metric.rawValue, status: "backfilling")
 
         let session: HealthKitBackfillSession

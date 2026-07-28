@@ -309,6 +309,15 @@ final class HealthKitOutboxStore: Sendable {
 
     func resetInFlightToPending() throws {
         try dbQueue.write { db in
+            // A terminal session is never valid for another upload. Its replacement
+            // session re-materializes the same coverage, so stale rows must not
+            // block the outbox with a server-side session_expired response.
+            try db.execute(sql: """
+                DELETE FROM outbox_events
+                WHERE session_id IN (
+                  SELECT session_id FROM backfill_sessions WHERE status != 'open'
+                )
+                """)
             try db.execute(sql: "UPDATE outbox_events SET status = 'pending', updated_at = ? WHERE status = 'in_flight'", arguments: [Date().timeIntervalSince1970])
         }
     }
@@ -703,12 +712,43 @@ final class HealthKitOutboxStore: Sendable {
         }
     }
 
-    func clearOpenBackfillSession(groupKey: String) throws {
+    /// Replacing a backfill session makes its local events and manifests obsolete.
+    /// The API expires the old server session when it creates the replacement.
+    func discardOpenBackfillSessions(groupKey: String) throws {
         try dbQueue.write { db in
+            let sessionIds = try String.fetchAll(
+                db,
+                sql: "SELECT session_id FROM backfill_sessions WHERE group_key = ? AND status = 'open'",
+                arguments: [groupKey]
+            )
+            guard !sessionIds.isEmpty else { return }
             try db.execute(
                 sql: "UPDATE backfill_sessions SET status = 'aborted' WHERE group_key = ? AND status = 'open'",
                 arguments: [groupKey]
             )
+            for sessionId in sessionIds {
+                try db.execute(sql: "DELETE FROM outbox_events WHERE session_id = ?", arguments: [sessionId])
+                try db.execute(sql: "DELETE FROM backfill_scope_manifests WHERE session_id = ?", arguments: [sessionId])
+            }
+        }
+    }
+
+    /// Drops a session the server has declared terminal and returns its group so
+    /// the caller can schedule a clean replacement backfill.
+    func discardBackfillSession(sessionId: String) throws -> String? {
+        try dbQueue.write { db in
+            let groupKey = try String.fetchOne(
+                db,
+                sql: "SELECT group_key FROM backfill_sessions WHERE session_id = ?",
+                arguments: [sessionId]
+            )
+            try db.execute(
+                sql: "UPDATE backfill_sessions SET status = 'aborted' WHERE session_id = ? AND status = 'open'",
+                arguments: [sessionId]
+            )
+            try db.execute(sql: "DELETE FROM outbox_events WHERE session_id = ?", arguments: [sessionId])
+            try db.execute(sql: "DELETE FROM backfill_scope_manifests WHERE session_id = ?", arguments: [sessionId])
+            return groupKey
         }
     }
 

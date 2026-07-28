@@ -288,6 +288,21 @@ actor HealthKitSyncWorker {
                 }
                 return
             }
+            if code == "session_expired" {
+                // Session fencing applies to a batch, so do not retry any
+                // session-tagged rows from it. A later engine pass starts a
+                // clean backfill for the affected group.
+                let sessionIds = Set(events.compactMap(\.sessionId))
+                for sessionId in sessionIds {
+                    if let groupKey = try store.discardBackfillSession(sessionId: sessionId) {
+                        try store.setGroupStatus(groupKey: groupKey, status: "error", lastErrorCode: code)
+                    }
+                }
+                for row in events where row.sessionId == nil {
+                    try store.scheduleRetry(eventId: row.eventId, attemptCount: row.attemptCount + 1, delaySeconds: 1)
+                }
+                return
+            }
             if code == "installation_inactive" || (status == 403 && (code?.contains("installation") == true)) {
                 for row in events {
                     try store.scheduleRetry(eventId: row.eventId, attemptCount: row.attemptCount + 1, delaySeconds: 3600)

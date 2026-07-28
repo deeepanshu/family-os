@@ -326,6 +326,73 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertFalse(try store.abortBackfillSessionIfOpen(sessionId: "session-1"))
     }
 
+    func testReplacingBackfillDiscardsOldSessionEvents() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FamilyOSOutboxReplacement-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = HealthKitOutboxStore(directoryURL: directory)
+
+        try store.saveBackfillSession(
+            sessionId: "session-1",
+            groupKey: "sleep",
+            rangeStart: .now.addingTimeInterval(-3600),
+            rangeEnd: .now,
+            status: "open"
+        )
+        try store.enqueueEvent(
+            eventId: "event-1",
+            entityKey: "sleep:2026-07-27",
+            entityVersion: 1,
+            groupKey: "sleep",
+            scopeKey: "sleep",
+            op: "upsert",
+            sessionId: "session-1",
+            payloadJson: Data("{}".utf8)
+        )
+        try store.saveScopeManifest(
+            sessionId: "session-1",
+            scopeKey: "sleep",
+            eventCount: 1,
+            manifestHash: "test",
+            eventIds: ["event-1"]
+        )
+
+        try store.discardOpenBackfillSessions(groupKey: "sleep")
+
+        XCTAssertNil(try store.openBackfillSession(groupKey: "sleep"))
+        XCTAssertTrue(try store.claimPendingEvents().isEmpty)
+        XCTAssertTrue(try store.pendingScopeManifests(sessionId: "session-1").isEmpty)
+    }
+
+    func testWorkerStartupDropsRowsForClosedSessions() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FamilyOSOutboxClosedSession-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = HealthKitOutboxStore(directoryURL: directory)
+
+        try store.saveBackfillSession(
+            sessionId: "session-1",
+            groupKey: "sleep",
+            rangeStart: .now.addingTimeInterval(-3600),
+            rangeEnd: .now,
+            status: "aborted"
+        )
+        try store.enqueueEvent(
+            eventId: "event-1",
+            entityKey: "sleep:2026-07-27",
+            entityVersion: 1,
+            groupKey: "sleep",
+            scopeKey: "sleep",
+            op: "upsert",
+            sessionId: "session-1",
+            payloadJson: Data("{}".utf8)
+        )
+
+        try store.resetInFlightToPending()
+
+        XCTAssertTrue(try store.claimPendingEvents().isEmpty)
+    }
+
     func testStartupRefreshesExpiredSessionBeforeBootstrap() async {
         let viewModel = makeViewModelWithMock([
             "/auth/v1/token": """
