@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     @ObservedObject var viewModel: HealthBootstrapViewModel
@@ -22,6 +23,43 @@ struct ContentView: View {
                 await viewModel.startup()
             }
         }
+        .overlay(alignment: .bottom) {
+            if let feedback = viewModel.actionFeedback, !feedback.isError {
+                ActionFeedbackToast(message: feedback.message)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 16)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: viewModel.actionFeedback?.id)
+        .alert("Action couldn't be completed", isPresented: actionFailurePresented) {
+            Button("OK", role: .cancel) {
+                viewModel.dismissActionFeedback()
+            }
+        } message: {
+            Text(viewModel.actionFeedback?.message ?? "")
+        }
+        .onChange(of: viewModel.actionFeedback?.id) { _, id in
+            guard let id, let feedback = viewModel.actionFeedback else { return }
+            UINotificationFeedbackGenerator().notificationOccurred(feedback.isError ? .error : .success)
+            guard !feedback.isError else { return }
+            Task {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard viewModel.actionFeedback?.id == id else { return }
+                viewModel.dismissActionFeedback()
+            }
+        }
+    }
+
+    private var actionFailurePresented: Binding<Bool> {
+        Binding(
+            get: { viewModel.actionFeedback?.isError == true },
+            set: { isPresented in
+                if !isPresented {
+                    viewModel.dismissActionFeedback()
+                }
+            }
+        )
     }
 
     private var startupLoadingView: some View {
@@ -48,6 +86,26 @@ struct ContentView: View {
             .buttonStyle(.borderedProminent)
         }
         .padding()
+    }
+}
+
+private struct ActionFeedbackToast: View {
+    let message: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+            Text(message)
+                .font(.footnote)
+                .multilineTextAlignment(.leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+        .accessibilityElement(children: .combine)
     }
 }
 

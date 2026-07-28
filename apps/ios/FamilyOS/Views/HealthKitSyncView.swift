@@ -3,7 +3,6 @@ import SwiftUI
 struct HealthKitSyncView: View {
     @ObservedObject var viewModel: HealthBootstrapViewModel
     @State private var isSavingSettings = false
-    @State private var actionFeedback: HealthKitActionFeedback?
 
     var body: some View {
         Section("Health Data") {
@@ -41,7 +40,6 @@ struct HealthKitSyncView: View {
                     } else {
                         await viewModel.saveHealthKitSettings()
                     }
-                    presentActionFeedback()
                 }
             }
             .disabled(viewModel.selfProfile == nil || isSavingSettings || viewModel.healthKit.isSyncing)
@@ -49,17 +47,9 @@ struct HealthKitSyncView: View {
             Button(viewModel.healthKit.isSyncing ? "Syncing..." : "Sync now") {
                 Task {
                     await viewModel.syncHealthKitNow()
-                    presentActionFeedback()
                 }
             }
             .disabled(syncDisabled)
-
-            if let actionFeedback {
-                Label(actionFeedback.message, systemImage: actionFeedback.isError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
-                    .font(.footnote)
-                    .foregroundStyle(actionFeedback.isError ? .red : .green)
-                    .accessibilityElement(children: .combine)
-            }
 
             if viewModel.healthKit.isAutomaticallySyncing {
                 HStack {
@@ -127,7 +117,14 @@ struct HealthKitSyncView: View {
             get: { viewModel.healthKit.backgroundSyncAlertsEnabled },
             set: { enabled in
                 Task {
-                    await viewModel.healthKit.setBackgroundSyncAlertsEnabled(enabled)
+                    let isEnabled = await viewModel.healthKit.setBackgroundSyncAlertsEnabled(enabled)
+                    if enabled && !isEnabled {
+                        viewModel.reportActionFailure("Allow notifications in Settings to receive background sync alerts.")
+                    } else if isEnabled {
+                        viewModel.reportActionResult("Background sync alerts enabled.")
+                    } else {
+                        viewModel.reportActionResult("Background sync alerts disabled.")
+                    }
                 }
             }
         )
@@ -183,13 +180,6 @@ struct HealthKitSyncView: View {
         )
     }
 
-    private func presentActionFeedback() {
-        actionFeedback = HealthKitActionFeedback(
-            message: viewModel.statusMessage,
-            isError: viewModel.isError
-        )
-    }
-
     private func displayName(for groupKey: String) -> String {
         HealthKitSyncMetric(rawValue: groupKey)?.displayName ?? groupKey.capitalized
     }
@@ -209,10 +199,4 @@ struct HealthKitSyncView: View {
         zones = Array(Set(zones)).sorted()
         return zones
     }
-}
-
-private struct HealthKitActionFeedback: Identifiable {
-    let id = UUID()
-    let message: String
-    let isError: Bool
 }

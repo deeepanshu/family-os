@@ -9,7 +9,7 @@ struct HistoryView: View {
                 Section {
                     ProfilePicker(viewModel: viewModel)
                     Button("Refresh") {
-                        Task { await refreshHistory() }
+                        Task { await refreshHistory(showsFeedback: true) }
                     }
                 }
 
@@ -36,8 +36,8 @@ struct HistoryView: View {
         }
     }
 
-    private func refreshHistory() async {
+    private func refreshHistory(showsFeedback: Bool = false) async {
         guard viewModel.hasSelectedProfile else { return }
-        await viewModel.loadBloodPressure()
+        await viewModel.loadBloodPressure(showsFeedback: showsFeedback)
     }
 }

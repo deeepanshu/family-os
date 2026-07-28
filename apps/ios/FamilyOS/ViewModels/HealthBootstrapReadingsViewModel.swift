@@ -1,8 +1,8 @@
 import Foundation
 
 extension HealthBootstrapViewModel {
-    func loadBloodPressure() async {
-        await request {
+    func loadBloodPressure(showsFeedback: Bool = false) async {
+        await request(showsFeedback: showsFeedback) {
             readings.bloodPressureReadings = try await client.listBloodPressure(
                 baseURL: connection.baseURL,
                 accessToken: auth.accessToken,

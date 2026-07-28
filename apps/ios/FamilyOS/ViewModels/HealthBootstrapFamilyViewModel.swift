@@ -29,8 +29,22 @@ extension HealthBootstrapViewModel {
         await loadCurrentFamily()
     }
 
+    func refreshFamily() async {
+        await loadCurrentFamily()
+        guard !isError else {
+            reportActionFailure(statusMessage)
+            return
+        }
+        await loadProfiles()
+        if isError {
+            reportActionFailure(statusMessage)
+        } else {
+            reportActionResult("Family refreshed.")
+        }
+    }
+
     func createFamily() async {
-        await request {
+        await request(showsFeedback: true) {
             let trimmedName = family.familyName.trimmingCharacters(in: .whitespacesAndNewlines)
             let response = try await client.createFamily(baseURL: connection.baseURL, accessToken: auth.accessToken, name: trimmedName)
             family.currentFamilyName = response.family.name
@@ -41,7 +55,7 @@ extension HealthBootstrapViewModel {
     }
 
     func createInvite() async {
-        await request {
+        await request(showsFeedback: true) {
             let response = try await client.createInvite(baseURL: connection.baseURL, accessToken: auth.accessToken)
             family.lastCreatedInviteToken = response.token
             return "Created invite token: \(response.token)"
@@ -52,7 +66,7 @@ extension HealthBootstrapViewModel {
     }
 
     func acceptInvite() async {
-        await request {
+        await request(showsFeedback: true) {
             let response = try await client.acceptInvite(
                 baseURL: connection.baseURL,
                 accessToken: auth.accessToken,
@@ -66,7 +80,7 @@ extension HealthBootstrapViewModel {
     }
 
     func acceptInvite(token: String) async {
-        await request {
+        await request(showsFeedback: true) {
             let response = try await client.acceptInvite(
                 baseURL: connection.baseURL,
                 accessToken: auth.accessToken,

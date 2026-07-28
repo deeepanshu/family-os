@@ -39,7 +39,9 @@ final class HealthKitSyncStateViewModel: ObservableObject {
         status?.metrics ?? []
     }
 
-    func setBackgroundSyncAlertsEnabled(_ enabled: Bool) async {
+    @discardableResult
+    func setBackgroundSyncAlertsEnabled(_ enabled: Bool) async -> Bool {
         backgroundSyncAlertsEnabled = await HealthKitBackgroundSyncAlerts.setEnabled(enabled)
+        return backgroundSyncAlertsEnabled
     }
 }

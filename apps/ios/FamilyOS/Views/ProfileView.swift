@@ -23,10 +23,6 @@ struct ProfileView: View {
                 }
 
                 HealthKitSyncView(viewModel: viewModel)
-
-                Section("Status") {
-                    StatusText(viewModel: viewModel)
-                }
             }
             .navigationTitle("Profile")
             .task {

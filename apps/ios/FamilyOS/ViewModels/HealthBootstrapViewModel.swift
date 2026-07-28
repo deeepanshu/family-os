@@ -12,6 +12,7 @@ final class HealthBootstrapViewModel: ObservableObject {
 
     @Published var statusMessage = "Online-only Phase 1 bootstrap is ready."
     @Published var isError = false
+    @Published var actionFeedback: ActionFeedback?
     @Published var isStartingUp = false
     @Published var needsProfileSetup = false
     @Published var startupError: Error?
@@ -110,6 +111,7 @@ final class HealthBootstrapViewModel: ObservableObject {
         startupError = nil
         statusMessage = "Signed out."
         isError = false
+        reportActionResult(statusMessage)
     }
 
     var pendingInviteToken: String? {
@@ -159,9 +161,10 @@ final class HealthBootstrapViewModel: ObservableObject {
         guard !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             isError = true
             statusMessage = "Please enter your name."
+            reportActionFailure(statusMessage)
             return
         }
-        await request {
+        await request(showsFeedback: true) {
             let profile = try await client.createSelfProfile(
                 baseURL: connection.baseURL,
                 accessToken: auth.accessToken,
@@ -191,16 +194,34 @@ final class HealthBootstrapViewModel: ObservableObject {
         healthKit.linkedProfileId = response.selfProfile?.id
     }
 
-    func request(_ action: () async throws -> String) async {
+    func request(showsFeedback: Bool = false, _ action: () async throws -> String) async {
         isError = false
         statusMessage = "Contacting Health API..."
         do {
             try await refreshSessionIfNeeded()
             statusMessage = try await action()
+            if showsFeedback {
+                reportActionResult(statusMessage)
+            }
         } catch {
             isError = true
             statusMessage = error.localizedDescription
+            if showsFeedback {
+                reportActionFailure(statusMessage)
+            }
         }
+    }
+
+    func reportActionResult(_ message: String) {
+        actionFeedback = ActionFeedback(message: message, isError: false)
+    }
+
+    func reportActionFailure(_ message: String) {
+        actionFeedback = ActionFeedback(message: message, isError: true)
+    }
+
+    func dismissActionFeedback() {
+        actionFeedback = nil
     }
 
     func storeSession(_ session: SupabaseSession) throws {
@@ -265,6 +286,12 @@ final class HealthBootstrapViewModel: ObservableObject {
             isError = false
         }
     }
+}
+
+struct ActionFeedback: Identifiable {
+    let id = UUID()
+    let message: String
+    let isError: Bool
 }
 
 enum DefaultsKey {

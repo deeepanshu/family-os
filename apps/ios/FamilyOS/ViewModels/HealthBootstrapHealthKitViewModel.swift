@@ -26,15 +26,24 @@ extension HealthBootstrapViewModel {
         healthKit.outboxDiagnostics = (try? HealthKitOutboxStore.shared.diagnostics()) ?? .empty
     }
 
-    func saveHealthKitSettings(replaceInstallation: Bool = false) async {
+    func saveHealthKitSettings(
+        replaceInstallation: Bool = false,
+        showsFeedback: Bool = true
+    ) async {
         guard let personId = selfProfile?.id else {
             isError = true
             statusMessage = "Create your profile before enabling HealthKit sync."
+            if showsFeedback {
+                reportActionFailure(statusMessage)
+            }
             return
         }
         if healthKit.consentGranted && healthKit.enabledMetrics.isEmpty {
             isError = true
             statusMessage = "Select at least one HealthKit metric, or turn off consent."
+            if showsFeedback {
+                reportActionFailure(statusMessage)
+            }
             return
         }
         let metricSummary = healthKit.enabledMetrics.map(\.rawValue).sorted().joined(separator: ",")
@@ -43,7 +52,7 @@ extension HealthBootstrapViewModel {
             "healthkit_metrics": metricSummary
         ])
         CrashReporting.log("healthkit.settings_save_requested metrics=\(metricSummary)")
-        await request {
+        await request(showsFeedback: showsFeedback) {
             let installationId = try await syncStateStore.installationId()
             let consentVersion = healthKit.consentGranted ? HealthKitConsent.version : nil
             let enabled = healthKit.consentGranted
@@ -79,22 +88,28 @@ extension HealthBootstrapViewModel {
         guard healthKitClient.isAvailable else {
             isError = true
             statusMessage = "HealthKit is not available on this device."
+            reportActionFailure(statusMessage)
             return
         }
         guard let personId = selfProfile?.id else {
             isError = true
             statusMessage = "Create your profile before syncing HealthKit."
+            reportActionFailure(statusMessage)
             return
         }
         guard healthKit.linkedProfileId == nil || healthKit.linkedProfileId == personId else {
             isError = true
             statusMessage = "HealthKit sync must target your own profile."
+            reportActionFailure(statusMessage)
             return
         }
 
         if healthKit.status == nil {
             await loadHealthKitStatus()
-            if isError { return }
+            if isError {
+                reportActionFailure(statusMessage)
+                return
+            }
         }
 
         if healthKit.status?.consentActive != true {
@@ -102,14 +117,17 @@ extension HealthBootstrapViewModel {
             if healthKit.enabledMetrics.isEmpty {
                 healthKit.enabledMetrics = Set(HealthKitSyncMetric.allCases)
             }
-            await saveHealthKitSettings()
-            if isError { return }
+            await saveHealthKitSettings(showsFeedback: false)
+            if isError {
+                reportActionFailure(statusMessage)
+                return
+            }
         }
 
         healthKit.isSyncing = true
         defer { healthKit.isSyncing = false }
 
-        await request {
+        await request(showsFeedback: true) {
             guard let status = healthKit.status else {
                 throw HealthAPIError.badStatus(409, "HealthKit settings could not be loaded. Save the settings and try again.")
             }
@@ -150,10 +168,14 @@ extension HealthBootstrapViewModel {
         guard healthKit.confirmTimezoneChange else {
             isError = true
             statusMessage = "Confirm the timezone change. This repairs the latest 90 days."
+            reportActionFailure(statusMessage)
             return
         }
-        await saveHealthKitSettings()
-        guard !isError else { return }
+        await saveHealthKitSettings(showsFeedback: false)
+        guard !isError else {
+            reportActionFailure(statusMessage)
+            return
+        }
         await syncHealthKitNow()
         healthKit.confirmTimezoneChange = false
     }

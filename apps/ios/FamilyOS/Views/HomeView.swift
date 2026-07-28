@@ -19,7 +19,6 @@ struct HomeView: View {
                         .foregroundStyle(.secondary)
 
                     LatestReadingsSummary(viewModel: viewModel)
-                    StatusText(viewModel: viewModel)
                 }
                 .padding()
             }

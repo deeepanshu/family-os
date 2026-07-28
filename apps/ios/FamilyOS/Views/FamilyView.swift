@@ -64,12 +64,8 @@ struct FamilyView: View {
 
                 Section("Connection") {
                     Button("Refresh Family") {
-                        Task {
-                            await viewModel.loadCurrentFamily()
-                            await viewModel.loadProfiles()
-                        }
+                        Task { await viewModel.refreshFamily() }
                     }
-                    StatusText(viewModel: viewModel)
                 }
             }
             .navigationTitle("Family")

@@ -11,6 +11,7 @@ extension HealthBootstrapViewModel {
         } catch {
             isError = true
             statusMessage = error.localizedDescription
+            reportActionFailure(statusMessage)
         }
     }
 
@@ -21,6 +22,7 @@ extension HealthBootstrapViewModel {
         case .failure(let error):
             isError = true
             statusMessage = error.localizedDescription
+            reportActionFailure(statusMessage)
         }
     }
 
@@ -36,9 +38,11 @@ extension HealthBootstrapViewModel {
             auth.signedInUserEmail = nil
             isError = false
             statusMessage = "Using local development sign in."
+            reportActionResult(statusMessage)
         } catch {
             isError = true
             statusMessage = error.localizedDescription
+            reportActionFailure(statusMessage)
             return
         }
         if hasAccessToken {
@@ -47,7 +51,7 @@ extension HealthBootstrapViewModel {
     }
 
     private func signInWithApple(_ authorization: ASAuthorization) async {
-        await request {
+        await request(showsFeedback: true) {
             guard let currentAppleNonce = auth.currentAppleNonce else {
                 return "Apple sign-in nonce was missing. Try again."
             }

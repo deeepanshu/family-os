@@ -9,7 +9,7 @@ extension HealthBootstrapViewModel {
     }
 
     func createProfile() async {
-        await request {
+        await request(showsFeedback: true) {
             let profile = try await client.createProfile(
                 baseURL: connection.baseURL,
                 accessToken: auth.accessToken,
