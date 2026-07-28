@@ -194,8 +194,10 @@ function assertPayloadValid(payload: HealthKitEventPayload, event: HealthKitSync
     case "sleep_day": {
       if (event.scopeKey !== "sleep") throw new HttpError(400, "payload_invalid", "sleep payload scope mismatch.");
       assertYmd(payload.sleepDay);
-      const fields = [
-        payload.totalMinutes,
+      if (!Number.isInteger(payload.totalMinutes) || payload.totalMinutes < 0 || payload.totalMinutes > 24 * 60) {
+        throw new HttpError(400, "payload_invalid", "total sleep minutes are invalid.");
+      }
+      const rawSourceFields = [
         payload.coreMinutes,
         payload.deepMinutes,
         payload.remMinutes,
@@ -203,9 +205,9 @@ function assertPayloadValid(payload: HealthKitEventPayload, event: HealthKitSync
         payload.awakeMinutes,
         payload.inBedMinutes
       ];
-      for (const value of fields) {
-        if (!Number.isInteger(value) || value < 0 || value > 24 * 60) {
-          throw new HttpError(400, "payload_invalid", "sleep minutes are invalid.");
+      for (const value of rawSourceFields) {
+        if (!Number.isInteger(value) || value < 0 || value > 7 * 24 * 60) {
+          throw new HttpError(400, "payload_invalid", "raw sleep source minutes are invalid.");
         }
       }
       const asleep =

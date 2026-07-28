@@ -30,12 +30,14 @@ const sleepDayPayload = z
     kind: z.literal("sleep_day"),
     sleepDay: ymd,
     totalMinutes: z.number().int().min(0).max(24 * 60),
-    coreMinutes: z.number().int().min(0).max(24 * 60),
-    deepMinutes: z.number().int().min(0).max(24 * 60),
-    remMinutes: z.number().int().min(0).max(24 * 60),
-    unspecifiedAsleepMinutes: z.number().int().min(0).max(24 * 60),
-    awakeMinutes: z.number().int().min(0).max(24 * 60),
-    inBedMinutes: z.number().int().min(0).max(24 * 60),
+    // These are raw source-stage totals. Separate HealthKit sources can overlap,
+    // unlike totalMinutes, which the client merges into one sleep duration.
+    coreMinutes: z.number().int().min(0).max(7 * 24 * 60),
+    deepMinutes: z.number().int().min(0).max(7 * 24 * 60),
+    remMinutes: z.number().int().min(0).max(7 * 24 * 60),
+    unspecifiedAsleepMinutes: z.number().int().min(0).max(7 * 24 * 60),
+    awakeMinutes: z.number().int().min(0).max(7 * 24 * 60),
+    inBedMinutes: z.number().int().min(0).max(7 * 24 * 60),
     wristTemperatureCelsius: z.number().min(25).max(45).optional(),
     breathingDisturbanceCount: z.number().int().min(0).max(10_000).optional()
   })
