@@ -105,6 +105,8 @@ final class HealthKitBackgroundSyncCoordinator {
     }
 
     func resumePendingWorkIfSignedIn(using viewModel: HealthBootstrapViewModel? = nil) async {
+        viewModel?.healthKit.isAutomaticallySyncing = true
+        defer { viewModel?.healthKit.isAutomaticallySyncing = false }
         await processSerialized {
             let context: HealthKitSyncEngine.SessionContext
             if let viewModel, let uiContext = await self.contextFromViewModel(viewModel) {

@@ -9,6 +9,31 @@ final class HealthKitOutboxStore: Sendable {
 
     private let dbQueue: DatabaseQueue
 
+    struct Diagnostics: Sendable, Equatable {
+        struct BackfillProgress: Identifiable, Sendable, Equatable {
+            var id: String { sessionId }
+            let sessionId: String
+            let groupKey: String
+            let expectedEventCount: Int
+            let acknowledgedEventCount: Int
+            let pendingEventCount: Int
+            let inFlightEventCount: Int
+            let failedEventCount: Int
+        }
+
+        let pendingEventCount: Int
+        let inFlightEventCount: Int
+        let failedEventCount: Int
+        let backfills: [BackfillProgress]
+
+        static let empty = Diagnostics(
+            pendingEventCount: 0,
+            inFlightEventCount: 0,
+            failedEventCount: 0,
+            backfills: []
+        )
+    }
+
     init(directoryURL: URL? = nil) {
         let fm = FileManager.default
         let base = directoryURL ?? fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -334,6 +359,67 @@ final class HealthKitOutboxStore: Sendable {
                 sql: "SELECT COUNT(*) FROM outbox_events WHERE session_id = ? AND status IN ('pending', 'in_flight')",
                 arguments: [sessionId]
             ) ?? 0
+        }
+    }
+
+    /// Redacted operational state for the temporary in-app sync activity panel.
+    func diagnostics() throws -> Diagnostics {
+        try dbQueue.read { db in
+            let pending = try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM outbox_events WHERE status = 'pending'"
+            ) ?? 0
+            let inFlight = try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM outbox_events WHERE status = 'in_flight'"
+            ) ?? 0
+            let failed = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM failed_events") ?? 0
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                SELECT
+                  sessions.session_id,
+                  sessions.group_key,
+                  COALESCE(SUM(CASE WHEN events.status = 'pending' THEN 1 ELSE 0 END), 0) AS pending_count,
+                  COALESCE(SUM(CASE WHEN events.status = 'in_flight' THEN 1 ELSE 0 END), 0) AS in_flight_count,
+                  COALESCE((
+                    SELECT SUM(manifests.event_count)
+                    FROM backfill_scope_manifests AS manifests
+                    WHERE manifests.session_id = sessions.session_id
+                  ), 0) AS expected_count,
+                  COALESCE((
+                    SELECT COUNT(*)
+                    FROM failed_events AS failures
+                    WHERE failures.session_id = sessions.session_id
+                  ), 0) AS failed_count
+                FROM backfill_sessions AS sessions
+                LEFT JOIN outbox_events AS events ON events.session_id = sessions.session_id
+                WHERE sessions.status = 'open'
+                GROUP BY sessions.session_id, sessions.group_key
+                ORDER BY sessions.group_key
+                """
+            )
+            let backfills = rows.map { row in
+                let expected = row["expected_count"] as Int
+                let pendingCount = row["pending_count"] as Int
+                let inFlightCount = row["in_flight_count"] as Int
+                let failedCount = row["failed_count"] as Int
+                return Diagnostics.BackfillProgress(
+                    sessionId: row["session_id"],
+                    groupKey: row["group_key"],
+                    expectedEventCount: expected,
+                    acknowledgedEventCount: max(0, expected - pendingCount - inFlightCount - failedCount),
+                    pendingEventCount: pendingCount,
+                    inFlightEventCount: inFlightCount,
+                    failedEventCount: failedCount
+                )
+            }
+            return Diagnostics(
+                pendingEventCount: pending,
+                inFlightEventCount: inFlight,
+                failedEventCount: failed,
+                backfills: backfills
+            )
         }
     }
 

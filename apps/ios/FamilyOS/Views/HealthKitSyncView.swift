@@ -53,7 +53,15 @@ struct HealthKitSyncView: View {
                 !viewModel.healthKit.isAvailable
                     || viewModel.selfProfile == nil
                     || viewModel.healthKit.isSyncing
+                    || viewModel.healthKit.isAutomaticallySyncing
             )
+
+            if viewModel.healthKit.isAutomaticallySyncing {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Resuming HealthKit sync")
+                }
+            }
 
             Text("Background delivery is best effort. iOS may delay updates. Opening the app resumes pending work.")
                 .font(.caption)
@@ -75,6 +83,33 @@ struct HealthKitSyncView: View {
                 }
             }
         }
+        .task {
+            while !Task.isCancelled {
+                viewModel.refreshHealthKitOutboxDiagnostics()
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+
+        Section("Sync Activity") {
+            LabeledContent("Queued locally", value: "\(viewModel.healthKit.outboxDiagnostics.pendingEventCount)")
+            LabeledContent("Uploading", value: "\(viewModel.healthKit.outboxDiagnostics.inFlightEventCount)")
+            LabeledContent("Local failures", value: "\(viewModel.healthKit.outboxDiagnostics.failedEventCount)")
+
+            ForEach(viewModel.healthKit.outboxDiagnostics.backfills) { backfill in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(displayName(for: backfill.groupKey)) backfill")
+                    LabeledContent("Expected", value: "\(backfill.expectedEventCount)")
+                    LabeledContent("Acknowledged", value: "\(backfill.acknowledgedEventCount)")
+                    LabeledContent("Queued", value: "\(backfill.pendingEventCount)")
+                    if backfill.inFlightEventCount > 0 {
+                        LabeledContent("Uploading", value: "\(backfill.inFlightEventCount)")
+                    }
+                    if backfill.failedEventCount > 0 {
+                        LabeledContent("Failed", value: "\(backfill.failedEventCount)")
+                    }
+                }
+            }
+        }
     }
 
     private func binding(for metric: HealthKitSyncMetric) -> Binding<Bool> {
@@ -88,6 +123,10 @@ struct HealthKitSyncView: View {
                 }
             }
         )
+    }
+
+    private func displayName(for groupKey: String) -> String {
+        HealthKitSyncMetric(rawValue: groupKey)?.displayName ?? groupKey.capitalized
     }
 
     private var commonTimezones: [String] {

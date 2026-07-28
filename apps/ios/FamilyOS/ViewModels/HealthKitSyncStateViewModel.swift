@@ -5,21 +5,25 @@ final class HealthKitSyncStateViewModel: ObservableObject {
     @Published var status: HealthKitSyncStatus?
     @Published var isAvailable = false
     @Published var isSyncing = false
+    @Published var isAutomaticallySyncing = false
     @Published var linkedProfileId: String?
     @Published var consentGranted = false
     @Published var selectedTimezone = TimeZone.current.identifier
     @Published var enabledMetrics: Set<HealthKitSyncMetric> = Set(HealthKitSyncMetric.allCases)
     @Published var confirmTimezoneChange = false
+    @Published var outboxDiagnostics = HealthKitOutboxStore.Diagnostics.empty
 
     func clear() {
         status = nil
         isAvailable = false
         isSyncing = false
+        isAutomaticallySyncing = false
         linkedProfileId = nil
         consentGranted = false
         selectedTimezone = TimeZone.current.identifier
         enabledMetrics = Set(HealthKitSyncMetric.allCases)
         confirmTimezoneChange = false
+        outboxDiagnostics = .empty
     }
 
     func apply(status: HealthKitSyncStatus) {

@@ -9,9 +9,6 @@ struct ProfileView: View {
                 Section("Your profile") {
                     if let selfProfile = viewModel.selfProfile {
                         LabeledContent("Name", value: selfProfile.displayName)
-                        if let relationship = selfProfile.relationshipLabel {
-                            LabeledContent("Relationship", value: relationship)
-                        }
                     } else {
                         Text("Finish setting up your profile to record readings and sync HealthKit.")
                             .foregroundStyle(.secondary)

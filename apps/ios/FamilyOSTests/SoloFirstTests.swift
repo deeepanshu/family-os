@@ -178,6 +178,62 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertFalse(AccessTokenExpiry.requiresRefresh("dev-token"))
     }
 
+    func testOutboxDiagnosticsReportsBackfillProgress() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FamilyOSOutboxTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = HealthKitOutboxStore(directoryURL: directory)
+        let sessionId = "session-1"
+
+        try store.saveBackfillSession(
+            sessionId: sessionId,
+            groupKey: "sleep",
+            rangeStart: .now.addingTimeInterval(-3600),
+            rangeEnd: .now,
+            status: "open"
+        )
+        try store.enqueueEvent(
+            eventId: "event-1",
+            entityKey: "sleep:2026-07-27",
+            entityVersion: 1,
+            groupKey: "sleep",
+            scopeKey: "sleep",
+            op: "upsert",
+            sessionId: sessionId,
+            payloadJson: Data("{}".utf8)
+        )
+        try store.enqueueEvent(
+            eventId: "event-2",
+            entityKey: "sleep:2026-07-26",
+            entityVersion: 1,
+            groupKey: "sleep",
+            scopeKey: "sleep",
+            op: "upsert",
+            sessionId: sessionId,
+            payloadJson: Data("{}".utf8)
+        )
+        try store.saveScopeManifest(
+            sessionId: sessionId,
+            scopeKey: "sleep",
+            eventCount: 2,
+            manifestHash: "test",
+            eventIds: ["event-1", "event-2"]
+        )
+
+        XCTAssertEqual(try store.claimPendingEvents(limit: 1).map(\.eventId), ["event-1"])
+        var diagnostics = try store.diagnostics()
+        XCTAssertEqual(diagnostics.pendingEventCount, 1)
+        XCTAssertEqual(diagnostics.inFlightEventCount, 1)
+        XCTAssertEqual(diagnostics.backfills.first?.expectedEventCount, 2)
+        XCTAssertEqual(diagnostics.backfills.first?.acknowledgedEventCount, 0)
+
+        try store.deleteEvents(eventIds: ["event-1"])
+        diagnostics = try store.diagnostics()
+        XCTAssertEqual(diagnostics.backfills.first?.pendingEventCount, 1)
+        XCTAssertEqual(diagnostics.backfills.first?.inFlightEventCount, 0)
+        XCTAssertEqual(diagnostics.backfills.first?.acknowledgedEventCount, 1)
+    }
+
     func testStartupRefreshesExpiredSessionBeforeBootstrap() async {
         let viewModel = makeViewModelWithMock([
             "/auth/v1/token": """

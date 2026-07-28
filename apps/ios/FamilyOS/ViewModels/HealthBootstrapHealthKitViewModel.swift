@@ -22,6 +22,10 @@ extension HealthBootstrapViewModel {
         }
     }
 
+    func refreshHealthKitOutboxDiagnostics() {
+        healthKit.outboxDiagnostics = (try? HealthKitOutboxStore.shared.diagnostics()) ?? .empty
+    }
+
     func saveHealthKitSettings(replaceInstallation: Bool = false) async {
         guard let personId = selfProfile?.id else {
             isError = true
