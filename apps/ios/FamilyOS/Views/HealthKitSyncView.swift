@@ -12,7 +12,9 @@ struct HealthKitSyncView: View {
 
             if viewModel.healthKit.consentGranted {
                 ForEach(HealthKitSyncMetric.allCases) { metric in
-                    Toggle(metric.displayName, isOn: binding(for: metric))
+                    Toggle(isOn: binding(for: metric)) {
+                        metricToggleLabel(metric)
+                    }
                 }
 
                 Picker("Health timezone", selection: $viewModel.healthKit.selectedTimezone) {
@@ -48,16 +50,6 @@ struct HealthKitSyncView: View {
                 HStack {
                     ProgressView()
                     Text("Resuming sync")
-                }
-            }
-
-            if !viewModel.healthKit.metricRows.isEmpty {
-                Text("Sync status")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                ForEach(viewModel.healthKit.metricRows) { metric in
-                    metricStatusRow(metric)
                 }
             }
 
@@ -128,25 +120,40 @@ struct HealthKitSyncView: View {
     }
 
     @ViewBuilder
-    private func metricStatusRow(_ metric: HealthKitMetricState) -> some View {
+    private func metricToggleLabel(_ metric: HealthKitSyncMetric) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            LabeledContent(metric.metric.displayName, value: metric.status.displayName)
-            if let detail = metricStatusDetail(metric) {
-                Text(detail)
+            Text(metric.displayName)
+            if let state = metricState(for: metric) {
+                Text(metricStatusText(state))
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(metricStatusColor(state))
             }
         }
     }
 
-    private func metricStatusDetail(_ metric: HealthKitMetricState) -> String? {
+    private func metricState(for metric: HealthKitSyncMetric) -> HealthKitMetricState? {
+        viewModel.healthKit.metricRows.first { $0.metric == metric }
+    }
+
+    private func metricStatusText(_ metric: HealthKitMetricState) -> String {
         if let code = metric.lastErrorCode {
-            return "Status: \(code)"
+            return "\(metric.status.displayName): \(code)"
         }
         if let last = metric.lastSuccessfulAt {
-            return "Last synced: \(last)"
+            return "\(metric.status.displayName) · Last synced \(last)"
         }
-        return nil
+        return metric.status.displayName
+    }
+
+    private func metricStatusColor(_ metric: HealthKitMetricState) -> Color {
+        switch metric.status {
+        case .ready:
+            return .secondary
+        case .backfilling, .neverSynced, .disabled:
+            return .orange
+        case .error:
+            return .red
+        }
     }
 
     private func binding(for metric: HealthKitSyncMetric) -> Binding<Bool> {
