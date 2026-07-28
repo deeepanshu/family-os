@@ -22,6 +22,7 @@ actor HealthKitSyncWorker {
     /// its own pass so work enqueued at the previous pass's tail is not missed.
     func nudge(
         baseURL: String,
+        origin: HealthKitSyncOrigin,
         accessTokenProvider: @escaping @Sendable () async -> String?
     ) async {
         while isDraining {
@@ -101,7 +102,8 @@ actor HealthKitSyncWorker {
                         wireEventIds: Set(wireEvents.map(\.eventId)),
                         config: config,
                         baseURL: baseURL,
-                        token: token
+                        token: token,
+                        origin: origin
                     )
                 } catch let error as HealthAPIError {
                     let wireIds = Set(wireEvents.map(\.eventId))
@@ -110,7 +112,8 @@ actor HealthKitSyncWorker {
                         error,
                         events: sentRows,
                         baseURL: baseURL,
-                        accessTokenProvider: accessTokenProvider
+                        accessTokenProvider: accessTokenProvider,
+                        origin: origin
                     )
                     break
                 } catch {
@@ -128,10 +131,12 @@ actor HealthKitSyncWorker {
                             delaySeconds: delay
                         )
                     }
+                    try store.recordSyncTrace(origin: origin, phase: .retryScheduled, eventCount: sentRows.count)
                     break
                 }
             }
         } catch {
+            try? store.recordSyncTrace(origin: origin, phase: .failed, eventCount: 0)
             #if DEBUG
             print("FamilyOS HealthKit worker error: \(error)")
             #endif
@@ -189,11 +194,14 @@ actor HealthKitSyncWorker {
         wireEventIds: Set<String>,
         config: HealthKitOutboxStore.ConfigurationRow,
         baseURL: String,
-        token: String
+        token: String,
+        origin: HealthKitSyncOrigin
     ) async throws {
         let byId = Dictionary(uniqueKeysWithValues: original.map { ($0.eventId, $0) })
         var handled = Set<String>()
         var deleteIds: [String] = []
+        var failedCount = 0
+        var retryCount = 0
 
         for item in results {
             handled.insert(item.eventId)
@@ -217,6 +225,7 @@ actor HealthKitSyncWorker {
                         groupKey: row.groupKey,
                         errorCode: item.result
                     )
+                    failedCount += 1
                 }
             default:
                 try store.scheduleRetry(
@@ -224,6 +233,7 @@ actor HealthKitSyncWorker {
                     attemptCount: row.attemptCount + 1,
                     delaySeconds: backoff(row.attemptCount)
                 )
+                retryCount += 1
             }
         }
 
@@ -235,10 +245,21 @@ actor HealthKitSyncWorker {
                     attemptCount: row.attemptCount + 1,
                     delaySeconds: backoff(row.attemptCount)
                 )
+                retryCount += 1
             }
         }
 
         try store.deleteEvents(eventIds: deleteIds)
+        if !deleteIds.isEmpty {
+            try store.recordSyncTrace(origin: origin, phase: .apiAcknowledged, eventCount: deleteIds.count)
+            HealthKitBackgroundSyncAlerts.notifyAfterAcknowledgement(origin: origin, eventCount: deleteIds.count)
+        }
+        if failedCount > 0 {
+            try store.recordSyncTrace(origin: origin, phase: .failed, eventCount: failedCount)
+        }
+        if retryCount > 0 {
+            try store.recordSyncTrace(origin: origin, phase: .retryScheduled, eventCount: retryCount)
+        }
     }
 
     /// Plan: permanent rejection of a session-tagged event aborts the server session
@@ -277,7 +298,8 @@ actor HealthKitSyncWorker {
         _ error: HealthAPIError,
         events: [HealthKitOutboxStore.OutboxEvent],
         baseURL: String,
-        accessTokenProvider: @escaping @Sendable () async -> String?
+        accessTokenProvider: @escaping @Sendable () async -> String?,
+        origin: HealthKitSyncOrigin
     ) async throws {
         switch error {
         case let .badStatus(status, _, code):
@@ -286,6 +308,7 @@ actor HealthKitSyncWorker {
                 for row in events {
                     try store.scheduleRetry(eventId: row.eventId, attemptCount: row.attemptCount, delaySeconds: 1)
                 }
+                try store.recordSyncTrace(origin: origin, phase: .retryScheduled, eventCount: events.count)
                 return
             }
             if code == "session_expired" {
@@ -301,12 +324,14 @@ actor HealthKitSyncWorker {
                 for row in events where row.sessionId == nil {
                     try store.scheduleRetry(eventId: row.eventId, attemptCount: row.attemptCount + 1, delaySeconds: 1)
                 }
+                try store.recordSyncTrace(origin: origin, phase: .failed, eventCount: events.count)
                 return
             }
             if code == "installation_inactive" || (status == 403 && (code?.contains("installation") == true)) {
                 for row in events {
                     try store.scheduleRetry(eventId: row.eventId, attemptCount: row.attemptCount + 1, delaySeconds: 3600)
                 }
+                try store.recordSyncTrace(origin: origin, phase: .retryScheduled, eventCount: events.count)
                 return
             }
             let delay = backoff(events.first?.attemptCount ?? 0)
@@ -319,6 +344,7 @@ actor HealthKitSyncWorker {
                 try store.scheduleRetry(eventId: row.eventId, attemptCount: row.attemptCount + 1, delaySeconds: delay)
             }
         }
+        try store.recordSyncTrace(origin: origin, phase: .retryScheduled, eventCount: events.count)
     }
 
     private func singleFlightToken(_ provider: @escaping @Sendable () async -> String?) async -> String? {

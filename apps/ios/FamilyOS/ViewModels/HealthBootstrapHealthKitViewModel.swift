@@ -124,7 +124,8 @@ extension HealthBootstrapViewModel {
                 timezone: status.healthTimezone,
                 timezoneVersion: status.healthTimezoneVersion,
                 installationId: installationId,
-                enabledGroups: status.enabledGroups
+                enabledGroups: status.enabledGroups,
+                origin: .manual
             )
 
             try await persistLocalConfiguration(from: status, userId: userId, installationId: installationId)

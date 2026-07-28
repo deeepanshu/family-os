@@ -308,6 +308,51 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertEqual(try store.diagnostics().failedEventCount, 1)
     }
 
+    func testOutboxDiagnosticsKeepsTheNewestThirtySyncTraceEntries() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FamilyOSOutboxTrace-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = HealthKitOutboxStore(directoryURL: directory)
+        let start = Date(timeIntervalSince1970: 1_000)
+
+        for index in 0..<31 {
+            try store.recordSyncTrace(
+                origin: .healthKitObserver,
+                phase: .apiAcknowledged,
+                eventCount: index,
+                timestamp: start.addingTimeInterval(TimeInterval(index))
+            )
+        }
+
+        let trace = try store.diagnostics().recentTraceEntries
+        XCTAssertEqual(trace.count, 30)
+        XCTAssertEqual(trace.first?.eventCount, 30)
+        XCTAssertEqual(trace.last?.eventCount, 1)
+        XCTAssertEqual(trace.first?.origin, .healthKitObserver)
+        XCTAssertEqual(trace.first?.phase, .apiAcknowledged)
+    }
+
+    func testBackgroundSyncAlertThrottleAllowsOnlyOneAlertPerInterval() {
+        let suite = "FamilyOSBackgroundAlertThrottle-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let start = Date(timeIntervalSince1970: 1_000)
+
+        XCTAssertTrue(HealthKitBackgroundSyncAlertThrottle.consumeIfAllowed(defaults: defaults, now: start))
+        XCTAssertFalse(
+            HealthKitBackgroundSyncAlertThrottle.consumeIfAllowed(
+                defaults: defaults,
+                now: start.addingTimeInterval(HealthKitBackgroundSyncAlertThrottle.interval - 1)
+            )
+        )
+        XCTAssertTrue(
+            HealthKitBackgroundSyncAlertThrottle.consumeIfAllowed(
+                defaults: defaults,
+                now: start.addingTimeInterval(HealthKitBackgroundSyncAlertThrottle.interval)
+            )
+        )
+    }
+
     func testBackfillSessionTransitionsToAbortedOnlyOnce() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("FamilyOSOutboxAbort-\(UUID().uuidString)", isDirectory: true)

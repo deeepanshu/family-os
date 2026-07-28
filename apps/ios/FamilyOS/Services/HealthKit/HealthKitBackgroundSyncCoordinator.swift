@@ -113,7 +113,7 @@ final class HealthKitBackgroundSyncCoordinator {
             if let viewModel, let uiContext = await self.contextFromViewModel(viewModel) {
                 context = uiContext
             } else {
-                context = try await self.sessionProvider.makeContext()
+                context = try await self.sessionProvider.makeContext(origin: .appLaunch)
             }
             try await self.engine.processPendingWork(context: context)
             self.configureObservers(for: context.enabledGroups)
@@ -138,23 +138,31 @@ final class HealthKitBackgroundSyncCoordinator {
     }
 
     private func handleObserverFire(metric: HealthKitSyncMetric) async {
+        recordTrace(origin: .healthKitObserver, phase: .started)
         let success = await processSerialized {
-            let context = try await self.sessionProvider.makeContext()
+            let context = try await self.sessionProvider.makeContext(origin: .healthKitObserver)
             guard context.enabledGroups.contains(metric) else { return }
             try await self.engine.processMetric(metric, context: context)
         }
         // Plan: do not schedule after successful observer work unless a future retry is owed.
         if !success || hasFutureOutboxRetry() {
+            if !success {
+                recordTrace(origin: .healthKitObserver, phase: .failed)
+            }
             scheduleBackgroundRetry()
         }
     }
 
     private func handleObserverFire(dataMetric: HealthKitDataMetric) async {
+        recordTrace(origin: .healthKitObserver, phase: .started)
         let success = await processSerialized {
-            let context = try await self.sessionProvider.makeContext()
+            let context = try await self.sessionProvider.makeContext(origin: .healthKitObserver)
             try await self.engine.processDataMetric(dataMetric, context: context)
         }
         if !success || hasFutureOutboxRetry() {
+            if !success {
+                recordTrace(origin: .healthKitObserver, phase: .failed)
+            }
             scheduleBackgroundRetry()
         }
     }
@@ -164,6 +172,7 @@ final class HealthKitBackgroundSyncCoordinator {
     }
 
     private func handleBackgroundProcessing(task: BGProcessingTask) async {
+        recordTrace(origin: .backgroundTask, phase: .started)
         task.expirationHandler = {
             Task { @MainActor in
                 HealthKitBackgroundSyncCoordinator.shared.scheduleBackgroundRetry()
@@ -171,15 +180,20 @@ final class HealthKitBackgroundSyncCoordinator {
         }
 
         let success = await processSerialized {
-            let context = try await self.sessionProvider.makeContext()
+            let context = try await self.sessionProvider.makeContext(origin: .backgroundTask)
             try await self.engine.processPendingWork(context: context)
             self.configureObservers(for: context.enabledGroups)
         }
 
         task.setTaskCompleted(success: success)
         if !success {
+            recordTrace(origin: .backgroundTask, phase: .failed)
             scheduleBackgroundRetry()
         }
+    }
+
+    private func recordTrace(origin: HealthKitSyncOrigin, phase: HealthKitSyncTracePhase) {
+        try? HealthKitOutboxStore.shared.recordSyncTrace(origin: origin, phase: phase, eventCount: 0)
     }
 
     @discardableResult
@@ -230,7 +244,8 @@ final class HealthKitBackgroundSyncCoordinator {
             timezone: status.healthTimezone,
             timezoneVersion: status.healthTimezoneVersion,
             installationId: installationId,
-            enabledGroups: status.enabledGroups
+            enabledGroups: status.enabledGroups,
+            origin: .appLaunch
         )
     }
 }

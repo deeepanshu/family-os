@@ -43,7 +43,10 @@ actor HealthKitSessionProvider {
         self.environment = environment
     }
 
-    func makeContext(refreshIfNeeded: Bool = true) async throws -> HealthKitSyncEngine.SessionContext {
+    func makeContext(
+        origin: HealthKitSyncOrigin,
+        refreshIfNeeded: Bool = true
+    ) async throws -> HealthKitSyncEngine.SessionContext {
         guard let configuration = await stateStore.loadConfiguration(),
               configuration.consentVersion != nil,
               !configuration.enabledMetrics.isEmpty
@@ -107,7 +110,8 @@ actor HealthKitSessionProvider {
             timezone: configuration.healthTimezone,
             timezoneVersion: configuration.healthTimezoneVersion,
             installationId: configuration.installationId,
-            enabledGroups: configuration.enabledMetrics
+            enabledGroups: configuration.enabledMetrics,
+            origin: origin
         )
     }
 }

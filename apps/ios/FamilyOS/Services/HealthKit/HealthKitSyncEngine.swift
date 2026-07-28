@@ -51,9 +51,11 @@ actor HealthKitSyncEngine {
         var timezoneVersion: Int
         var installationId: String
         var enabledGroups: [HealthKitSyncMetric]
+        var origin: HealthKitSyncOrigin
     }
 
     func enableAndRepair(context: SessionContext) async throws {
+        try outbox.recordSyncTrace(origin: context.origin, phase: .started, eventCount: 0)
         let metricSummary = context.enabledGroups.map(\.rawValue).sorted().joined(separator: ",")
         CrashReporting.setCustomValues([
             "healthkit_stage": "sync_started",
@@ -73,12 +75,13 @@ actor HealthKitSyncEngine {
         for metric in context.enabledGroups {
             try await processMetric(metric, context: context)
         }
-        await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL) { context.accessToken }
+        await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL, origin: context.origin) { context.accessToken }
         CrashReporting.setCustomValues(["healthkit_stage": "sync_completed"])
         CrashReporting.log("healthkit.sync_completed")
     }
 
     func processPendingWork(context: SessionContext) async throws {
+        try outbox.recordSyncTrace(origin: context.origin, phase: .started, eventCount: 0)
         try outbox.saveConfiguration(
             userId: context.userId,
             personId: context.personId,
@@ -91,7 +94,7 @@ actor HealthKitSyncEngine {
             try await processMetric(metric, context: context)
         }
         try await materializeDirtyBuckets(context: context)
-        await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL) { context.accessToken }
+        await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL, origin: context.origin) { context.accessToken }
     }
 
     func processMetric(_ metric: HealthKitSyncMetric, context: SessionContext) async throws {
@@ -305,7 +308,7 @@ actor HealthKitSyncEngine {
         context: SessionContext
     ) async throws {
         // Drain session events before manifests.
-        await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL) { context.accessToken }
+        await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL, origin: context.origin) { context.accessToken }
         try requireDrainedSessionEvents(session.sessionId)
 
         do {
@@ -318,7 +321,7 @@ actor HealthKitSyncEngine {
             let code = error.errorCode
             if code == "session_incomplete" {
                 // Drain pending session events, then re-upload manifests (duplicates allowed) and complete.
-                await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL) { context.accessToken }
+                await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL, origin: context.origin) { context.accessToken }
                 try await uploadManifestsAndComplete(
                     session: session,
                     eventsByScope: eventsByScope,
@@ -392,7 +395,7 @@ actor HealthKitSyncEngine {
             )
             try outbox.markScopeManifestUploaded(sessionId: session.sessionId, scopeKey: scope)
         }
-        await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL) { context.accessToken }
+        await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL, origin: context.origin) { context.accessToken }
         try requireDrainedSessionEvents(session.sessionId)
         _ = try await api.completeHealthKitBackfillSession(
             baseURL: context.baseURL,
@@ -795,7 +798,8 @@ actor HealthKitSyncEngine {
         for op in operations {
             _ = try enqueueOperation(op, sessionId: sessionId, context: context)
         }
-        await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL) { context.accessToken }
+        try outbox.recordSyncTrace(origin: context.origin, phase: .queued, eventCount: operations.count)
+        await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL, origin: context.origin) { context.accessToken }
     }
 
     private func isDelete(_ op: HealthKitSyncOperation) -> Bool {
@@ -1439,7 +1443,8 @@ actor HealthKitSyncEngine {
             )
             if committed, !eventSpecs.isEmpty {
                 // Upload only after durable local write of replacement event(s).
-                await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL) { context.accessToken }
+                try outbox.recordSyncTrace(origin: context.origin, phase: .queued, eventCount: eventSpecs.count)
+                await HealthKitSyncWorker.shared.nudge(baseURL: context.baseURL, origin: context.origin) { context.accessToken }
             }
             // If generation changed during recompute, leave dirty for another pass.
         }

@@ -68,6 +68,23 @@ struct HealthKitSyncView: View {
             LabeledContent("Queued locally", value: "\(viewModel.healthKit.outboxDiagnostics.pendingEventCount)")
             LabeledContent("Uploading", value: "\(viewModel.healthKit.outboxDiagnostics.inFlightEventCount)")
             LabeledContent("Local failures", value: "\(viewModel.healthKit.outboxDiagnostics.failedEventCount)")
+            Toggle("Background sync alerts", isOn: backgroundSyncAlertsBinding)
+
+            ForEach(viewModel.healthKit.outboxDiagnostics.recentTraceEntries.prefix(8)) { entry in
+                HStack {
+                    Text(entry.origin.displayName)
+                    Spacer()
+                    Text(entry.phase.displayName)
+                        .foregroundStyle(.secondary)
+                    if entry.eventCount > 0 {
+                        Text("\(entry.eventCount)")
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(entry.timestamp, style: .time)
+                        .foregroundStyle(.secondary)
+                }
+                .font(.caption)
+            }
 
             ForEach(viewModel.healthKit.outboxDiagnostics.backfills) { backfill in
                 VStack(alignment: .leading, spacing: 4) {
@@ -97,6 +114,17 @@ struct HealthKitSyncView: View {
             || viewModel.selfProfile == nil
             || viewModel.healthKit.isSyncing
             || viewModel.healthKit.isAutomaticallySyncing
+    }
+
+    private var backgroundSyncAlertsBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.healthKit.backgroundSyncAlertsEnabled },
+            set: { enabled in
+                Task {
+                    await viewModel.healthKit.setBackgroundSyncAlertsEnabled(enabled)
+                }
+            }
+        )
     }
 
     @ViewBuilder

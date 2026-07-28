@@ -1,5 +1,21 @@
 import Foundation
 import GRDB
+import UserNotifications
+
+enum HealthKitSyncOrigin: String, Sendable, CaseIterable, Equatable {
+    case manual
+    case appLaunch = "app_launch"
+    case healthKitObserver = "healthkit_observer"
+    case backgroundTask = "background_task"
+}
+
+enum HealthKitSyncTracePhase: String, Sendable, Equatable {
+    case started
+    case queued
+    case apiAcknowledged = "api_acknowledged"
+    case retryScheduled = "retry_scheduled"
+    case failed
+}
 
 /// Durable local SQLite outbox for HealthKit sync.
 /// All sync-path writes throw on failure. DB uses complete-until-first-auth protection
@@ -10,6 +26,14 @@ final class HealthKitOutboxStore: Sendable {
     private let dbQueue: DatabaseQueue
 
     struct Diagnostics: Sendable, Equatable {
+        struct SyncTraceEntry: Identifiable, Sendable, Equatable {
+            let id: Int
+            let timestamp: Date
+            let origin: HealthKitSyncOrigin
+            let phase: HealthKitSyncTracePhase
+            let eventCount: Int
+        }
+
         struct BackfillProgress: Identifiable, Sendable, Equatable {
             var id: String { sessionId }
             let sessionId: String
@@ -25,12 +49,14 @@ final class HealthKitOutboxStore: Sendable {
         let inFlightEventCount: Int
         let failedEventCount: Int
         let backfills: [BackfillProgress]
+        let recentTraceEntries: [SyncTraceEntry]
 
         static let empty = Diagnostics(
             pendingEventCount: 0,
             inFlightEventCount: 0,
             failedEventCount: 0,
-            backfills: []
+            backfills: [],
+            recentTraceEntries: []
         )
     }
 
@@ -135,6 +161,15 @@ final class HealthKitOutboxStore: Sendable {
                   session_id TEXT,
                   failed_at REAL NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS sync_trace (
+                  trace_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  timestamp REAL NOT NULL,
+                  origin TEXT NOT NULL CHECK (origin IN ('manual', 'app_launch', 'healthkit_observer', 'background_task')),
+                  phase TEXT NOT NULL CHECK (phase IN ('started', 'queued', 'api_acknowledged', 'retry_scheduled', 'failed')),
+                  event_count INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS sync_trace_recent ON sync_trace(trace_id DESC);
                 """)
             // Best-effort migrate older outbox DBs that predate newer columns.
             try? db.execute(sql: "ALTER TABLE backfill_scope_manifests ADD COLUMN event_ids_json TEXT")
@@ -146,6 +181,23 @@ final class HealthKitOutboxStore: Sendable {
             URLFileProtection.completeUntilFirstUserAuthentication,
             forKey: .fileProtectionKey
         )
+    }
+
+    // MARK: - Redacted sync trace
+
+    func recordSyncTrace(
+        origin: HealthKitSyncOrigin,
+        phase: HealthKitSyncTracePhase,
+        eventCount: Int,
+        timestamp: Date = Date()
+    ) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "INSERT INTO sync_trace (timestamp, origin, phase, event_count) VALUES (?, ?, ?, ?)",
+                arguments: [timestamp.timeIntervalSince1970, origin.rawValue, phase.rawValue, eventCount]
+            )
+            try db.execute(sql: "DELETE FROM sync_trace WHERE trace_id NOT IN (SELECT trace_id FROM sync_trace ORDER BY trace_id DESC LIMIT 30)")
+        }
     }
 
     // MARK: - Configuration
@@ -454,11 +506,28 @@ final class HealthKitOutboxStore: Sendable {
                     failedEventCount: failedCount
                 )
             }
+            let traceRows = try Row.fetchAll(
+                db,
+                sql: "SELECT trace_id, timestamp, origin, phase, event_count FROM sync_trace ORDER BY trace_id DESC LIMIT 30"
+            )
+            let trace = traceRows.compactMap { row -> Diagnostics.SyncTraceEntry? in
+                guard let origin = HealthKitSyncOrigin(rawValue: row["origin"]),
+                      let phase = HealthKitSyncTracePhase(rawValue: row["phase"])
+                else { return nil }
+                return Diagnostics.SyncTraceEntry(
+                    id: row["trace_id"],
+                    timestamp: Date(timeIntervalSince1970: row["timestamp"]),
+                    origin: origin,
+                    phase: phase,
+                    eventCount: row["event_count"]
+                )
+            }
             return Diagnostics(
                 pendingEventCount: pending,
                 inFlightEventCount: inFlight,
                 failedEventCount: failed,
-                backfills: backfills
+                backfills: backfills,
+                recentTraceEntries: trace
             )
         }
     }
@@ -865,6 +934,83 @@ final class HealthKitOutboxStore: Sendable {
                 sql: "UPDATE backfill_scope_manifests SET status = 'uploaded' WHERE session_id = ? AND scope_key = ?",
                 arguments: [sessionId, scopeKey]
             )
+        }
+    }
+}
+
+struct HealthKitBackgroundSyncAlertThrottle {
+    static let interval: TimeInterval = 15 * 60
+
+    static func consumeIfAllowed(defaults: UserDefaults, now: Date = Date()) -> Bool {
+        let last = defaults.double(forKey: HealthKitBackgroundSyncAlerts.lastAlertDateKey)
+        guard last == 0 || now.timeIntervalSince1970 - last >= interval else { return false }
+        defaults.set(now.timeIntervalSince1970, forKey: HealthKitBackgroundSyncAlerts.lastAlertDateKey)
+        return true
+    }
+}
+
+enum HealthKitBackgroundSyncAlerts {
+    static let enabledKey = "familyOS.healthKit.backgroundSyncAlertsEnabled"
+    static let lastAlertDateKey = "familyOS.healthKit.lastBackgroundSyncAlertAt"
+
+    static func isEnabled(defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: enabledKey)
+    }
+
+    static func setEnabled(_ enabled: Bool, defaults: UserDefaults = .standard) async -> Bool {
+        guard enabled else {
+            defaults.set(false, forKey: enabledKey)
+            return false
+        }
+
+        let granted = (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])) ?? false
+        defaults.set(granted, forKey: enabledKey)
+        return granted
+    }
+
+    static func notifyAfterAcknowledgement(
+        origin: HealthKitSyncOrigin,
+        eventCount: Int,
+        defaults: UserDefaults = .standard
+    ) {
+        guard eventCount > 0,
+              origin == .healthKitObserver || origin == .backgroundTask,
+              isEnabled(defaults: defaults),
+              HealthKitBackgroundSyncAlertThrottle.consumeIfAllowed(defaults: defaults)
+        else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Health sync complete"
+        content.body = "Background HealthKit updates were synced."
+        content.sound = .default
+        let request = UNNotificationRequest(
+            identifier: "familyOS.healthKit.backgroundSync",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { _ in }
+    }
+}
+
+extension HealthKitSyncOrigin {
+    var displayName: String {
+        switch self {
+        case .manual: return "Manual"
+        case .appLaunch: return "App launch"
+        case .healthKitObserver: return "HealthKit"
+        case .backgroundTask: return "Background task"
+        }
+    }
+}
+
+extension HealthKitSyncTracePhase {
+    var displayName: String {
+        switch self {
+        case .started: return "Started"
+        case .queued: return "Queued"
+        case .apiAcknowledged: return "Acknowledged"
+        case .retryScheduled: return "Retry scheduled"
+        case .failed: return "Failed"
         }
     }
 }

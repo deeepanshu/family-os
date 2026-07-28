@@ -12,6 +12,7 @@ final class HealthKitSyncStateViewModel: ObservableObject {
     @Published var enabledMetrics: Set<HealthKitSyncMetric> = Set(HealthKitSyncMetric.allCases)
     @Published var confirmTimezoneChange = false
     @Published var outboxDiagnostics = HealthKitOutboxStore.Diagnostics.empty
+    @Published var backgroundSyncAlertsEnabled = HealthKitBackgroundSyncAlerts.isEnabled()
 
     func clear() {
         status = nil
@@ -36,5 +37,9 @@ final class HealthKitSyncStateViewModel: ObservableObject {
 
     var metricRows: [HealthKitMetricState] {
         status?.metrics ?? []
+    }
+
+    func setBackgroundSyncAlertsEnabled(_ enabled: Bool) async {
+        backgroundSyncAlertsEnabled = await HealthKitBackgroundSyncAlerts.setEnabled(enabled)
     }
 }
