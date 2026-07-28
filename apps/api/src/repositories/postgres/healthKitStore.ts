@@ -1020,13 +1020,10 @@ export class PostgresHealthKitStore {
   ): Promise<HealthKitEventApplyResult> {
     const { event, fingerprint } = input;
 
-    const [existingEvent] = await tx`
-      select fingerprint, apply_result from healthkit_sync_events where event_id = ${event.eventId}
-    `;
-    if (existingEvent) {
-      if (existingEvent.fingerprint !== fingerprint) {
-        throw new HttpError(409, "event_conflict", "Event id was reused with a different fingerprint.");
-      }
+    // Claim the immutable event before writing canonical data. A retried request waits
+    // for this transaction, then observes the matching claim as a duplicate.
+    const receipt = await this.claimEventReceipt(tx, input);
+    if (receipt === "duplicate") {
       return { eventId: event.eventId, result: "duplicate" };
     }
 
@@ -1040,32 +1037,14 @@ export class PostgresHealthKitStore {
     if (entity) {
       const latestVersion = Number(entity.entity_version);
       if (event.entityVersion < latestVersion) {
-        await tx`
-          insert into healthkit_sync_events (
-            event_id, person_id, family_id, installation_id, entity_key, entity_version,
-            group_key, scope_key, op, session_id, fingerprint, apply_result, received_at
-          ) values (
-            ${event.eventId}, ${input.personId}, ${input.familyId}, ${input.installationId},
-            ${event.entityKey}, ${event.entityVersion}, ${event.group}, ${event.scopeKey},
-            ${event.op}, ${event.sessionId ?? null}, ${fingerprint}, 'superseded', ${input.nowIso}
-          )
-        `;
+        await this.setEventReceiptResult(tx, event.eventId, "superseded");
         return { eventId: event.eventId, result: "superseded" };
       }
       if (event.entityVersion === latestVersion) {
         if (entity.fingerprint !== fingerprint) {
           throw new HttpError(409, "event_conflict", "Entity version reused with a different fingerprint.");
         }
-        await tx`
-          insert into healthkit_sync_events (
-            event_id, person_id, family_id, installation_id, entity_key, entity_version,
-            group_key, scope_key, op, session_id, fingerprint, apply_result, received_at
-          ) values (
-            ${event.eventId}, ${input.personId}, ${input.familyId}, ${input.installationId},
-            ${event.entityKey}, ${event.entityVersion}, ${event.group}, ${event.scopeKey},
-            ${event.op}, ${event.sessionId ?? null}, ${fingerprint}, 'duplicate', ${input.nowIso}
-          )
-        `;
+        await this.setEventReceiptResult(tx, event.eventId, "duplicate");
         return { eventId: event.eventId, result: "duplicate" };
       }
     }
@@ -1095,17 +1074,6 @@ export class PostgresHealthKitStore {
         updated_at = excluded.updated_at
     `;
 
-    await tx`
-      insert into healthkit_sync_events (
-        event_id, person_id, family_id, installation_id, entity_key, entity_version,
-        group_key, scope_key, op, session_id, fingerprint, apply_result, received_at
-      ) values (
-        ${event.eventId}, ${input.personId}, ${input.familyId}, ${input.installationId},
-        ${event.entityKey}, ${event.entityVersion}, ${event.group}, ${event.scopeKey},
-        ${event.op}, ${event.sessionId ?? null}, ${fingerprint}, 'applied', ${input.nowIso}
-      )
-    `;
-
     // Incremental success does not flip never_synced/backfilling to ready.
     if (!event.sessionId) {
       await this.touchGroupState(tx, {
@@ -1119,6 +1087,54 @@ export class PostgresHealthKitStore {
     }
 
     return { eventId: event.eventId, result: "applied" };
+  }
+
+  private async claimEventReceipt(
+    tx: any,
+    input: {
+      familyId: string;
+      personId: string;
+      installationId: string;
+      timezoneVersion: number;
+      event: HealthKitSyncEvent;
+      fingerprint: string;
+      nowIso: string;
+    }
+  ): Promise<"inserted" | "duplicate"> {
+    const { event, fingerprint } = input;
+    const inserted = await tx`
+      insert into healthkit_sync_events (
+        event_id, person_id, family_id, installation_id, entity_key, entity_version,
+        group_key, scope_key, op, session_id, fingerprint, apply_result, received_at
+      ) values (
+        ${event.eventId}, ${input.personId}, ${input.familyId}, ${input.installationId},
+        ${event.entityKey}, ${event.entityVersion}, ${event.group}, ${event.scopeKey},
+        ${event.op}, ${event.sessionId ?? null}, ${fingerprint}, 'applied', ${input.nowIso}
+      )
+      on conflict (event_id) do nothing
+      returning event_id
+    `;
+    if (inserted.length > 0) return "inserted";
+
+    const [existing] = await tx`
+      select fingerprint from healthkit_sync_events where event_id = ${event.eventId}
+    `;
+    if (!existing || existing.fingerprint !== fingerprint) {
+      throw new HttpError(409, "event_conflict", "Event id was reused with a different fingerprint.");
+    }
+    return "duplicate";
+  }
+
+  private async setEventReceiptResult(
+    tx: any,
+    eventId: string,
+    applyResult: "duplicate" | "superseded"
+  ) {
+    await tx`
+      update healthkit_sync_events
+      set apply_result = ${applyResult}
+      where event_id = ${eventId}
+    `;
   }
 
   private async applyCanonical(

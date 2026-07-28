@@ -244,6 +244,76 @@ describe("Postgres repository wiring", () => {
     expect(readings).toMatchObject([{ value: 104, personId: profile.data.id, source: "healthkit" }]);
   });
 
+  it("treats concurrent retries of the same event as a duplicate", async () => {
+    const api = app();
+    const token = await jwtFor(managerId, "manager@example.com");
+    await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const profile = await (
+      await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ displayName: "Manager" })
+      })
+    ).json();
+    const profileId = profile.data.id as string;
+    const installationId = "00000000-0000-4000-8000-000000009010";
+    const settings = await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        personId: profileId,
+        enabledGroups: ["activity"],
+        healthTimezone: "UTC",
+        installationId,
+        consentVersion: "healthkit-v1"
+      })
+    });
+    expect(settings.status).toBe(200);
+
+    const event = {
+      eventId: "00000000-0000-4000-8000-000000009020",
+      entityKey: "steps_hour:2026-07-25T14:00:00.000Z",
+      entityVersion: 1,
+      group: "activity",
+      scopeKey: "steps",
+      op: "upsert",
+      payload: {
+        kind: "steps_hour",
+        hourStartUtc: "2026-07-25T14:00:00.000Z",
+        count: 1200
+      }
+    };
+    const request = () =>
+      api.request(`${HEALTH_API_PREFIX}/healthkit/events:batch`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          installationId,
+          personId: profileId,
+          timezoneVersion: 1,
+          events: [event]
+        })
+      });
+
+    const responses = await Promise.all([request(), request()]);
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    const results = await Promise.all(responses.map(async (response) => (await response.json()).data.results[0].result));
+    expect(results.sort()).toEqual(["applied", "duplicate"]);
+
+    const receipts = await sql`
+      select event_id from healthkit_sync_events where event_id = ${event.eventId}
+    `;
+    expect(receipts).toHaveLength(1);
+    const steps = await sql`
+      select count from health_step_hours
+      where person_id = ${profileId} and hour_start_utc = ${event.payload.hourStartUtc}
+    `;
+    expect(steps).toEqual([{ count: 1200 }]);
+  });
+
   it("returns canonical ISO sleep days from Postgres", async () => {
     const familyId = "00000000-0000-4000-8000-000000000003";
     const profileId = "00000000-0000-4000-8000-000000000004";
