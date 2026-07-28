@@ -4,6 +4,9 @@ import Foundation
 /// App-wide serialized worker that drains the local outbox to the Family OS API.
 actor HealthKitSyncWorker {
     static let shared = HealthKitSyncWorker()
+    // The production database is remote from the Raspberry Pi. Keep an initial
+    // backfill batch comfortably below the iOS request timeout.
+    private static let uploadBatchSize = 20
 
     private let api = HealthAPIClient()
     private let store = HealthKitOutboxStore.shared
@@ -37,7 +40,7 @@ actor HealthKitSyncWorker {
         do {
             try store.resetInFlightToPending()
             while true {
-                let batch = try store.claimPendingEvents(limit: 100)
+                let batch = try store.claimPendingEvents(limit: Self.uploadBatchSize)
                 guard !batch.isEmpty else { break }
                 guard let config = try store.loadConfiguration() else {
                     // Cannot upload without configuration; release claim.
@@ -109,6 +112,22 @@ actor HealthKitSyncWorker {
                         baseURL: baseURL,
                         accessTokenProvider: accessTokenProvider
                     )
+                    break
+                } catch {
+                    // URLSession failures (including timeouts) are not
+                    // HealthAPIError values. Release the claim with backoff
+                    // so a transient transport failure cannot strand rows in
+                    // the in-flight state until a future app launch.
+                    let wireIds = Set(wireEvents.map(\.eventId))
+                    let sentRows = batch.filter { wireIds.contains($0.eventId) }
+                    let delay = backoff(sentRows.first?.attemptCount ?? 0)
+                    for row in sentRows {
+                        try store.scheduleRetry(
+                            eventId: row.eventId,
+                            attemptCount: row.attemptCount + 1,
+                            delaySeconds: delay
+                        )
+                    }
                     break
                 }
             }
