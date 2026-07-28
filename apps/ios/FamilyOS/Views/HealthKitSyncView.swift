@@ -2,6 +2,8 @@ import SwiftUI
 
 struct HealthKitSyncView: View {
     @ObservedObject var viewModel: HealthBootstrapViewModel
+    @State private var isSavingSettings = false
+    @State private var actionFeedback: HealthKitActionFeedback?
 
     var body: some View {
         Section("Health Data") {
@@ -29,22 +31,35 @@ struct HealthKitSyncView: View {
                 }
             }
 
-            Button("Save changes") {
+            Button(isSavingSettings ? "Saving..." : "Save changes") {
                 Task {
+                    isSavingSettings = true
+                    defer { isSavingSettings = false }
                     if let current = viewModel.healthKit.status?.healthTimezone,
                        current != viewModel.healthKit.selectedTimezone {
                         await viewModel.changeHealthTimezone()
                     } else {
                         await viewModel.saveHealthKitSettings()
                     }
+                    presentActionFeedback()
                 }
             }
-            .disabled(viewModel.selfProfile == nil)
+            .disabled(viewModel.selfProfile == nil || isSavingSettings || viewModel.healthKit.isSyncing)
 
             Button(viewModel.healthKit.isSyncing ? "Syncing..." : "Sync now") {
-                Task { await viewModel.syncHealthKitNow() }
+                Task {
+                    await viewModel.syncHealthKitNow()
+                    presentActionFeedback()
+                }
             }
             .disabled(syncDisabled)
+
+            if let actionFeedback {
+                Label(actionFeedback.message, systemImage: actionFeedback.isError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(actionFeedback.isError ? .red : .green)
+                    .accessibilityElement(children: .combine)
+            }
 
             if viewModel.healthKit.isAutomaticallySyncing {
                 HStack {
@@ -102,6 +117,7 @@ struct HealthKitSyncView: View {
     private var syncDisabled: Bool {
         !viewModel.healthKit.isAvailable
             || viewModel.selfProfile == nil
+            || isSavingSettings
             || viewModel.healthKit.isSyncing
             || viewModel.healthKit.isAutomaticallySyncing
     }
@@ -167,6 +183,13 @@ struct HealthKitSyncView: View {
         )
     }
 
+    private func presentActionFeedback() {
+        actionFeedback = HealthKitActionFeedback(
+            message: viewModel.statusMessage,
+            isError: viewModel.isError
+        )
+    }
+
     private func displayName(for groupKey: String) -> String {
         HealthKitSyncMetric(rawValue: groupKey)?.displayName ?? groupKey.capitalized
     }
@@ -186,4 +209,10 @@ struct HealthKitSyncView: View {
         zones = Array(Set(zones)).sorted()
         return zones
     }
+}
+
+private struct HealthKitActionFeedback: Identifiable {
+    let id = UUID()
+    let message: String
+    let isError: Bool
 }
