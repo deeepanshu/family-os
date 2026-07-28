@@ -185,6 +185,16 @@ final class SoloFirstTests: XCTestCase {
         let store = HealthKitOutboxStore(directoryURL: directory)
         let sessionId = "session-1"
 
+        try store.saveConfiguration(
+            userId: "user-1",
+            personId: "person-1",
+            installationId: "installation-1",
+            healthTimezone: "Asia/Bangkok",
+            timezoneVersion: 1,
+            enabledGroups: ["sleep"]
+        )
+        XCTAssertEqual(try store.loadConfiguration()?.personId, "person-1")
+
         try store.saveBackfillSession(
             sessionId: sessionId,
             groupKey: "sleep",

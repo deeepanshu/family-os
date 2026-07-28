@@ -160,6 +160,17 @@ final class HealthKitOutboxStore: Sendable {
         var timezoneVersion: Int
         var enabledGroupsJson: Data
         var updatedAt: Double
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case userId = "user_id"
+            case personId = "person_id"
+            case installationId = "installation_id"
+            case healthTimezone = "health_timezone"
+            case timezoneVersion = "timezone_version"
+            case enabledGroupsJson = "enabled_groups_json"
+            case updatedAt = "updated_at"
+        }
     }
 
     func saveConfiguration(
@@ -240,6 +251,22 @@ final class HealthKitOutboxStore: Sendable {
         var nextAttemptAt: Double
         var createdAt: Double
         var updatedAt: Double
+
+        enum CodingKeys: String, CodingKey {
+            case eventId = "event_id"
+            case entityKey = "entity_key"
+            case entityVersion = "entity_version"
+            case groupKey = "group_key"
+            case scopeKey = "scope_key"
+            case op
+            case sessionId = "session_id"
+            case payloadJson = "payload_json"
+            case status
+            case attemptCount = "attempt_count"
+            case nextAttemptAt = "next_attempt_at"
+            case createdAt = "created_at"
+            case updatedAt = "updated_at"
+        }
     }
 
     /// Insert an immutable event; for session-less work, compact older pending rows for the same entity.
@@ -445,6 +472,17 @@ final class HealthKitOutboxStore: Sendable {
         var dirtyGeneration: Int
         var createdAt: Double
         var updatedAt: Double
+
+        enum CodingKeys: String, CodingKey {
+            case entityKey = "entity_key"
+            case groupKey = "group_key"
+            case scopeKey = "scope_key"
+            case bucketJson = "bucket_json"
+            case allowsDelete = "allows_delete"
+            case dirtyGeneration = "dirty_generation"
+            case createdAt = "created_at"
+            case updatedAt = "updated_at"
+        }
 
         var allowsDeleteFlag: Bool { allowsDelete != 0 }
     }
