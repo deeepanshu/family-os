@@ -83,19 +83,26 @@ jobs:
     name: Deploy on Pi via manager
     needs: build-and-push
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     steps:
-      - name: Call rpi-manager deploy hook
+      - name: Deploy and wait for Pi success
         env:
           DEPLOY_SECRET: ${{ secrets.RPI_DEPLOY_SECRET }}
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+          # Short curl per request; overall wait is the poll loop (~15 min).
+          POLL_INTERVAL: "10"
+          MAX_ATTEMPTS: "90"
+          CURL_MAX_TIME: "30"
         run: |
           set -euo pipefail
           if [ -z "${DEPLOY_SECRET}" ]; then
             echo "Missing repo secret RPI_DEPLOY_SECRET" >&2
             exit 1
           fi
-          curl -fsS -X POST "https://manager.deepanshujain.me/hooks/deploy/family-os" \
+
+          RESP="$(curl -fsS --max-time 60 -X POST \
+            "https://manager.deepanshujain.me/hooks/deploy/family-os" \
             -H "Content-Type: application/json" \
             -H "X-Deploy-Secret: ${DEPLOY_SECRET}" \
             -d "$(jq -nc \
@@ -103,6 +110,42 @@ jobs:
               --arg sha "${GITHUB_SHA}" \
               --arg tag "${IMAGE_TAG}" \
               --arg repo "${GITHUB_REPOSITORY}" \
-              '{ref:$ref, sha:$sha, image_tag:$tag, repository:$repo}')"
-          echo
-          echo "Deploy accepted for tag ${IMAGE_TAG}"
+              '{ref:$ref, sha:$sha, image_tag:$tag, repository:$repo}')")"
+          echo "${RESP}"
+          DEPLOY_ID="$(echo "${RESP}" | jq -r '.deploy_id // empty')"
+          if [ -z "${DEPLOY_ID}" ] || [ "${DEPLOY_ID}" = "null" ]; then
+            echo "Hook response missing deploy_id" >&2
+            exit 1
+          fi
+          echo "Waiting for deploy_id=${DEPLOY_ID} tag=${IMAGE_TAG}"
+
+          STATUS_URL="https://manager.deepanshujain.me/api/deploys/${DEPLOY_ID}"
+          for attempt in $(seq 1 "${MAX_ATTEMPTS}"); do
+            body="$(curl -fsS --max-time "${CURL_MAX_TIME}" \
+              -H "X-Deploy-Secret: ${DEPLOY_SECRET}" \
+              -H "Accept: application/json" \
+              "${STATUS_URL}" 2>/dev/null || true)"
+            if [ -z "${body}" ]; then
+              echo "[${attempt}/${MAX_ATTEMPTS}] poll error; retrying…"
+              sleep "${POLL_INTERVAL}"
+              continue
+            fi
+            status="$(echo "${body}" | jq -r '.status // empty')"
+            message="$(echo "${body}" | jq -r '.message // empty')"
+            echo "[${attempt}/${MAX_ATTEMPTS}] status=${status} ${message}"
+            case "${status}" in
+              success)
+                echo "Deploy ${DEPLOY_ID} succeeded"
+                exit 0
+                ;;
+              failed|rejected)
+                echo "Deploy ${DEPLOY_ID} ${status}" >&2
+                exit 1
+                ;;
+              *)
+                sleep "${POLL_INTERVAL}"
+                ;;
+            esac
+          done
+          echo "Deploy ${DEPLOY_ID} timed out" >&2
+          exit 1
