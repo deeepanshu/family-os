@@ -47,3 +47,9 @@ List connected devices when the destination name is unclear:
 ```sh
 xcrun xctrace list devices
 ```
+
+## Xcode Cloud Releases
+
+The `FamilyOS` Xcode Cloud workflow starts automatically from tags prefixed
+`release/` (for example, `release/0.1.0-22`). It does not trigger from branch
+pushes. Push a new release tag after the intended commit is on `main`.
