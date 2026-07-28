@@ -27,6 +27,7 @@ enum HealthAPIError: LocalizedError {
 }
 
 struct HealthAPIClient {
+    private static let healthKitEventBatchTimeout: TimeInterval = 45
     let session: URLSession
 
     init(session: URLSession = .shared) {
@@ -194,7 +195,8 @@ struct HealthAPIClient {
                 personId: personId,
                 timezoneVersion: timezoneVersion,
                 events: events
-            )
+            ),
+            timeoutInterval: Self.healthKitEventBatchTimeout
         )
     }
 
@@ -325,7 +327,8 @@ struct HealthAPIClient {
         path: String,
         baseURL: String,
         accessToken: String,
-        body: Body
+        body: Body,
+        timeoutInterval: TimeInterval? = nil
     ) async throws -> T {
         guard !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw HealthAPIError.missingToken
@@ -340,6 +343,9 @@ struct HealthAPIClient {
         request.setValue("application/json", forHTTPHeaderField: "accept")
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "authorization")
         request.httpBody = try JSONEncoder().encode(body)
+        if let timeoutInterval {
+            request.timeoutInterval = timeoutInterval
+        }
 
         return try await decodeEnvelope(T.self, from: request)
     }

@@ -358,7 +358,7 @@ struct HealthKitClient {
         return (systolic, diastolic, pulse, correlation.startDate)
     }
 
-    /// Attribute sleep stages to the profile-local calendar day containing the sample end.
+    /// Split sleep samples at profile-local day boundaries before aggregation.
     /// Asleep totals merge intervals so duplicate HealthKit sources do not inflate duration.
     func sleepDayTotals(
         samples: [HKCategorySample],
@@ -377,39 +377,63 @@ struct HealthKitClient {
         formatter.dateFormat = "yyyy-MM-dd"
 
         for sample in samples {
-            let day = formatter.string(from: sample.endDate)
-            let minutes = max(0, Int((sample.endDate.timeIntervalSince(sample.startDate) / 60).rounded()))
-            var total = totals[day, default: HealthKitSleepDayTotals()]
-            switch sample.value {
-            case HKCategoryValueSleepAnalysis.asleepCore.rawValue:
-                total.coreMinutes += minutes
-                asleepIntervals[day, default: []].append((sample.startDate, sample.endDate))
-            case HKCategoryValueSleepAnalysis.asleepDeep.rawValue:
-                total.deepMinutes += minutes
-                asleepIntervals[day, default: []].append((sample.startDate, sample.endDate))
-            case HKCategoryValueSleepAnalysis.asleepREM.rawValue:
-                total.remMinutes += minutes
-                asleepIntervals[day, default: []].append((sample.startDate, sample.endDate))
-            case HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue:
-                total.unspecifiedAsleepMinutes += minutes
-                asleepIntervals[day, default: []].append((sample.startDate, sample.endDate))
-            case HKCategoryValueSleepAnalysis.awake.rawValue:
-                total.awakeMinutes += minutes
-            case HKCategoryValueSleepAnalysis.inBed.rawValue:
-                total.inBedMinutes += minutes
-            default:
-                break
+            for segment in splitAtLocalDayBoundaries(from: sample.startDate, to: sample.endDate, calendar: calendar) {
+                let day = formatter.string(from: segment.start)
+                let minutes = max(0, Int((segment.end.timeIntervalSince(segment.start) / 60).rounded()))
+                var total = totals[day, default: HealthKitSleepDayTotals()]
+                switch sample.value {
+                case HKCategoryValueSleepAnalysis.asleepCore.rawValue:
+                    total.coreMinutes += minutes
+                    asleepIntervals[day, default: []].append(segment)
+                case HKCategoryValueSleepAnalysis.asleepDeep.rawValue:
+                    total.deepMinutes += minutes
+                    asleepIntervals[day, default: []].append(segment)
+                case HKCategoryValueSleepAnalysis.asleepREM.rawValue:
+                    total.remMinutes += minutes
+                    asleepIntervals[day, default: []].append(segment)
+                case HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue:
+                    total.unspecifiedAsleepMinutes += minutes
+                    asleepIntervals[day, default: []].append(segment)
+                case HKCategoryValueSleepAnalysis.awake.rawValue:
+                    total.awakeMinutes += minutes
+                case HKCategoryValueSleepAnalysis.inBed.rawValue:
+                    total.inBedMinutes += minutes
+                default:
+                    break
+                }
+                totals[day] = total
             }
-            totals[day] = total
         }
         for (day, intervals) in asleepIntervals {
             var total = totals[day, default: HealthKitSleepDayTotals()]
-            total.totalMinutes = mergeIntervals(intervals).reduce(0) { partial, interval in
+            let mergedMinutes = mergeIntervals(intervals).reduce(0) { partial, interval in
                 partial + max(0, Int((interval.end.timeIntervalSince(interval.start) / 60).rounded()))
             }
+            let sourceStageMinutes = total.coreMinutes + total.deepMinutes + total.remMinutes + total.unspecifiedAsleepMinutes
+            total.totalMinutes = min(mergedMinutes, sourceStageMinutes)
             totals[day] = total
         }
         return totals
+    }
+
+    private func splitAtLocalDayBoundaries(
+        from start: Date,
+        to end: Date,
+        calendar: Calendar
+    ) -> [(start: Date, end: Date)] {
+        guard start < end else { return [] }
+
+        var segments: [(start: Date, end: Date)] = []
+        var cursor = start
+        while cursor < end {
+            let dayStart = calendar.startOfDay(for: cursor)
+            guard let nextDayStart = calendar.date(byAdding: .day, value: 1, to: dayStart) else { break }
+            let segmentEnd = min(nextDayStart, end)
+            guard segmentEnd > cursor else { break }
+            segments.append((start: cursor, end: segmentEnd))
+            cursor = segmentEnd
+        }
+        return segments
     }
 
     private func mergeIntervals(_ intervals: [(start: Date, end: Date)]) -> [(start: Date, end: Date)] {

@@ -420,6 +420,12 @@ final class HealthKitOutboxStore: Sendable {
         }
     }
 
+    func clearFailedEvents(groupKey: String) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM failed_events WHERE group_key = ?", arguments: [groupKey])
+        }
+    }
+
     func scheduleRetry(eventId: String, attemptCount: Int, delaySeconds: TimeInterval) throws {
         let now = Date().timeIntervalSince1970
         try dbQueue.write { db in
@@ -463,7 +469,20 @@ final class HealthKitOutboxStore: Sendable {
             ) ?? 0
             let failed = try Int.fetchOne(
                 db,
-                sql: "SELECT COUNT(*) FROM failed_events WHERE error_code NOT LIKE '%_session_mate'"
+                sql: """
+                SELECT COUNT(*)
+                FROM failed_events AS failures
+                WHERE failures.error_code NOT LIKE '%_session_mate'
+                  AND (
+                    failures.session_id IS NULL
+                    OR EXISTS (
+                      SELECT 1
+                      FROM backfill_sessions AS sessions
+                      WHERE sessions.session_id = failures.session_id
+                        AND sessions.status = 'open'
+                    )
+                  )
+                """
             ) ?? 0
             let rows = try Row.fetchAll(
                 db,

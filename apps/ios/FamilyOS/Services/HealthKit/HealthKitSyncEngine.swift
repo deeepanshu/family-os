@@ -168,6 +168,7 @@ actor HealthKitSyncEngine {
         // A replacement backfill invalidates the old server session. Discard its
         // local work before creating the replacement so it cannot reach the worker.
         try outbox.discardOpenBackfillSessions(groupKey: metric.rawValue)
+        try outbox.clearFailedEvents(groupKey: metric.rawValue)
         try outbox.setGroupStatus(groupKey: metric.rawValue, status: "backfilling")
 
         let session: HealthKitBackfillSession
@@ -369,6 +370,7 @@ actor HealthKitSyncEngine {
         local.lastErrorCode = nil
         local.redactedStatus = "ready"
         await stateStore.saveMetricState(userId: context.userId, personId: context.personId, metric: metric, state: local)
+        try outbox.clearFailedEvents(groupKey: metric.rawValue)
         try outbox.setGroupStatus(groupKey: metric.rawValue, status: "ready")
         try outbox.updateBackfillSessionStatus(sessionId: session.sessionId, status: "completed")
     }
@@ -776,8 +778,6 @@ actor HealthKitSyncEngine {
     @discardableResult
     private func enqueueOperation(_ op: HealthKitSyncOperation, sessionId: String?, context: SessionContext) throws -> String {
         let eventId = UUID().uuidString.lowercased()
-        let entityKey = op.stableKey
-        // stableKey for upserts used as entity key after normalizing:
         let key = entityKeyFor(op)
         let version = try outbox.nextEntityVersion(entityKey: key)
         let payloadData = try payloadJSON(for: op)

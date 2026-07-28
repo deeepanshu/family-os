@@ -1,3 +1,4 @@
+import HealthKit
 import XCTest
 @testable import FamilyOS
 
@@ -308,6 +309,36 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertEqual(try store.diagnostics().failedEventCount, 1)
     }
 
+    func testOutboxDiagnosticsIgnoresFailuresFromAbortedSessions() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FamilyOSOutboxAbortedFailures-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = HealthKitOutboxStore(directoryURL: directory)
+        let sessionId = "session-1"
+
+        try store.saveBackfillSession(
+            sessionId: sessionId,
+            groupKey: "sleep",
+            rangeStart: .now.addingTimeInterval(-3600),
+            rangeEnd: .now,
+            status: "open"
+        )
+        try store.enqueueEvent(
+            eventId: "event-1",
+            entityKey: "sleep:1",
+            entityVersion: 1,
+            groupKey: "sleep",
+            scopeKey: "sleep",
+            op: "upsert",
+            sessionId: sessionId,
+            payloadJson: Data("{}".utf8)
+        )
+        try store.updateBackfillSessionStatus(sessionId: sessionId, status: "aborted")
+        try store.retireSessionEvents(sessionId: sessionId, keepEventId: "event-1", errorCode: "payload_invalid")
+
+        XCTAssertEqual(try store.diagnostics().failedEventCount, 0)
+    }
+
     func testOutboxDiagnosticsKeepsTheNewestThirtySyncTraceEntries() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("FamilyOSOutboxTrace-\(UUID().uuidString)", isDirectory: true)
@@ -330,6 +361,26 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertEqual(trace.last?.eventCount, 1)
         XCTAssertEqual(trace.first?.origin, .healthKitObserver)
         XCTAssertEqual(trace.first?.phase, .apiAcknowledged)
+    }
+
+    func testSleepTotalsSplitSamplesAcrossLocalDayBoundaries() {
+        let formatter = ISO8601DateFormatter()
+        let start = formatter.date(from: "2026-07-01T23:00:00Z")!
+        let end = formatter.date(from: "2026-07-02T01:00:00Z")!
+        let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!
+        let sample = HKCategorySample(
+            type: sleepType,
+            value: HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue,
+            start: start,
+            end: end
+        )
+
+        let totals = HealthKitClient().sleepDayTotals(samples: [sample], timeZoneIdentifier: "UTC")
+
+        XCTAssertEqual(totals["2026-07-01"]?.totalMinutes, 60)
+        XCTAssertEqual(totals["2026-07-01"]?.unspecifiedAsleepMinutes, 60)
+        XCTAssertEqual(totals["2026-07-02"]?.totalMinutes, 60)
+        XCTAssertEqual(totals["2026-07-02"]?.unspecifiedAsleepMinutes, 60)
     }
 
     func testBackgroundSyncAlertThrottleAllowsOnlyOneAlertPerInterval() {
