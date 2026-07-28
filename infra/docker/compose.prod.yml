@@ -31,9 +31,10 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 3001
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
-      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME_API:-family-os-health-api}
-      OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-deployment.environment=prod}
+      # Must be the Docker DNS name — do not use host .env 127.0.0.1 (that is the container loopback).
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_SERVICE_NAME: family-os-health-api
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=prod
     ports:
       - "3001:3001"
     restart: unless-stopped
