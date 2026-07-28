@@ -7,10 +7,106 @@
   "links": [],
   "panels": [
     {
-      "title": "API request logs",
-      "description": "OTLP logs from family-os-health-api",
+      "title": "Request rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(app_http_server_requests_total{job=~\"homelab/family-os.*\"}[5m])) or sum(rate(app_http_server_requests_total{service_name=~\"family-os.*\"}[5m])) or sum(rate(app_http_server_requests_total[5m]))",
+          "legendFormat": "req/s",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "title": "Error rate (5xx)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(app_http_server_errors_total[5m])) or sum(rate(app_http_server_requests_total{status_class=\"5xx\"}[5m]))",
+          "legendFormat": "errors/s",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "color": { "mode": "fixed", "fixedColor": "red" } }, "overrides": [] }
+    },
+    {
+      "title": "In-flight requests",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 4, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(app_http_server_inflight_requests) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "App up",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 4, "x": 20, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "max(app_app_up) or max(app_app_up_ratio) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Latency p50 / p95 (histogram)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(app_http_server_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(app_http_server_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "title": "Requests by route",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (route, method) (rate(app_http_server_requests_total[5m]))",
+          "legendFormat": "{{method}} {{route}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Requests by status class",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (status_class) (rate(app_http_server_requests_total[5m]))",
+          "legendFormat": "{{status_class}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "API logs",
       "type": "logs",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 16 },
       "datasource": { "type": "loki", "uid": "loki" },
       "targets": [
         {
@@ -21,17 +117,15 @@
       "options": {
         "showTime": true,
         "showLabels": true,
-        "showCommonLabels": false,
         "wrapLogMessage": true,
         "enableLogDetails": true,
         "sortOrder": "Descending"
       }
     },
     {
-      "title": "MCP request logs",
-      "description": "OTLP logs from family-os-mcp",
+      "title": "MCP logs",
       "type": "logs",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 10 },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 26 },
       "datasource": { "type": "loki", "uid": "loki" },
       "targets": [
         {
@@ -42,44 +136,17 @@
       "options": {
         "showTime": true,
         "showLabels": true,
-        "showCommonLabels": false,
         "wrapLogMessage": true,
         "enableLogDetails": true,
         "sortOrder": "Descending"
       }
-    },
-    {
-      "title": "HTTP request rate (log-derived)",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
-      "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [
-        {
-          "expr": "sum(count_over_time({service_name=\"family-os-health-api\"} |= \"http_request\" [1m]))",
-          "legendFormat": "requests/min",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "title": "5xx / error log lines",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
-      "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [
-        {
-          "expr": "sum(count_over_time({service_name=\"family-os-health-api\"} |~ \"(?i)error|status..=5\" [1m]))",
-          "legendFormat": "errors/min",
-          "refId": "A"
-        }
-      ]
     }
   ],
   "schemaVersion": 39,
-  "tags": ["family-os", "api"],
+  "tags": ["family-os", "api", "metrics"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
   "title": "Family OS API",
   "uid": "family-os-api",
-  "version": 1
+  "version": 2
 }

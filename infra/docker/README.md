@@ -78,8 +78,19 @@ OTEL_SERVICE_NAME=family-os-health-api   # or family-os-mcp
 OTEL_RESOURCE_ATTRIBUTES=deployment.environment=prod
 ```
 
-Request logs and errors are exported as OTLP logs (and still printed to
-stdout). In Grafana/Loki:
+**Logs** (OTLP → Loki) and **metrics** (OTLP → Prometheus via collector `:8889`)
+are both exported. Request middleware records:
+
+| Metric | Meaning |
+|--------|---------|
+| `app_http_server_requests_total` | Counter by method, route, status |
+| `app_http_server_request_duration_seconds` | Latency histogram |
+| `app_http_server_errors_total` | 5xx counter |
+| `app_http_server_inflight_requests` | In-flight gauge |
+| `app_app_up` / `app_app_up_ratio` | Process heartbeat |
+
+Grafana: dashboard **Family OS API** (folder Apps), synced from
+`grafana/dashboards/family-os-api.json` on deploy.
 
 ```logql
 {service_name="family-os-health-api"}

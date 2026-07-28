@@ -1,9 +1,17 @@
 /**
  * Lightweight OTLP/HTTP JSON log exporter for the homelab collector.
- * Mirrors the contract used by yt-learner / expense-tracker / rpi-manager:
- *   OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
  * Logs always go to console; OTLP is best-effort and never throws into request path.
  */
+
+import {
+  getOtelConfig,
+  isOtelEnabled,
+  otelAttrValue,
+  otelResourceAttributes,
+  resetOtelConfigForTests,
+  setOtelConfig
+} from "./otelConfig";
+import { configureOtelMetrics, flushOtelMetrics } from "./otelMetrics";
 
 export type LogSeverity = "DEBUG" | "INFO" | "WARN" | "ERROR";
 
@@ -16,14 +24,6 @@ type PendingLog = {
   timeUnixNano: string;
 };
 
-type OtelConfig = {
-  enabled: boolean;
-  endpoint: string;
-  serviceName: string;
-  environment: string;
-  serviceVersion: string;
-};
-
 const SEVERITY_NUMBER: Record<LogSeverity, number> = {
   DEBUG: 5,
   INFO: 9,
@@ -31,39 +31,9 @@ const SEVERITY_NUMBER: Record<LogSeverity, number> = {
   ERROR: 17
 };
 
-let config: OtelConfig = {
-  enabled: false,
-  endpoint: "",
-  serviceName: "family-os-health-api",
-  environment: "development",
-  serviceVersion: "0.1.0"
-};
-
 const pending: PendingLog[] = [];
 let flushTimer: ReturnType<typeof setInterval> | undefined;
 let flushing = false;
-
-function attrValue(value: string | number | boolean): { stringValue: string } | { intValue: string } | { doubleValue: number } | { boolValue: boolean } {
-  if (typeof value === "boolean") {
-    return { boolValue: value };
-  }
-  if (typeof value === "number") {
-    if (Number.isInteger(value)) {
-      return { intValue: String(value) };
-    }
-    return { doubleValue: value };
-  }
-  return { stringValue: value };
-}
-
-function resourceAttributes() {
-  return [
-    { key: "service.name", value: attrValue(config.serviceName) },
-    { key: "service.namespace", value: attrValue("homelab") },
-    { key: "deployment.environment", value: attrValue(config.environment) },
-    { key: "service.version", value: attrValue(config.serviceVersion) }
-  ];
-}
 
 export function configureOtelLogs(input: {
   endpoint?: string;
@@ -72,39 +42,33 @@ export function configureOtelLogs(input: {
   serviceVersion?: string;
   enabled?: boolean;
 }): void {
-  const endpoint = (input.endpoint ?? "").trim().replace(/\/$/, "");
-  const enabled = input.enabled ?? Boolean(endpoint);
-  config = {
-    enabled,
-    endpoint,
-    serviceName: input.serviceName?.trim() || "family-os-health-api",
-    environment: input.environment?.trim() || "development",
-    serviceVersion: input.serviceVersion?.trim() || "0.1.0"
-  };
+  setOtelConfig(input);
 
   if (flushTimer) {
     clearInterval(flushTimer);
     flushTimer = undefined;
   }
-  if (config.enabled) {
+  if (isOtelEnabled()) {
     flushTimer = setInterval(() => {
       void flushOtelLogs();
+      void flushOtelMetrics();
     }, 2000);
-    // Don't keep the process alive solely for the timer (Node); Bun ignores unref sometimes
     if (typeof flushTimer === "object" && flushTimer && "unref" in flushTimer) {
       (flushTimer as NodeJS.Timeout).unref?.();
     }
   }
+  configureOtelMetrics();
 }
 
 export function isOtelLogsEnabled(): boolean {
-  return config.enabled && config.endpoint.length > 0;
+  return isOtelEnabled();
 }
 
 export function logWithSeverity(severity: LogSeverity, message: string, attributes: LogAttributes = {}): void {
+  const clean = sanitizeAttrs(attributes);
   const line =
-    Object.keys(attributes).length > 0
-      ? JSON.stringify({ msg: message, ...sanitizeAttrs(attributes), severity })
+    Object.keys(clean).length > 0
+      ? JSON.stringify({ msg: message, ...clean, severity })
       : message;
 
   if (severity === "ERROR") {
@@ -115,14 +79,14 @@ export function logWithSeverity(severity: LogSeverity, message: string, attribut
     console.info(line);
   }
 
-  if (!isOtelLogsEnabled()) {
+  if (!isOtelEnabled()) {
     return;
   }
 
   pending.push({
     body: message,
     severity,
-    attributes: sanitizeAttrs(attributes),
+    attributes: clean,
     timeUnixNano: String(BigInt(Date.now()) * 1_000_000n)
   });
 
@@ -149,9 +113,14 @@ function sanitizeAttrs(attributes: LogAttributes): Record<string, string | numbe
     if (value === undefined || value === null) {
       continue;
     }
-    // Never ship secrets-ish values
     const lower = key.toLowerCase();
-    if (lower.includes("password") || lower.includes("secret") || lower.includes("authorization") || lower.includes("token")) {
+    if (
+      lower.includes("password") ||
+      lower.includes("secret") ||
+      lower.includes("authorization") ||
+      lower.includes("token") ||
+      lower.includes("cookie")
+    ) {
       continue;
     }
     out[key] = value;
@@ -160,11 +129,12 @@ function sanitizeAttrs(attributes: LogAttributes): Record<string, string | numbe
 }
 
 export async function flushOtelLogs(): Promise<void> {
-  if (!isOtelLogsEnabled() || flushing || pending.length === 0) {
+  if (!isOtelEnabled() || flushing || pending.length === 0) {
     return;
   }
   flushing = true;
   const batch = pending.splice(0, pending.length);
+  const cfg = getOtelConfig();
   try {
     const logRecords = batch.map((item) => ({
       timeUnixNano: item.timeUnixNano,
@@ -173,17 +143,17 @@ export async function flushOtelLogs(): Promise<void> {
       body: { stringValue: item.body },
       attributes: Object.entries(item.attributes).map(([key, value]) => ({
         key,
-        value: attrValue(value as string | number | boolean)
+        value: otelAttrValue(value as string | number | boolean)
       }))
     }));
 
     const payload = {
       resourceLogs: [
         {
-          resource: { attributes: resourceAttributes() },
+          resource: { attributes: otelResourceAttributes() },
           scopeLogs: [
             {
-              scope: { name: "family-os-health-api", version: config.serviceVersion },
+              scope: { name: cfg.serviceName, version: cfg.serviceVersion },
               logRecords
             }
           ]
@@ -191,8 +161,7 @@ export async function flushOtelLogs(): Promise<void> {
       ]
     };
 
-    const url = `${config.endpoint}/v1/logs`;
-    const response = await fetch(url, {
+    const response = await fetch(`${cfg.endpoint}/v1/logs`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -201,12 +170,11 @@ export async function flushOtelLogs(): Promise<void> {
       body: JSON.stringify(payload)
     });
     if (!response.ok) {
-      // Drop on failure; do not re-queue forever
       console.warn(
         JSON.stringify({
           msg: "otel log export failed",
           status: response.status,
-          endpoint: config.endpoint
+          endpoint: cfg.endpoint
         })
       );
     }
@@ -222,18 +190,12 @@ export async function flushOtelLogs(): Promise<void> {
   }
 }
 
-/** Test helper — drain without network if disabled. */
+/** Test helper */
 export function _resetOtelLogsForTests(): void {
   pending.length = 0;
   if (flushTimer) {
     clearInterval(flushTimer);
     flushTimer = undefined;
   }
-  config = {
-    enabled: false,
-    endpoint: "",
-    serviceName: "family-os-health-api",
-    environment: "test",
-    serviceVersion: "0.1.0"
-  };
+  resetOtelConfigForTests();
 }

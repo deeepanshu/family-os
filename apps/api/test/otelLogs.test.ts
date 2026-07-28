@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { _resetOtelMetricsForTests } from "../src/logging/otelMetrics";
 import {
   _resetOtelLogsForTests,
   configureOtelLogs,
@@ -9,6 +10,7 @@ import {
 describe("otelLogs", () => {
   afterEach(() => {
     _resetOtelLogsForTests();
+    _resetOtelMetricsForTests();
     vi.unstubAllGlobals();
   });
 

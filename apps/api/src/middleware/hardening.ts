@@ -4,7 +4,13 @@ import { createMiddleware } from "hono/factory";
 import type { AppConfig } from "../config";
 import { HttpError } from "../errors";
 import type { AppVariables } from "../auth";
-import { logInfo } from "../logging/otelLogs";
+import { httpStatusClass, normalizeHttpRoute } from "../logging/otelConfig";
+import { logError, logInfo, logWarn } from "../logging/otelLogs";
+import {
+  httpRequestFinished,
+  httpRequestStarted,
+  recordHttpRequest
+} from "../logging/otelMetrics";
 
 const writeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
@@ -23,23 +29,53 @@ export function requestLoggingMiddleware() {
     const requestId = c.req.header("x-request-id") ?? randomUUID();
     const startedAt = Date.now();
     c.header("x-request-id", requestId);
+    httpRequestStarted();
 
     try {
       await next();
     } finally {
+      httpRequestFinished();
       if (c.get("config").NODE_ENV === "test") {
         return;
       }
       const durationMs = Date.now() - startedAt;
-      logInfo("http_request", {
+      const method = c.req.method;
+      const path = c.req.path;
+      const route = normalizeHttpRoute(path);
+      const status = c.res.status;
+      const statusClass = httpStatusClass(status);
+
+      recordHttpRequest({ method, route, status, durationMs });
+
+      const attrs = {
         requestId,
-        method: c.req.method,
-        path: c.req.path,
-        status: c.res.status,
-        durationMs
-      });
+        method,
+        path,
+        route,
+        status,
+        status_class: statusClass,
+        duration_ms: durationMs,
+        // low-cardinality hints only
+        has_auth: Boolean(c.req.header("authorization")),
+        user_agent: truncate(c.req.header("user-agent"), 120)
+      };
+
+      if (status >= 500) {
+        logError("http_request", attrs);
+      } else if (status >= 400) {
+        logWarn("http_request", attrs);
+      } else {
+        logInfo("http_request", attrs);
+      }
     }
   });
+}
+
+function truncate(value: string | undefined, max: number): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  return value.length <= max ? value : `${value.slice(0, max)}…`;
 }
 
 export function writeRateLimitMiddleware(config: AppConfig) {

@@ -22,6 +22,7 @@ import type { AppRepositories } from "./repositories/contracts";
 import { createMcpRoutes, createMcpWellKnownRoutes } from "./mcp/routes";
 import { mcpOAuthPath, mcpPublicPath } from "./mcp/publicUrl";
 import { configureOtelLogs, logError, logInfo } from "./logging/otelLogs";
+import { flushOtelMetrics } from "./logging/otelMetrics";
 
 export type AppOptions = {
   /** Env-like values parsed by `loadConfig` (strings, not pre-parsed arrays). */
@@ -56,10 +57,13 @@ export function createApp(options: AppOptions = {}) {
       enabled: Boolean(config.OTEL_EXPORTER_OTLP_ENDPOINT)
     });
     if (config.OTEL_EXPORTER_OTLP_ENDPOINT) {
-      logInfo("otel logs configured", {
+      logInfo("otel telemetry configured", {
         endpoint: config.OTEL_EXPORTER_OTLP_ENDPOINT,
-        service: config.OTEL_SERVICE_NAME
+        service: config.OTEL_SERVICE_NAME,
+        signals: "logs,metrics"
       });
+      // Prime Prometheus with an initial metrics scrape sample
+      void flushOtelMetrics();
     }
   }
   const dependencies = options.repositories
