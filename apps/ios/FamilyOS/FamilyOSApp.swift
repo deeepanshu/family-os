@@ -35,11 +35,7 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, @preconcur
     ) -> Bool {
         CrashReporting.configure()
         UNUserNotificationCenter.current().delegate = self
-        HealthKitBackgroundSyncCoordinator.shared.registerBackgroundTasks()
-        // Observers are registered only after validated local consent/configuration is restored.
-        Task { @MainActor in
-            await HealthKitBackgroundSyncCoordinator.shared.restoreObserversFromLocalConfiguration()
-        }
+        // HealthKit BG sync stack removed pending correctness-first rewrite.
         return true
     }
 
