@@ -39,8 +39,11 @@ If unsure → **do not build it.** Ship the simpler path and prove it with tests
 | CRDTs, multi-writer merge, repair chunk protocols | Not this product |
 | Dual full server engines (memory clone of apply rules) | Drift |
 | “Future multi-device” hooks | YAGNI |
-| Extra metrics “while we’re here” | Surface area kills correctness |
+| Extra metrics “while we’re here” | Surface area kills correctness (see §15 Crashlytics) |
 | Compatibility shims with the old sync protocol | Clean cutover |
+| `@MainActor` coordinator owning BGTask handlers | Production `EXC_BREAKPOINT` isolation crashes (§15) |
+| Full “repair all groups / all metrics” on BG budget | BG must only drain; not re-import the world |
+| Crashing on bad `HKUnit` / one bad metric | Fail soft; skip metric; never kill the process |
 
 ### 0.4 Allowed complexity (only this)
 
@@ -390,8 +393,12 @@ without deleting another.
 | `HealthKitSyncEngine` | Read HK → enqueue ops → advance cursor (same txn as enqueue) |
 | `HealthKitSyncWorker` | Drain `pending_ops` only |
 
-Background: observers + BGTask only **nudge** engine/worker. Auth token provider can be a
+Background: observers + BGTask only **nudge** the worker (drain). Auth token provider can be a
 small helper, not a parallel state store.
+
+**Crashlytics (§15):** Do **not** put BGTask registration/handlers on a `@MainActor`
+coordinator. BG entry is nonisolated; sync work is actor/background-safe; MainActor is for UI
+only. BG does **not** run full multi-group first import.
 
 **Delete** dual UserDefaults / JSON ledger authority. UI reads store counts + server status.
 
@@ -521,12 +528,23 @@ not when protocol docs are complete.
 - [ ] No ghost “ready” data from previous phone after replace
 - [ ] Timezone change → day-bucketed metrics re-imported under new version
 
-### 9.5 Concurrency
+### 9.5 Concurrency / background (Crashlytics-driven)
 
 - [ ] Observer + manual sync + BG task do not double-corrupt local state
 - [ ] Only one drain loop mutates in_flight claims
+- [ ] BGTask handler never touches a `@MainActor` singleton/coordinator path that can
+      trip queue isolation asserts (device soak after shipping BG)
+- [ ] BG path only drains pending ops; does not run full multi-group first import
+- [ ] Expiration handler only reschedules; does not re-enter MainActor-heavy stacks unsafely
 
-### 9.6 Accuracy samples
+### 9.6 Units / metric isolation (Crashlytics-driven)
+
+- [ ] VO₂ and every enabled metric use safe composed `HKUnit` constructors (no process-killing
+      `unitFromString` for complex units)
+- [ ] One bad metric skips with non-fatal log; other metrics still import
+- [ ] Production-enabled metric list is the narrow v1 set only (§7.6 / §15)
+
+### 9.7 Accuracy samples
 
 - [ ] Manual BP entry in Health → appears once in DB
 - [ ] Watch steps for a day → hour buckets match Health totals within known aggregation rules
@@ -561,11 +579,14 @@ Take as long as needed. Do not add “nice” layers mid-stream.
 6. Worker drain/retry/idempotency.
 7. Add steps hourly, sleep day, daily HR, workouts — one at a time with tests.
 8. Incremental anchors + deletes.
-9. Background only after foreground is soak-stable.
-10. MCP check on ready groups.
-11. Delete dead old sync code and mark old plan docs superseded.
+9. Background only after foreground is soak-stable — and only as **drain** (§15).
+10. Device soak specifically for: BGTask no crash, bad-unit skip, narrow metrics.
+11. MCP check on ready groups.
+12. Delete dead old sync code and mark old plan docs superseded.
 
-**Gate:** if a PR adds a forbidden item from §0.3, reject it.
+**Gate:** if a PR adds a forbidden item from §0.3, reject it.  
+**Gate:** if a PR reintroduces a §15 failure mode (MainActor BGTask, full repair on BG,
+crash on unit, full nutrition critical path), reject it.
 
 ---
 
@@ -577,6 +598,8 @@ Take as long as needed. Do not add “nice” layers mid-stream.
 4. MCP only answers from ready groups and matches those tables.
 5. Phone replace never shows old phone data as ready.
 6. Nobody is debugging versions, manifests, dual ledgers, or session machines.
+7. Crashlytics does not show recurring HealthKit BGTask isolation or unit-parse fatals
+   after the rewrite ships.
 
 If you need a debugger for protocol state more often than for HealthKit itself, the design
 has failed the simplicity rule.
@@ -593,6 +616,7 @@ has failed the simplicity rule.
 | Typed aggregates + local queue? | **Yes** (correctness) |
 | Versions / hashes / dual stores / session manifests? | **No** |
 | More tables “for safety”? | Only if they map to a §2.1 promise |
+| Production crash lesson | BG isolation + narrow safe metrics, not more protocol |
 
 ---
 
@@ -604,3 +628,114 @@ has failed the simplicity rule.
 - `docs/TECHNICAL_DESIGN.md` HealthKit sections are stale for this area.
 
 When accepted, mark old HealthKit sync plans superseded and point here only.
+
+---
+
+## 15. Crashlytics constraints (production evidence, 2026-07)
+
+**Source:** Firebase Crashlytics for app `1:326123052022:ios:5593032d52c78a35a605d7`
+(`com.deepanshujain.familyos`), roughly last 30 days, versions `0.1.0` (builds 17–34).  
+**Method:** Firebase MCP `crashlytics_get_report` (topIssues / topVersions) + sample events.  
+**Takeaway:** All top fatals are HealthKit sync related. Production pain is **not** “need
+more sync protocol.” It is **concurrency isolation** and **unsafe metric/unit breadth**.
+
+### 15.1 Top fatal issues observed
+
+| Rank | Issue (title) | Events | Users | Class |
+|------|---------------|--------|-------|-------|
+| 1 | `HealthKitBackgroundSyncCoordinator.registerBackgroundTasks` closure #2 | 8 | 3 | `EXC_BREAKPOINT` — MainActor / queue isolation |
+| 2 | `HealthKitDataMetric.unit.getter` | 2 | 1 | `NSInvalidArgumentException` — `Unable to parse factorization string mL/kg/min` (VO₂) |
+| 3 | `registerBackgroundTasks` closure #1 | 2 | 2 | Same BGTask isolation class as #1 |
+
+No top issues attributed to outbox SQL, API client fatals, entity versions, or scope
+manifests. That supports stripping the heavy control plane and fixing the real failure modes.
+
+### 15.2 BGTask + `@MainActor` (dominant crash)
+
+**Stack pattern (sample, build 34, iPhone 17 / iOS 26.5.2):**
+
+```text
+_dispatch_assert_queue_fail
+swift_task_isCurrentExecutorWithFlagsImpl
+closure in HealthKitBackgroundSyncCoordinator.registerBackgroundTasks()
+BGTaskScheduler _runTask
+```
+
+**Cause class:** BGTaskScheduler invokes handlers off the main queue. A fully `@MainActor`
+coordinator (registration, shared singleton, processing) produces isolation asserts
+(`EXC_BREAKPOINT`) when BG work crosses that boundary incorrectly.
+
+**Rewrite requirements (non-negotiable):**
+
+1. **BGTask entry is nonisolated.** Do not own registration/handlers on a `@MainActor` type.
+2. Sync work lives on an **actor / plain class / worker**; hop to MainActor **only** for UI.
+3. BG path is **drain pending ops only** — load config, upload queue, `setTaskCompleted`.
+   Not full multi-group first import / “repair everything.”
+4. Expiration handler only **reschedules** a later drain; no heavy MainActor re-entry.
+5. Device soak must prove BGTask completes without this fatal after rewrite.
+
+**Maps to:** §7 (iOS components hard cap), §9.5, implementation order step 9.
+
+### 15.3 Invalid unit + oversized metric surface
+
+**Exception (sample, build 17):**
+
+```text
+NSInvalidArgumentException: Unable to parse factorization string mL/kg/min
+  at HealthKitDataMetric.unit.getter
+  → dailyMetricOperations → additionalRepairOperations → buildRepair / processMetric
+  → ProfileView resumePendingWork
+```
+
+**Context from Crashlytics logs:** `healthkit_stage: background_delivery_requested` and a
+flood of enabled types including many **dietary micronutrients** (e.g. DietaryMolybdenum,
+DietaryVitaminE, DietaryChromium, …) before/around the crash.
+
+**Cause class:**
+
+1. Unsafe / wrong `HKUnit` construction for complex units (VO₂-style `mL/kg/min` is not a
+   valid HealthKit factorization string; use composed units).
+2. **Metric surface far too wide for v1** — nutrition matrix + full repair multiplies
+   fatal surface. One bad unit can kill the whole import path.
+
+**Rewrite requirements (non-negotiable):**
+
+1. **Narrow v1 allowlist only** (§7.6): steps + core activity, sleep, vitals (HR/BP/glucose),
+   body mass, workouts. **No full nutrition micronutrient critical path** until soak is green.
+2. Units are a **static composed `HKUnit` map**. Prefer constructors over `HKUnit(from:)`.
+   Complex units (VO₂, rates) must be composed; never process-kill on parse failure.
+3. **Per-metric isolation:** bad metric → skip + non-fatal log; other metrics continue.
+4. **Do not enable background delivery** for metrics not ready to sync correctly.
+5. Ship metrics **one at a time** with tests (implementation order), not “all groups at once.”
+
+**Maps to:** §0.3 extra-metrics ban, §7.6, §9.6, implementation order steps 5–7.
+
+### 15.4 What we will not do in response to these crashes
+
+| Temptation | Why rejected |
+|------------|--------------|
+| Add more protocol / versions / manifests to “be safer” | Crashes are isolation + units, not event ordering |
+| Keep dual ledgers for “diagnostics” | Did not prevent fatals; increases dual-truth risk |
+| Nuclear full rescan when one metric unit fails | Same class of harsh recovery already banned |
+| Enable all HealthKit types then “fix units later” | Production already proved this crashes users |
+
+### 15.5 Crashlytics-derived acceptance (must pass before calling rewrite done)
+
+- [ ] No recurrence of BGTask `EXC_BREAKPOINT` isolation fatals on device after BG enabled
+- [ ] No fatal on unit construction for any **enabled** metric (VO₂ included only if enabled
+      and unit is composed-safe)
+- [ ] Enabling/disabling metrics never registers background delivery for out-of-scope types
+- [ ] One intentionally broken unit in a **test** path skips without killing the process
+- [ ] Foreground import of narrow set works before BG is turned on
+
+### 15.6 Priority order implied by Crashlytics
+
+| Priority | Work | Why |
+|----------|------|-----|
+| P0 | Nonisolated BG entry + worker drain-only | Most events; still open on recent builds |
+| P0 | Safe unit map + fail soft | Process-killing fatals on sync |
+| P0 | Narrow enabled metric set | Removes entire crash classes |
+| P1 | Per-metric try/isolation in engine | One bad metric must not stop the pipe |
+| P1 | BG only after foreground soak | Avoid shipping isolation bugs early |
+
+These constraints are part of the plan’s definition of done, not optional polish.
