@@ -1,9 +1,59 @@
 # HealthKit Correctness-First Sync Plan
 
 Status: proposed rewrite  
-Priority: **accuracy and stability over speed, feature breadth, or protocol completeness**  
+Priority: **correctness and stability. No over-engineering allowed.**  
 Audience: implementers rewriting the HealthKit → Postgres → MCP path  
 Date: 2026-07-30
+
+---
+
+## 0. Constitution (read first)
+
+### 0.1 One sentence
+
+**Put Health data into Postgres once, keep it correct, let MCP read it. Nothing else.**
+
+### 0.2 NO OVER-ENGINEERING
+
+This rewrite exists because the previous path was over-engineered and unstable.
+**Over-engineering is a defect.** Clever protocol is not a feature.
+
+Before adding any table, endpoint, status, hash, version field, or abstraction, answer:
+
+> Does this directly prevent **loss**, **duplicate truth**, **false deletes**, or **half-ready MCP reads**?
+
+If the answer is no → **do not build it.**
+
+If unsure → **do not build it.** Ship the simpler path and prove it with tests.
+
+### 0.3 Forbidden (do not reintroduce)
+
+| Forbidden | Why |
+|-----------|-----|
+| Entity versions / `superseded` streams | Single writer; natural-key overwrite is enough |
+| Payload fingerprints as conflict protocol | Trusted own phone |
+| Scope manifests / SHA-256 completeness proofs | Ceremony, not row truth |
+| Long-lived event logs / entity ledgers as product core | Second source of truth |
+| Dual local stores (SQLite + UserDefaults/JSON authority) | They disagree |
+| Session abort → full 90-day nuclear rescan for one bad op | Breaks stability |
+| CRDTs, multi-writer merge, repair chunk protocols | Not this product |
+| Dual full server engines (memory clone of apply rules) | Drift |
+| “Future multi-device” hooks | YAGNI |
+| Extra metrics “while we’re here” | Surface area kills correctness |
+| Compatibility shims with the old sync protocol | Clean cutover |
+
+### 0.4 Allowed complexity (only this)
+
+Only mechanisms that defend the six promises below:
+
+1. Local queue until server ACK (no loss on crash/offline)
+2. Idempotent `op_id` + natural-key upsert/delete (no duplicate truth)
+3. Anchors + empty-read ≠ delete (no false wipes)
+4. Simple group ready/not-ready (no half-truth MCP)
+5. One active installation + timezone version (no ghost/cross-phone mix as ready)
+6. On-device aggregates for high-frequency types (correct family-shaped rows)
+
+That is the whole system. Prefer boring code.
 
 ---
 
@@ -38,7 +88,7 @@ designed like one.
 | 5 | MCP never presents a half-imported group as complete | Misleading family/MCP answers |
 | 6 | Crash, offline, and retry never violate 1–5 | Flaky “sometimes wrong” |
 
-If a design element does not defend one of these six, it is optional and default-removed.
+If a design element does not defend one of these six, it is **forbidden by default**.
 
 ### 2.2 What “stable” means
 
@@ -48,17 +98,17 @@ If a design element does not defend one of these six, it is optional and default
 - Stuck states are rare and user-visible with a single recovery action
 - Soak tests prove kill mid-upload, offline, delete, reinstall, timezone change
 
-### 2.3 Explicit non-goals for v1 of this rewrite
+### 2.3 Explicit non-goals
 
 - Multi-device concurrent writers for the same person
 - Cryptographic completeness proofs of backfill
 - Full event-sourcing query model
-- Long-term forensic event ledger as product dependency
-- Maximum HealthKit metric surface (nutrition micronutrients, etc.)
-- Compatibility with the current outbox / entityVersion / scope-manifest protocol
+- Long-term forensic event ledger
+- Maximum HealthKit metric surface
+- Compatibility with the current entityVersion / scope-manifest protocol
+- Performance micro-optimizations before correctness soak
 
-Clean cutover is preferred. This path has not shipped to real users as a stable product;
-preserving the old protocol is not a correctness requirement.
+Clean cutover is preferred. Preserving the old protocol is not a correctness requirement.
 
 ---
 
@@ -108,32 +158,32 @@ These show that “more protocol” did not equal “more correct”:
 
 ### 4.1 Name
 
-**Natural-key bulk upsert with thin durable outbox and group readiness.**
+**Natural-key upsert + thin outbox + ready flag.**
+
+Boring on purpose.
 
 ```text
 HealthKit (anchors)
-  → recompute natural-key records (hour / day / source UUID)
-  → one SQLite table: pending_ops
-  → serialized worker POST /healthkit/ops:batch
-  → Postgres UPSERT/DELETE by natural key (idempotent op_id)
-  → group status: never_synced | syncing | ready | error
-  → MCP / API history read when ready (or clearly incomplete)
+  → build natural-key records (hour / day / source UUID)
+  → SQLite pending_ops
+  → worker POST /ops:batch
+  → Postgres UPSERT/DELETE by natural key
+  → group ready? → MCP may read
 ```
 
-### 4.2 Pattern components
+### 4.2 Only these moving parts
 
-| Component | Role |
-|-----------|------|
-| HK anchors | Incremental change detection |
-| On-device aggregation | Product-shaped rows, not sample firehose |
-| Natural keys | Single row identity in Postgres |
-| `op_id` (UUID) | Idempotent upload / retry |
-| Thin outbox | Crash-safe until ACK |
-| Group readiness | MCP accuracy gate for first import |
-| Active installation | Phone swap fence |
+| Piece | Why it exists (must map to a promise) |
+|-------|----------------------------------------|
+| HK anchors | Don’t miss changes / don’t re-scan forever |
+| On-device aggregates | Correct day/hour rows without raw firehose |
+| Natural keys | One truth per row in Postgres |
+| `op_id` | Retries without duplicate apply |
+| Thin outbox | Crash/offline without loss |
+| Group `ready` flag | MCP doesn’t see half imports |
+| Active installation | Phone swap doesn’t mix ready ghosts |
 
-No entity-version streams. No scope crypto manifests. No long-lived apply log as product
-dependency (short-lived receipts optional for dedup windows only).
+**If you need a new moving part, stop and re-read §0.**
 
 ---
 
@@ -153,24 +203,23 @@ dependency (short-lived receipts optional for dedup windows only).
 These keys already exist in spirit in the current payloads. The rewrite makes them the
 **only** consistency model: last successful apply for a natural key wins.
 
-### 5.2 Server control tables (minimal)
-
-Keep / rewrite down to:
+### 5.2 Server control tables (minimal — do not grow this list)
 
 | Table | Purpose |
 |-------|---------|
 | `healthkit_sync_profile_settings` | Consent, timezone, timezone version |
-| `healthkit_sync_groups` or merged into state | Enabled groups |
-| `healthkit_sync_state` | `never_synced` \| `syncing` \| `ready` \| `error` + coverage window + last error |
+| `healthkit_sync_state` | enabled + `never_synced` \| `syncing` \| `ready` \| `error` + coverage + last error (merge groups into this; **one table**, not two) |
 | `healthkit_sync_installations` | Single active installation per person |
-| `healthkit_op_receipts` (optional, short TTL) | Recent `op_id` dedup only (e.g. 7–30 days) |
+| `healthkit_op_receipts` | Short-TTL `op_id` dedup only (7–30 days). Not a product event log. |
 
-Drop as product dependencies:
+**Drop and do not replace with clever variants:**
 
-- `healthkit_sync_events` long-lived apply log (or replace with short TTL receipts only)
-- `healthkit_sync_entities` version ledger
-- `healthkit_backfill_scope_manifests` crypto proofs
-- Complex multi-status backfill session machine beyond open/complete/abort
+- `healthkit_sync_events`
+- `healthkit_sync_entities`
+- `healthkit_backfill_scope_manifests`
+- `healthkit_backfill_sessions` with multi-phase status machines  
+  (first import readiness is **group status only** — see §6.2)
+- Separate `healthkit_sync_groups` if state can hold `enabled`
 
 ### 5.3 Canonical health tables
 
@@ -227,7 +276,7 @@ CREATE TABLE pending_ops (
 CREATE INDEX pending_ops_drain ON pending_ops(status, next_attempt_at);
 CREATE INDEX pending_ops_natural ON pending_ops(natural_key, status);
 
--- Dirty aggregate buckets (optional but recommended for steps/sleep/daily)
+-- Pending recompute for bucketed metrics (steps hour / sleep day / daily). Correctness, not ceremony.
 CREATE TABLE dirty_buckets (
   natural_key TEXT PRIMARY KEY,
   group_key TEXT NOT NULL,
@@ -236,7 +285,7 @@ CREATE TABLE dirty_buckets (
   updated_at REAL NOT NULL
 );
 
--- Source UUID → affected bucket keys for delete fan-out (in SQLite, not JSON files)
+-- Map sample UUID → natural keys so deletes can recompute the right buckets. Keep in SQLite only.
 CREATE TABLE source_bucket_index (
   source_uuid TEXT NOT NULL,
   group_key TEXT NOT NULL,
@@ -249,24 +298,30 @@ CREATE INDEX source_bucket_index_source ON source_bucket_index(source_uuid);
 
 **Rules:**
 
-- No UserDefaults as durable sync control plane
-- No parallel “ledger JSON files” as authority
-- UI may cache display state; SQLite is authoritative for sync
+- SQLite is the **only** durable sync control plane
+- No UserDefaults / JSON files as authority
+- UI may mirror status for display only
+- Do not add tables “for diagnostics” that become a second control plane
 
 ---
 
-## 6. API surface (minimal)
+## 6. API surface (keep tiny)
 
-Base path remains under `/health/api/v1/healthkit` (or a clean `/healthkit/v2` cutover).
+Base: `/health/api/v1/healthkit` (or one clean cutover path — **not** dual v1+v2 forever).
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET/PUT /settings` | Consent, groups, timezone, active installation |
-| `POST /ops:batch` | Apply up to N ops; each result `applied` \| `duplicate` \| `rejected` |
-| `POST /import-sessions` | Open first-import / re-import window for one group (optional but useful) |
-| `POST /import-sessions/:id/complete` | Mark group ready after client finished full scan + drain |
-| `POST /import-sessions/:id/abort` | Mark error; does not delete already-applied good rows |
-| `GET /groups/:group/status` | status + coverage for UI/MCP diagnostics |
+| `GET/PUT /settings` | Consent, enabled groups, timezone, active installation |
+| `POST /ops:batch` | Apply ops; each result `applied` \| `duplicate` \| `rejected` |
+| `POST /groups/:group/ready` | Client asserts first import finished (scanned + local outbox empty for group) |
+| `GET /groups/:group/status` | status + coverage for UI |
+
+**No** import-session CRUD, **no** scope manifests, **no** pending-event diagnostic pagination,
+**no** group entity reconciliation API in v1.
+
+If first-import needs a server-side range freeze, store `coverage_start` / `coverage_end` on
+`healthkit_sync_state` when client starts import (`POST /groups/:group/start-import` is
+acceptable as a **single** extra endpoint). Do not grow a session subsystem.
 
 ### 6.1 Op batch contract
 
@@ -288,64 +343,57 @@ Base path remains under `/health/api/v1/healthkit` (or a clean `/healthkit/v2` c
 }
 ```
 
-Server rules:
+Server rules (all of them):
 
 1. Reject batch if installation inactive, consent withdrawn, or timezone version stale.
-2. For each op: if `op_id` already seen → `duplicate` (no re-apply required).
-3. Else validate payload; on invalid → `rejected` for that op only (do not fail whole batch
-   unless fencing error).
-4. Apply UPSERT/DELETE on canonical table by natural key.
-5. Optionally store `op_id` in short-TTL receipts.
-6. **Do not** require entity versions or payload fingerprints for conflict protocol.
-7. Incremental applies during `syncing` may write canonical rows, but group stays non-ready
-   until import session completes (MCP withholds).
+2. Known `op_id` → `duplicate`.
+3. Invalid op → `rejected` for that op only (do not invent batch-wide drama).
+4. Valid op → UPSERT/DELETE by natural key; store short-TTL `op_id` receipt.
+5. While group is `syncing` / `never_synced`, rows may land, but reads stay withheld until `ready`.
 
-### 6.2 Import session (simple readiness, no crypto)
+**Do not add:** entity versions, fingerprints, supersede results, session-tagged events.
 
-- Create session freezes `rangeStart`, `rangeEnd`, required scope list for the group.
-- Client scans all scopes, enqueues ops, drains outbox.
-- Client calls complete when:
-  - every required scope was scanned once, and
-  - no pending/in_flight ops remain for that session/group (or server pending count is 0
-    if using session tags — optional).
-- Server marks group `ready` and sets coverage window.
-- **One permanent rejection does not auto-nuke the session.** Client may retry the bad op
-  or mark group `error` with a clear code after repeated failure. Prefer soft isolation.
+### 6.2 First import readiness (no crypto, no session machine)
 
-### 6.3 Installation replace (correctness critical)
+1. Client sets group `syncing` (local + `start-import` if used) and scans the 90-day window.
+2. Client enqueues ops and drains outbox for that group.
+3. Client calls `POST /groups/:group/ready` only when scan finished and local pending for that
+   group is empty.
+4. Server sets `ready` + coverage. MCP may read.
+5. Bad single op → fix or surface error; **never** force a nuclear full-protocol rebuild.
+
+### 6.3 Installation replace (correctness critical, still simple)
 
 On `replaceActiveInstallation=true`:
 
-1. Revoke old installation.
-2. Activate new installation.
-3. Set all enabled groups to `never_synced`.
-4. Abort open import sessions.
-5. Do **not** leave status `ready` with previous phone’s unsuperseded rows.
+1. Revoke old installation; activate new one.
+2. Set all enabled groups to `never_synced` (not `ready`).
+3. Clear coverage / last success for those groups.
+4. MCP stays withheld until new phone finishes import.
 
-Optional hardening (recommended):
-
-- Soft-quarantine or delete previous installation’s sparse source-keyed rows that will not
-  be re-sent (or require full re-import before any MCP read — already forced by status).
-
-Timezone change already bumps version and forces re-import for day-bucketed data; keep that.
+No soft-quarantine subsystem. Readiness flag is the gate. Timezone change bumps version and
+forces re-import for day-bucketed data — same simple rule.
 
 ---
 
 ## 7. iOS pipeline
 
-### 7.1 Components (fewer than today)
+### 7.1 Components (hard cap)
+
+Prefer **four** units of code. Do not invent a fifth “manager/coordinator/facade” layer
+without deleting another.
 
 | Component | Responsibility |
 |-----------|----------------|
-| `HealthKitClient` | Auth, observers, anchors, statistics, sample queries |
-| `HealthKitSyncEngine` | Read HK → dirty/index → enqueue ops → advance cursor in same SQLite txn as enqueue |
-| `HealthKitOutboxStore` | Single GRDB store (above schema) |
-| `HealthKitSyncWorker` | Serialize drain of `pending_ops` |
-| `HealthKitBackgroundCoordinator` | Observers + BGTask nudge only |
-| Session/auth provider | Token + config for background |
+| `HealthKitClient` | HK auth, observers, anchors, queries |
+| `HealthKitSyncStore` | One GRDB DB (schema above) |
+| `HealthKitSyncEngine` | Read HK → enqueue ops → advance cursor (same txn as enqueue) |
+| `HealthKitSyncWorker` | Drain `pending_ops` only |
 
-Delete dual `HealthKitSyncStateStore` durable role (UserDefaults anchors/ledgers). UI view
-models read from outbox diagnostics + API status only.
+Background: observers + BGTask only **nudge** engine/worker. Auth token provider can be a
+small helper, not a parallel state store.
+
+**Delete** dual UserDefaults / JSON ledger authority. UI reads store counts + server status.
 
 ### 7.2 Triggers
 
@@ -360,12 +408,11 @@ All paths only **nudge** the same engine + worker. No second upload path.
 
 **First import / re-import (`never_synced` or `error` recovery):**
 
-1. Open import session (server freezes 90-day range).
-2. For each scope in group, query HealthKit for the range and materialize natural-key ops.
-3. Enqueue all ops; drain until empty.
-4. Complete session → group `ready`.
-5. Establish anchors after successful materialize of the window (cursor advanced only after
-   durable local enqueue of observed page, same transaction preferred).
+1. Mark group `syncing` (local + server).
+2. Query HealthKit for the 90-day window per scope; materialize natural-key ops.
+3. Drain outbox until empty for that group.
+4. Call `ready` → group `ready`.
+5. Keep anchors in SQLite; advance cursor only after durable local enqueue of an observed page.
 
 **Incremental (`ready`):**
 
@@ -413,7 +460,7 @@ pipeline is soak-stable. Registry size is a correctness surface area multiplier.
 
 ## 8. Server apply path
 
-### 8.1 Apply algorithm (simple)
+### 8.1 Apply algorithm (this is the whole server sync brain)
 
 ```text
 for each op in batch:
@@ -425,9 +472,8 @@ for each op in batch:
   return applied
 ```
 
-Optional: one transaction per batch or per small chunk; prefer **not** rolling back already
-valid ops when a later op is invalid. Per-op isolation is good; fencing checks (install,
-timezone, consent) stay batch-level up front.
+Fence install/consent/timezone once at batch start. Do not build savepoint ballets, entity
+ledgers, or fingerprint conflict graphs.
 
 ### 8.2 Read path / MCP
 
@@ -466,8 +512,8 @@ not when protocol docs are complete.
 ### 9.3 First import / readiness
 
 - [ ] Mid-import MCP/API does not present group as complete
-- [ ] Complete only after full window scanned and outbox drained
-- [ ] Failed complete leaves group non-ready
+- [ ] `ready` only after full window scanned and outbox drained
+- [ ] Failed ready leaves group non-ready
 
 ### 9.4 Install / timezone
 
@@ -490,53 +536,50 @@ not when protocol docs are complete.
 
 ## 10. Migration / cutover plan
 
-1. **Freeze** new features on the old protocol (no more manifest/version edge cases).
-2. **Add** v2 ops batch + simplified status alongside or as clean replacement migration
-   (prefer clean replacement if no production users depend on old tables).
-3. **Replace** iOS HealthKit services with single-store engine/worker against v2.
-4. **Drop** dual UserDefaults durable state.
-5. **Force** re-import on first launch of new client (simplest correctness).
-6. **Prune** metric enablement to the milestone set.
-7. **Soak** on personal device for real days: manual entries, Watch auto data, deletes,
-   airplane mode, force-quit mid-sync, reinstall.
-8. Only then expand metrics.
+Prefer **one clean cut**, not dual-protocol forever:
 
-Database: one migration that drops unused protocol tables after cutover, keeps canonical
-health tables, and introduces short-TTL op receipts if desired.
+1. Stop adding features to the old protocol.
+2. One migration: keep canonical health tables; drop unused protocol tables; add short-TTL
+   op receipts + simplified state if needed.
+3. Replace iOS HealthKit stack with the four components in §7.1.
+4. Force re-import on first launch of the new client.
+5. Enable only the narrow metric set.
+6. Soak on a real phone (manual entry, Watch, delete, airplane, force-quit, reinstall).
+7. Expand metrics only after soak is boringly green.
 
 ---
 
-## 11. Implementation order (correctness-driven, not calendar-driven)
+## 11. Implementation order (correctness first)
 
-Order is dependency order. Take as long as needed; do not reorder for “demo speed.”
+Take as long as needed. Do not add “nice” layers mid-stream.
 
-1. **Shared contracts** — natural keys, op payload schemas, group status enum, registry subset.
-2. **Postgres** — ensure canonical tables + minimal control tables + op receipt; install
-   replace resets readiness; retention job for receipts.
-3. **API** — settings, ops batch, simple import session complete/abort, status read;
-   withhold helpers on all health reads.
-4. **iOS SQLite store** — schema above; no dual store.
-5. **Engine** — first import for one group (e.g. vitals BP/glucose only) end-to-end.
-6. **Worker** — drain, retry, idempotent ACK.
-7. **Expand scopes** — steps hourly, sleep day, daily HR, workouts.
-8. **Incremental anchors + deletes** with tests.
-9. **Background observers + BGTask** after foreground path is soak-stable.
-10. **MCP verification** against ready groups only.
-11. **Remove** dead protocol code and docs; single design doc remains this file (or supersedes
-    `HEALTHKIT_SYNC_PLAN.md`).
+1. Shared op + natural-key schemas + small registry subset.
+2. Postgres control tables + install-replace → `never_synced` + receipt TTL.
+3. API: settings, ops batch, start-import (optional), ready, status; withhold on all reads.
+4. iOS single SQLite store.
+5. End-to-end **one** metric (e.g. blood pressure) foreground only.
+6. Worker drain/retry/idempotency.
+7. Add steps hourly, sleep day, daily HR, workouts — one at a time with tests.
+8. Incremental anchors + deletes.
+9. Background only after foreground is soak-stable.
+10. MCP check on ready groups.
+11. Delete dead old sync code and mark old plan docs superseded.
+
+**Gate:** if a PR adds a forbidden item from §0.3, reject it.
 
 ---
 
 ## 12. What success looks like
 
-You can say the system is accurate and stable when:
+1. Health data appears in Postgres **once**.
+2. Deletes in Health correct Postgres.
+3. Crash / offline / retry end in the same DB state as a clean run.
+4. MCP only answers from ready groups and matches those tables.
+5. Phone replace never shows old phone data as ready.
+6. Nobody is debugging versions, manifests, dual ledgers, or session machines.
 
-1. You enter or generate health data in Apple Health and it appears in Postgres **once**.
-2. You delete it in Health and it disappears or corrects in Postgres.
-3. You force-quit, go offline, or retry freely and final DB state matches a clean run.
-4. MCP answers only from ready groups and matches those tables.
-5. Phone reinstall / replace never silently mixes old and new device history as “ready.”
-6. You are not debugging scope manifests, entity versions, or dual ledgers.
+If you need a debugger for protocol state more often than for HealthKit itself, the design
+has failed the simplicity rule.
 
 ---
 
@@ -544,20 +587,20 @@ You can say the system is accurate and stable when:
 
 | Question | Decision |
 |----------|----------|
-| Is the current system over-engineered for personal use? | **Yes** (control plane) |
-| Does over-engineering improve accuracy here? | **No** — it reduced stability |
-| Keep typed aggregates + outbox idea? | **Yes** |
-| Keep entity versions / scope hashes / dual stores? | **No** |
-| Primary goal of rewrite? | **Accuracy + stability** of Health → DB → MCP |
-| Primary model? | **Natural-key upsert + thin outbox + group readiness** |
+| Over-engineering allowed? | **No** |
+| Goal | Correct Health → DB → MCP |
+| Model | Natural-key upsert + thin outbox + ready flag |
+| Typed aggregates + local queue? | **Yes** (correctness) |
+| Versions / hashes / dual stores / session manifests? | **No** |
+| More tables “for safety”? | Only if they map to a §2.1 promise |
 
 ---
 
 ## 14. Related docs
 
-- Supersedes protocol direction in `docs/HEALTHKIT_SYNC_PLAN.md` for the rewrite branch.
-- `docs/TECHNICAL_DESIGN.md` HealthKit sections are historical; do not implement from them.
-- Older background-sync plans remain historical context only.
+- This file is the source of truth for the rewrite.
+- `docs/HEALTHKIT_SYNC_PLAN.md` and older background-sync plans are historical; do not
+  implement from them after this is accepted.
+- `docs/TECHNICAL_DESIGN.md` HealthKit sections are stale for this area.
 
-When this plan is accepted and implemented, mark `HEALTHKIT_SYNC_PLAN.md` as superseded and
-point here as the single source of truth.
+When accepted, mark old HealthKit sync plans superseded and point here only.
