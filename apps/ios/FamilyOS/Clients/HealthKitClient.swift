@@ -16,6 +16,13 @@ struct HealthKitClient {
     /// Requests read access for the selected consent groups. No background delivery yet.
     func requestAuthorization(for metrics: Set<HealthKitSyncMetric>) async throws {
         guard isAvailable else { return }
+        #if DEBUG
+        // Headless simulator smoke cannot tap the system Health permission sheet.
+        if ProcessInfo.processInfo.arguments.contains("-FamilyOSLocalSmoke") {
+            CrashReporting.log("healthkit_auth_skipped_for_local_smoke")
+            return
+        }
+        #endif
         let types = readTypes(for: metrics)
         guard !types.isEmpty else { return }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in

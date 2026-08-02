@@ -18,6 +18,13 @@ enum HealthKitBloodPressureSync {
         store: HKHealthStore = HKHealthStore(),
         now: Date = Date()
     ) async throws -> [BPSample] {
+        #if DEBUG
+        // Headless smoke cannot complete Health permission UI; empty import still proves pipeline.
+        if ProcessInfo.processInfo.arguments.contains("-FamilyOSLocalSmoke") {
+            CrashReporting.log("healthkit_bp_fetch_skipped_for_local_smoke")
+            return []
+        }
+        #endif
         guard let correlationType = HKCorrelationType.correlationType(forIdentifier: .bloodPressure) else {
             return []
         }

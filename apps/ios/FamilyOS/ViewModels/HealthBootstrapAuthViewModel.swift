@@ -79,7 +79,8 @@ extension HealthBootstrapViewModel {
         _ = personId
         healthKit.consentGranted = true
         healthKit.enabledMetrics = [.vitals]
-        await saveHealthKitSettings(showsFeedback: true)
+        // Claim this simulator install (E2E / prior runs may hold a different active id).
+        await saveHealthKitSettings(replaceInstallation: true, showsFeedback: true)
         await syncHealthKitNow()
         #endif
     }

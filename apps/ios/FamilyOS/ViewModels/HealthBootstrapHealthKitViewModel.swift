@@ -146,11 +146,33 @@ extension HealthBootstrapViewModel {
         await request {
             do {
                 let installationId = try HealthKitInstallationId.current(using: keychain)
-                let status = try await client.healthKitSettings(
+                var status = try await client.healthKitSettings(
                     baseURL: connection.baseURL,
                     accessToken: auth.accessToken,
                     personId: personId
                 )
+                // Personal single-writer: if another install is active (reinstall / new phone),
+                // claim this device so ops:batch and start-import are not fenced out.
+                if let active = status.activeInstallationId, active != installationId {
+                    CrashReporting.healthKit(
+                        .settingsLoaded,
+                        group: "vitals",
+                        extra: ["install_replace": "1"]
+                    )
+                    let enabled = status.enabledGroups.isEmpty
+                        ? Array(healthKit.enabledMetrics)
+                        : status.enabledGroups
+                    status = try await client.putHealthKitSettings(
+                        baseURL: connection.baseURL,
+                        accessToken: auth.accessToken,
+                        personId: personId,
+                        consentVersion: status.consentVersion ?? HealthKitConsent.version,
+                        enabledGroups: enabled,
+                        healthTimezone: status.healthTimezone,
+                        installationId: installationId,
+                        replaceActiveInstallation: true
+                    )
+                }
                 healthKit.apply(status: status)
                 CrashReporting.healthKit(
                     .settingsLoaded,
