@@ -1,48 +1,44 @@
 import { createHash } from "node:crypto";
 import type {
   AuditLog,
-  CreateInviteResponse,
-  BloodPressureReading,
   BloodGlucoseReading,
+  BloodPressureReading,
   BootstrapResponse,
-  AbortHealthKitBackfillSessionInput,
-  CompleteHealthKitBackfillSessionInput,
-  CreateHealthKitBackfillSessionInput,
-  FamilyMember,
-  HealthKitBackfillSession,
-  HealthKitBackfillSessionAbortResult,
-  HealthKitBackfillSessionCompleteResult,
-  HealthKitEventsBatchInput,
-  HealthKitEventsBatchResult,
-  HealthKitGroupManifest,
-  HealthKitMetric,
-  HealthKitMetricKey,
-  HealthKitScopeManifestResult,
-  HealthKitSettings,
-  HealthDailyMetricRecord,
-  HealthMetricFreshness,
-  HealthSleepDayRecord,
-  HealthStepHourRecord,
-  HealthWorkoutRecord,
-  McpCapability,
-  McpConnectionGrant,
-  PutHealthKitScopeManifestInput,
-  PutHealthKitSettingsInput,
-  Reminder,
-  NotificationDelivery,
-  NotificationDevice,
-  ReminderRecipient,
-  ReminderScheduleKind,
-  ReminderType,
+  CreateInviteResponse,
   CurrentFamilyResponse,
   Family,
   FamilyInvite,
   FamilyKind,
+  FamilyMember,
   FamilyMembership,
   FamilyRole,
+  HealthDailyMetricRecord,
+  HealthKitConsentGroup,
+  HealthKitGroupImportStartResult,
+  HealthKitGroupReadyResult,
+  HealthKitGroupStatus,
+  HealthKitMetricKey,
+  HealthKitOpsBatchInput,
+  HealthKitOpsBatchResult,
+  HealthKitSettings,
+  HealthMetricFreshness,
   HealthProfile,
+  HealthSleepDayRecord,
+  HealthStepHourRecord,
+  HealthWorkoutRecord,
+  MarkHealthKitGroupReadyInput,
+  McpCapability,
+  McpConnectionGrant,
+  NotificationDelivery,
+  NotificationDevice,
   PersonStatus,
-  PublicInviteResponse
+  PublicInviteResponse,
+  PutHealthKitSettingsInput,
+  Reminder,
+  ReminderRecipient,
+  ReminderScheduleKind,
+  ReminderType,
+  StartHealthKitImportInput
 } from "@family-os/shared";
 import { HttpError } from "../errors";
 import type {
@@ -552,61 +548,32 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     return this.healthKit.putHealthKitSettings(actorUserId, input);
   }
 
-  async applyHealthKitEvents(actorUserId: string, input: HealthKitEventsBatchInput): Promise<HealthKitEventsBatchResult> {
-    return this.healthKit.applyHealthKitEvents(actorUserId, input);
+  async applyHealthKitOps(actorUserId: string, input: HealthKitOpsBatchInput): Promise<HealthKitOpsBatchResult> {
+    return this.healthKit.applyHealthKitOps(actorUserId, input);
   }
 
-  async createBackfillSession(
+  async startHealthKitImport(
     actorUserId: string,
-    input: CreateHealthKitBackfillSessionInput
-  ): Promise<HealthKitBackfillSession> {
-    return this.healthKit.createBackfillSession(actorUserId, input);
+    group: HealthKitConsentGroup,
+    input: StartHealthKitImportInput
+  ): Promise<HealthKitGroupImportStartResult> {
+    return this.healthKit.startHealthKitImport(actorUserId, group, input);
   }
 
-  async putScopeManifest(
+  async markHealthKitGroupReady(
     actorUserId: string,
-    sessionId: string,
-    scopeKey: string,
-    input: PutHealthKitScopeManifestInput
-  ): Promise<HealthKitScopeManifestResult> {
-    return this.healthKit.putScopeManifest(actorUserId, sessionId, scopeKey, input);
+    group: HealthKitConsentGroup,
+    input: MarkHealthKitGroupReadyInput
+  ): Promise<HealthKitGroupReadyResult> {
+    return this.healthKit.markHealthKitGroupReady(actorUserId, group, input);
   }
 
-  async completeBackfillSession(
+  async getHealthKitGroupStatus(
     actorUserId: string,
-    sessionId: string,
-    input: CompleteHealthKitBackfillSessionInput
-  ): Promise<HealthKitBackfillSessionCompleteResult> {
-    return this.healthKit.completeBackfillSession(actorUserId, sessionId, input);
-  }
-
-  async abortBackfillSession(
-    actorUserId: string,
-    sessionId: string,
-    input: AbortHealthKitBackfillSessionInput
-  ): Promise<HealthKitBackfillSessionAbortResult> {
-    return this.healthKit.abortBackfillSession(actorUserId, sessionId, input);
-  }
-
-  async getBackfillSession(actorUserId: string, sessionId: string): Promise<HealthKitBackfillSession> {
-    return this.healthKit.getBackfillSession(actorUserId, sessionId);
-  }
-
-  async listBackfillPending(
-    actorUserId: string,
-    sessionId: string,
-    cursor?: string,
-    limit?: number
-  ): Promise<{ eventIds: string[]; nextCursor?: string }> {
-    return this.healthKit.listBackfillPending(actorUserId, sessionId, cursor, limit);
-  }
-
-  async getGroupManifest(
-    actorUserId: string,
-    group: HealthKitMetric,
+    group: HealthKitConsentGroup,
     personId?: string
-  ): Promise<HealthKitGroupManifest> {
-    return this.healthKit.getGroupManifest(actorUserId, group, personId);
+  ): Promise<HealthKitGroupStatus> {
+    return this.healthKit.getHealthKitGroupStatus(actorUserId, group, personId);
   }
 
   async getHealthMetricFreshness(

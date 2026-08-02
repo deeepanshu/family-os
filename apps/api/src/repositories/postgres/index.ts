@@ -1,39 +1,35 @@
 import postgres from "postgres";
 import type {
-  AbortHealthKitBackfillSessionInput,
   AuditLog,
+  BloodGlucoseReading,
   BloodPressureReading,
   BootstrapResponse,
-  CompleteHealthKitBackfillSessionInput,
-  CreateHealthKitBackfillSessionInput,
   CreateInviteResponse,
   CurrentFamilyResponse,
   FamilyMember,
   FamilyMembership,
-  HealthKitBackfillSession,
-  HealthKitBackfillSessionAbortResult,
-  HealthKitBackfillSessionCompleteResult,
-  HealthKitEventsBatchInput,
-  HealthKitEventsBatchResult,
-  HealthKitGroupManifest,
-  HealthKitMetric,
-  HealthKitMetricKey,
-  HealthKitScopeManifestResult,
-  HealthKitSettings,
   HealthDailyMetricRecord,
+  HealthKitConsentGroup,
+  HealthKitGroupImportStartResult,
+  HealthKitGroupReadyResult,
+  HealthKitGroupStatus,
+  HealthKitMetricKey,
+  HealthKitOpsBatchInput,
+  HealthKitOpsBatchResult,
+  HealthKitSettings,
   HealthMetricFreshness,
   HealthProfile,
   HealthSleepDayRecord,
   HealthStepHourRecord,
   HealthWorkoutRecord,
-  BloodGlucoseReading,
+  MarkHealthKitGroupReadyInput,
   NotificationDelivery,
   NotificationDevice,
   PublicInviteResponse,
-  PutHealthKitScopeManifestInput,
   PutHealthKitSettingsInput,
   Reminder,
-  ReminderRecipient
+  ReminderRecipient,
+  StartHealthKitImportInput
 } from "@family-os/shared";
 import type {
   CreateFamilyInput,
@@ -152,61 +148,32 @@ export class PostgresFamilyRepository implements FamilyRepository {
     return this.healthKitStore.putHealthKitSettings(actorUserId, input);
   }
 
-  applyHealthKitEvents(actorUserId: string, input: HealthKitEventsBatchInput): Promise<HealthKitEventsBatchResult> {
-    return this.healthKitStore.applyHealthKitEvents(actorUserId, input);
+  applyHealthKitOps(actorUserId: string, input: HealthKitOpsBatchInput): Promise<HealthKitOpsBatchResult> {
+    return this.healthKitStore.applyHealthKitOps(actorUserId, input);
   }
 
-  createBackfillSession(
+  startHealthKitImport(
     actorUserId: string,
-    input: CreateHealthKitBackfillSessionInput
-  ): Promise<HealthKitBackfillSession> {
-    return this.healthKitStore.createBackfillSession(actorUserId, input);
+    group: HealthKitConsentGroup,
+    input: StartHealthKitImportInput
+  ): Promise<HealthKitGroupImportStartResult> {
+    return this.healthKitStore.startHealthKitImport(actorUserId, group, input);
   }
 
-  putScopeManifest(
+  markHealthKitGroupReady(
     actorUserId: string,
-    sessionId: string,
-    scopeKey: string,
-    input: PutHealthKitScopeManifestInput
-  ): Promise<HealthKitScopeManifestResult> {
-    return this.healthKitStore.putScopeManifest(actorUserId, sessionId, scopeKey, input);
+    group: HealthKitConsentGroup,
+    input: MarkHealthKitGroupReadyInput
+  ): Promise<HealthKitGroupReadyResult> {
+    return this.healthKitStore.markHealthKitGroupReady(actorUserId, group, input);
   }
 
-  completeBackfillSession(
+  getHealthKitGroupStatus(
     actorUserId: string,
-    sessionId: string,
-    input: CompleteHealthKitBackfillSessionInput
-  ): Promise<HealthKitBackfillSessionCompleteResult> {
-    return this.healthKitStore.completeBackfillSession(actorUserId, sessionId, input);
-  }
-
-  abortBackfillSession(
-    actorUserId: string,
-    sessionId: string,
-    input: AbortHealthKitBackfillSessionInput
-  ): Promise<HealthKitBackfillSessionAbortResult> {
-    return this.healthKitStore.abortBackfillSession(actorUserId, sessionId, input);
-  }
-
-  getBackfillSession(actorUserId: string, sessionId: string): Promise<HealthKitBackfillSession> {
-    return this.healthKitStore.getBackfillSession(actorUserId, sessionId);
-  }
-
-  listBackfillPending(
-    actorUserId: string,
-    sessionId: string,
-    cursor?: string,
-    limit?: number
-  ): Promise<{ eventIds: string[]; nextCursor?: string }> {
-    return this.healthKitStore.listBackfillPending(actorUserId, sessionId, cursor, limit);
-  }
-
-  getGroupManifest(
-    actorUserId: string,
-    group: HealthKitMetric,
+    group: HealthKitConsentGroup,
     personId?: string
-  ): Promise<HealthKitGroupManifest> {
-    return this.healthKitStore.getGroupManifest(actorUserId, group, personId);
+  ): Promise<HealthKitGroupStatus> {
+    return this.healthKitStore.getHealthKitGroupStatus(actorUserId, group, personId);
   }
 
   getHealthMetricFreshness(actorUserId: string, personId: string, healthMetric: HealthKitMetricKey): Promise<HealthMetricFreshness> {

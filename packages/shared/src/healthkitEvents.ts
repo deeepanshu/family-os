@@ -1,19 +1,38 @@
+/**
+ * Legacy HealthKit event/session types retained only for historical fixtures.
+ * New clients and API use healthkitOps.ts (natural-key ops:batch).
+ */
+import type { HealthKitConsentGroup } from "./healthkitRegistry";
 import {
-  HEALTHKIT_METRIC_REGISTRY,
-  healthKitMetricsForGroup,
-  isHealthKitMetricKey,
-  type HealthKitConsentGroup,
-  type HealthKitMetricKey
-} from "./healthkitRegistry";
+  BACKFILL_WINDOW_MS,
+  groupForScopeKey,
+  healthKitNaturalKey,
+  requiredScopeKeysForGroup,
+  scopeKeyForPayload,
+  type HealthKitBloodGlucosePayload,
+  type HealthKitBloodPressurePayload,
+  type HealthKitDailyMetricPayload,
+  type HealthKitOpPayload,
+  type HealthKitSleepDayPayload,
+  type HealthKitStepsHourPayload,
+  type HealthKitWorkoutPayload
+} from "./healthkitOps";
 import {
   canonicalHealthEventString,
   canonicalScopeManifestString,
   sha256HexFromUtf8
 } from "./healthkitCanonical";
 
+export {
+  BACKFILL_WINDOW_MS,
+  groupForScopeKey,
+  requiredScopeKeysForGroup,
+  scopeKeyForPayload
+};
+
 export type HealthKitEventOp = "upsert" | "delete";
 
-/** Per-event apply outcomes returned by POST /events:batch. */
+/** @deprecated Prefer HealthKitOpApplyCode from healthkitOps. */
 export type HealthKitEventApplyCode =
   | "applied"
   | "duplicate"
@@ -21,10 +40,7 @@ export type HealthKitEventApplyCode =
   | "payload_invalid"
   | "event_conflict";
 
-/**
- * Worker / client actions derived from API and transport outcomes.
- * See docs/HEALTHKIT_SYNC_PLAN.md.
- */
+/** @deprecated Prefer HealthKitOpErrorAction from healthkitOps. */
 export type HealthKitSyncErrorAction =
   | "delete_local"
   | "fail_permanent"
@@ -37,6 +53,7 @@ export type HealthKitSyncErrorAction =
   | "refresh_auth"
   | "backoff";
 
+/** @deprecated Prefer HealthKitOpErrorCode from healthkitOps. */
 export type HealthKitSyncErrorCode =
   | "payload_invalid"
   | "event_conflict"
@@ -95,78 +112,18 @@ export function healthKitSuccessAction(
   }
 }
 
-// --- Payload kinds (upsert bodies; deletes carry null payload) ---
-
-export type HealthKitStepsHourPayload = {
-  kind: "steps_hour";
-  hourStartUtc: string;
-  count: number;
+export type {
+  HealthKitStepsHourPayload,
+  HealthKitSleepDayPayload,
+  HealthKitDailyMetricPayload,
+  HealthKitBloodPressurePayload,
+  HealthKitBloodGlucosePayload,
+  HealthKitWorkoutPayload
 };
 
-export type HealthKitSleepDayPayload = {
-  kind: "sleep_day";
-  sleepDay: string;
-  totalMinutes: number;
-  coreMinutes: number;
-  deepMinutes: number;
-  remMinutes: number;
-  unspecifiedAsleepMinutes: number;
-  awakeMinutes: number;
-  inBedMinutes: number;
-  wristTemperatureCelsius?: number;
-  breathingDisturbanceCount?: number;
-};
+export type HealthKitEventPayload = HealthKitOpPayload;
 
-export type HealthKitDailyMetricPayload = {
-  kind: "daily_metric";
-  healthMetric: HealthKitMetricKey;
-  localDay: string;
-  sumValue?: number;
-  averageValue?: number;
-  minimumValue?: number;
-  maximumValue?: number;
-  latestValue?: number;
-  sampleCount: number;
-};
-
-export type HealthKitBloodPressurePayload = {
-  kind: "blood_pressure";
-  /** HealthKit object UUID (HKCorrelation for BP, not a single quantity sample). */
-  sourceObjectKey: string;
-  measuredAtUtc: string;
-  systolic: number;
-  diastolic: number;
-  pulse?: number;
-};
-
-export type HealthKitBloodGlucosePayload = {
-  kind: "blood_glucose";
-  sourceSampleKey: string;
-  measuredAtUtc: string;
-  valueMgDl: number;
-};
-
-export type HealthKitWorkoutPayload = {
-  kind: "workout";
-  sourceSampleKey: string;
-  workoutType: string;
-  startedAtUtc: string;
-  endedAtUtc: string;
-  durationSeconds: number;
-  activeEnergyKcal?: number;
-  distanceMeters?: number;
-  averageHeartRateBpm?: number;
-  maximumHeartRateBpm?: number;
-};
-
-export type HealthKitEventPayload =
-  | HealthKitStepsHourPayload
-  | HealthKitSleepDayPayload
-  | HealthKitDailyMetricPayload
-  | HealthKitBloodPressurePayload
-  | HealthKitBloodGlucosePayload
-  | HealthKitWorkoutPayload;
-
+/** @deprecated Prefer HealthKitSyncOp. */
 export type HealthKitSyncEvent = {
   eventId: string;
   entityKey: string;
@@ -178,6 +135,7 @@ export type HealthKitSyncEvent = {
   payload?: HealthKitEventPayload | null;
 };
 
+/** @deprecated Prefer HealthKitOpsBatchInput. */
 export type HealthKitEventsBatchInput = {
   installationId: string;
   personId: string;
@@ -185,6 +143,7 @@ export type HealthKitEventsBatchInput = {
   events: HealthKitSyncEvent[];
 };
 
+/** @deprecated Prefer HealthKitOpApplyResult. */
 export type HealthKitEventApplyResult = {
   eventId: string;
   result: HealthKitEventApplyCode;
@@ -192,10 +151,12 @@ export type HealthKitEventApplyResult = {
   errorMessage?: string;
 };
 
+/** @deprecated Prefer HealthKitOpsBatchResult. */
 export type HealthKitEventsBatchResult = {
   results: HealthKitEventApplyResult[];
 };
 
+/** @deprecated Sessions removed in correctness rewrite. */
 export type CreateHealthKitBackfillSessionInput = {
   installationId: string;
   personId: string;
@@ -203,16 +164,15 @@ export type CreateHealthKitBackfillSessionInput = {
   group: HealthKitConsentGroup;
 };
 
+/** @deprecated Sessions removed in correctness rewrite. */
 export type HealthKitBackfillSession = {
   sessionId: string;
   personId: string;
   group: HealthKitConsentGroup;
   installationId: string;
   timezoneVersion: number;
-  /** Inclusive UTC instant bounds. */
   rangeStart: string;
   rangeEnd: string;
-  /** Inclusive profile-local calendar days. */
   rangeStartDay: string;
   rangeEndDay: string;
   requiredScopeKeys: string[];
@@ -228,6 +188,7 @@ export type HealthKitBackfillSessionStatus =
   | "aborted"
   | "expired";
 
+/** @deprecated Scope manifests removed in correctness rewrite. */
 export type PutHealthKitScopeManifestInput = {
   installationId: string;
   personId: string;
@@ -268,6 +229,7 @@ export type HealthKitBackfillSessionAbortResult = {
   aborted: true;
 };
 
+/** @deprecated Entity ledgers removed in correctness rewrite. */
 export type HealthKitGroupManifest = {
   personId: string;
   group: HealthKitConsentGroup;
@@ -282,56 +244,13 @@ export type HealthKitGroupManifest = {
 };
 
 export const HEALTHKIT_EVENTS_BATCH_MAX = 500;
-export const BACKFILL_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 export const BACKFILL_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
-/** Build entity key for a source-keyed or bucketed record. */
+/** @deprecated Prefer healthKitNaturalKey. */
 export function healthKitEntityKey(
   payload: HealthKitEventPayload | { kind: "delete"; scopeKey: string; bucketKey: string }
 ): string {
-  if ("kind" in payload && payload.kind === "delete") {
-    return `${payload.scopeKey}:${payload.bucketKey}`;
-  }
-  switch (payload.kind) {
-    case "steps_hour":
-      return `steps_hour:${payload.hourStartUtc}`;
-    case "sleep_day":
-      return `sleep_day:${payload.sleepDay}`;
-    case "daily_metric":
-      return `daily_metric:${payload.healthMetric}:${payload.localDay}`;
-    case "blood_pressure":
-      return `blood_pressure:${payload.sourceObjectKey}`;
-    case "blood_glucose":
-      return `blood_glucose:${payload.sourceSampleKey}`;
-    case "workout":
-      return `workout:${payload.sourceSampleKey}`;
-  }
-}
-
-export function scopeKeyForPayload(payload: HealthKitEventPayload): HealthKitMetricKey {
-  switch (payload.kind) {
-    case "steps_hour":
-      return "steps";
-    case "sleep_day":
-      return "sleep";
-    case "daily_metric":
-      return payload.healthMetric;
-    case "blood_pressure":
-      return "blood_pressure";
-    case "blood_glucose":
-      return "blood_glucose";
-    case "workout":
-      return "workout";
-  }
-}
-
-export function groupForScopeKey(scopeKey: string): HealthKitConsentGroup | null {
-  if (!isHealthKitMetricKey(scopeKey)) return null;
-  return HEALTHKIT_METRIC_REGISTRY[scopeKey].group;
-}
-
-export function requiredScopeKeysForGroup(group: HealthKitConsentGroup): string[] {
-  return healthKitMetricsForGroup(group);
+  return healthKitNaturalKey(payload);
 }
 
 export function fingerprintHealthEvent(
@@ -360,8 +279,6 @@ export function fingerprintScopeManifest(
   return sha256HexFromUtf8(canonicalScopeManifestString(input), sha256);
 }
 
-/** Node-friendly SHA-256 hex helper for tests and the API process. */
-export function nodeSha256Hex(utf8: string): string {
-  // Lazy require pattern avoided; callers in Node should pass createHash.
+export function nodeSha256Hex(_utf8: string): string {
   throw new Error("Use fingerprint helpers with an injected sha256 implementation.");
 }

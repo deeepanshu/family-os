@@ -331,9 +331,8 @@ describe("HealthMcpReadService", () => {
     });
     const installationId = "53064303-35cf-4db0-a5d3-8af7d8f747e1";
     const hrEvent = {
-      eventId: crypto.randomUUID(),
-      entityKey: "daily_metric:heart_rate:2026-07-17",
-      entityVersion: 1,
+      opId: crypto.randomUUID(),
+      naturalKey: "daily_metric:heart_rate:2026-07-17",
       group: "vitals" as const,
       scopeKey: "heart_rate",
       op: "upsert" as const,
@@ -349,9 +348,8 @@ describe("HealthMcpReadService", () => {
       }
     };
     const glucoseEvent = {
-      eventId: crypto.randomUUID(),
-      entityKey: "blood_glucose:da6694a6-3f56-4a33-a9d8-3ba481670d57",
-      entityVersion: 1,
+      opId: crypto.randomUUID(),
+      naturalKey: "blood_glucose:da6694a6-3f56-4a33-a9d8-3ba481670d57",
       group: "vitals" as const,
       scopeKey: "blood_glucose",
       op: "upsert" as const,
@@ -364,9 +362,8 @@ describe("HealthMcpReadService", () => {
     };
     await seedHealthKitReadyGroup(api, token, profileId, installationId, "vitals", [hrEvent, glucoseEvent]);
     const workoutEvent = {
-      eventId: crypto.randomUUID(),
-      entityKey: "workout:e9758548-5fab-4e47-a4ac-9a05693bea71",
-      entityVersion: 1,
+      opId: crypto.randomUUID(),
+      naturalKey: "workout:e9758548-5fab-4e47-a4ac-9a05693bea71",
       group: "workouts" as const,
       scopeKey: "workout",
       op: "upsert" as const,
@@ -511,27 +508,25 @@ describe("HealthMcpReadService", () => {
         installationId
       })
     });
-    // Open session (backfilling) without completing.
-    const sessionRes = await api.request(`${HEALTH_API_PREFIX}/healthkit/sessions`, {
+    // Start import (syncing) without marking ready.
+    await api.request(`${HEALTH_API_PREFIX}/healthkit/groups/activity/start-import`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({
         installationId,
         personId: profileId,
-        group: "activity",
         timezoneVersion: 1
       })
     });
-    const sessionId = (await sessionRes.json()).data.sessionId as string;
     const step = stepsHourEvent("2026-07-15T08:00:00.000Z", 9999);
-    await api.request(`${HEALTH_API_PREFIX}/healthkit/events:batch`, {
+    await api.request(`${HEALTH_API_PREFIX}/healthkit/ops:batch`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({
         installationId,
         personId: profileId,
         timezoneVersion: 1,
-        events: [{ ...step, sessionId }]
+        ops: [step]
       })
     });
 
@@ -547,37 +542,13 @@ describe("HealthMcpReadService", () => {
       { userId, oauthClientId },
       { personId: profileId, healthMetric: "steps", rangeDays: 30, timezone: "UTC" }
     );
-    expect(partial.metricSyncStatus).toBe("backfilling");
+    expect(partial.metricSyncStatus).toBe("syncing");
     expect(partial.coverage.complete).toBe(false);
     if (partial.viewType === "daily_series") {
       expect(partial.points).toEqual([]);
     }
 
-    // Complete the open session with manifests for every required activity scope.
-    // Reuse the already-applied session-tagged event rather than replaying version 1.
-    const { createHash } = await import("node:crypto");
-    const { fingerprintScopeManifest, requiredScopeKeysForGroup } = await import("@family-os/shared");
-    const sha = (data: Uint8Array) => createHash("sha256").update(data).digest();
-    for (const scopeKey of requiredScopeKeysForGroup("activity")) {
-      const eventIds = scopeKey === "steps" ? [step.eventId] : [];
-      const manifestHash = fingerprintScopeManifest({ sessionId, scopeKey, eventIds }, sha);
-      const put = await api.request(
-        `${HEALTH_API_PREFIX}/healthkit/sessions/${sessionId}/scopes/${scopeKey}/manifest`,
-        {
-          method: "PUT",
-          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-          body: JSON.stringify({
-            installationId,
-            personId: profileId,
-            timezoneVersion: 1,
-            eventCount: eventIds.length,
-            manifestHash
-          })
-        }
-      );
-      expect(put.status).toBe(200);
-    }
-    const complete = await api.request(`${HEALTH_API_PREFIX}/healthkit/sessions/${sessionId}/complete`, {
+    const readyRes = await api.request(`${HEALTH_API_PREFIX}/healthkit/groups/activity/ready`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({
@@ -586,7 +557,7 @@ describe("HealthMcpReadService", () => {
         timezoneVersion: 1
       })
     });
-    expect(complete.status).toBe(200);
+    expect(readyRes.status).toBe(200);
     const ready = await service.getHealthData(
       { userId, oauthClientId },
       { personId: profileId, healthMetric: "steps", rangeDays: 30, timezone: "UTC" }

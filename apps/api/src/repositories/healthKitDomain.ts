@@ -1,8 +1,8 @@
 import type {
   HealthKitConsentGroup,
-  HealthKitEventPayload,
   HealthKitMetric,
-  HealthKitSyncEvent,
+  HealthKitOpPayload,
+  HealthKitSyncOp,
   HealthMetricSyncStatusCode
 } from "@family-os/shared";
 import {
@@ -10,14 +10,13 @@ import {
   HEALTHKIT_CONSENT_GROUPS,
   HEALTHKIT_METRIC_REGISTRY,
   groupForScopeKey,
-  healthKitEntityKey,
+  healthKitNaturalKey,
   isHealthKitMetricKey,
   requiredScopeKeysForGroup
 } from "@family-os/shared";
 import { HttpError } from "../errors";
 
 export const HEALTHKIT_METRICS: readonly HealthKitMetric[] = HEALTHKIT_CONSENT_GROUPS;
-export const BACKFILL_TTL_MS = 24 * 60 * 60 * 1000;
 
 export function assertSelfProfileMatch(input: {
   selfProfileId: string | undefined;
@@ -47,7 +46,13 @@ export function coverageComplete(input: {
   rangeStart: string;
   rangeEnd: string;
 }): boolean {
-  if (input.status === "backfilling" || input.status === "never_synced" || input.status === "disabled" || input.status === "error") {
+  if (
+    input.status === "syncing" ||
+    input.status === "backfilling" ||
+    input.status === "never_synced" ||
+    input.status === "disabled" ||
+    input.status === "error"
+  ) {
     return false;
   }
   if (!input.coverageStartAt || !input.coverageEndAt) {
@@ -100,7 +105,7 @@ export function profileLocalDayRange(rangeEndDay: string, windowDays = 90): {
   rangeEndDay: string;
 } {
   if (windowDays < 1) {
-    throw new HttpError(400, "session_invalid", "Backfill window must be at least one day.");
+    throw new HttpError(400, "payload_invalid", "Backfill window must be at least one day.");
   }
   return {
     rangeStartDay: addCalendarDays(rangeEndDay, -(windowDays - 1)),
@@ -120,11 +125,16 @@ export function scopesForGroup(group: HealthKitConsentGroup): string[] {
 }
 
 /**
- * Incomplete backfill and post-timezone-change windows must not expose records via MCP
- * until the required backfill completes under the current health timezone version.
+ * Incomplete first import and post-timezone-change windows must not expose records
+ * via MCP/history until the group is ready under the current timezone version.
  */
 export function shouldWithholdMetricRecords(status: HealthMetricSyncStatusCode): boolean {
-  return status === "backfilling" || status === "never_synced" || status === "error";
+  return (
+    status === "syncing" ||
+    status === "backfilling" ||
+    status === "never_synced" ||
+    status === "error"
+  );
 }
 
 const DATE_SANITY_PAST_MS = 10 * 365 * 24 * 60 * 60 * 1000;
@@ -150,40 +160,40 @@ export function assertDateSanity(iso: string, now = new Date()) {
   }
 }
 
-export function assertEventCoherent(event: HealthKitSyncEvent): void {
-  if (event.entityVersion < 1) {
-    throw new HttpError(400, "payload_invalid", "entityVersion must be >= 1.");
-  }
-  if (!isHealthKitMetricKey(event.scopeKey)) {
+export function assertOpCoherent(op: HealthKitSyncOp): void {
+  if (!isHealthKitMetricKey(op.scopeKey)) {
     throw new HttpError(400, "payload_invalid", "scopeKey is not allowlisted.");
   }
-  const expectedGroup = groupForScopeKey(event.scopeKey);
-  if (expectedGroup !== event.group) {
+  const expectedGroup = groupForScopeKey(op.scopeKey);
+  if (expectedGroup !== op.group) {
     throw new HttpError(400, "payload_invalid", "group does not match scopeKey.");
   }
 
-  if (event.op === "delete") {
-    if (event.payload != null) {
-      throw new HttpError(400, "payload_invalid", "delete events must not include a payload.");
+  if (op.op === "delete") {
+    if (op.payload != null) {
+      throw new HttpError(400, "payload_invalid", "delete ops must not include a payload.");
+    }
+    if (!op.naturalKey || op.naturalKey.length > 256) {
+      throw new HttpError(400, "payload_invalid", "naturalKey is invalid.");
     }
     return;
   }
 
-  if (!event.payload) {
-    throw new HttpError(400, "payload_invalid", "upsert events require a payload.");
+  if (!op.payload) {
+    throw new HttpError(400, "payload_invalid", "upsert ops require a payload.");
   }
-  assertPayloadValid(event.payload, event);
+  assertPayloadValid(op.payload, op);
 }
 
-function assertPayloadValid(payload: HealthKitEventPayload, event: HealthKitSyncEvent): void {
-  const expectedKey = healthKitEntityKey(payload);
-  if (event.entityKey !== expectedKey) {
-    throw new HttpError(400, "payload_invalid", "entityKey does not match payload.");
+function assertPayloadValid(payload: HealthKitOpPayload, op: HealthKitSyncOp): void {
+  const expectedKey = healthKitNaturalKey(payload);
+  if (op.naturalKey !== expectedKey) {
+    throw new HttpError(400, "payload_invalid", "naturalKey does not match payload.");
   }
 
   switch (payload.kind) {
     case "steps_hour": {
-      if (event.scopeKey !== "steps") throw new HttpError(400, "payload_invalid", "steps payload scope mismatch.");
+      if (op.scopeKey !== "steps") throw new HttpError(400, "payload_invalid", "steps payload scope mismatch.");
       assertUtcHourBoundary(payload.hourStartUtc);
       assertDateSanity(payload.hourStartUtc);
       if (!Number.isInteger(payload.count) || payload.count < 0 || payload.count > 200_000) {
@@ -192,7 +202,7 @@ function assertPayloadValid(payload: HealthKitEventPayload, event: HealthKitSync
       return;
     }
     case "sleep_day": {
-      if (event.scopeKey !== "sleep") throw new HttpError(400, "payload_invalid", "sleep payload scope mismatch.");
+      if (op.scopeKey !== "sleep") throw new HttpError(400, "payload_invalid", "sleep payload scope mismatch.");
       assertYmd(payload.sleepDay);
       if (!Number.isInteger(payload.totalMinutes) || payload.totalMinutes < 0 || payload.totalMinutes > 24 * 60) {
         throw new HttpError(400, "payload_invalid", "total sleep minutes are invalid.");
@@ -212,9 +222,6 @@ function assertPayloadValid(payload: HealthKitEventPayload, event: HealthKitSync
       }
       const asleep =
         payload.coreMinutes + payload.deepMinutes + payload.remMinutes + payload.unspecifiedAsleepMinutes;
-      // The iOS client merges overlapping asleep intervals from separate
-      // HealthKit sources. Stage totals retain the source values, so their raw
-      // sum can be greater than the merged total duration.
       if (payload.totalMinutes > asleep) {
         throw new HttpError(400, "payload_invalid", "totalMinutes cannot exceed the sleep stage total.");
       }
@@ -235,7 +242,7 @@ function assertPayloadValid(payload: HealthKitEventPayload, event: HealthKitSync
       return;
     }
     case "daily_metric": {
-      if (payload.healthMetric !== event.scopeKey) {
+      if (payload.healthMetric !== op.scopeKey) {
         throw new HttpError(400, "payload_invalid", "daily metric scope mismatch.");
       }
       if (!isHealthKitMetricKey(payload.healthMetric)) {
@@ -269,10 +276,7 @@ function assertPayloadValid(payload: HealthKitEventPayload, event: HealthKitSync
       ) {
         throw new HttpError(400, "payload_invalid", "Statistics metric requires average, min, max, latest.");
       }
-      if (
-        definition.aggregation === "statistics" &&
-        payload.minimumValue! > payload.maximumValue!
-      ) {
+      if (definition.aggregation === "statistics" && payload.minimumValue! > payload.maximumValue!) {
         throw new HttpError(400, "payload_invalid", "minimumValue must be <= maximumValue.");
       }
       if (
@@ -287,7 +291,7 @@ function assertPayloadValid(payload: HealthKitEventPayload, event: HealthKitSync
       return;
     }
     case "blood_pressure": {
-      if (event.scopeKey !== "blood_pressure") throw new HttpError(400, "payload_invalid", "BP scope mismatch.");
+      if (op.scopeKey !== "blood_pressure") throw new HttpError(400, "payload_invalid", "BP scope mismatch.");
       assertDateSanity(payload.measuredAtUtc);
       if (payload.systolic < 50 || payload.systolic > 260 || payload.diastolic < 30 || payload.diastolic > 180) {
         throw new HttpError(400, "payload_invalid", "blood pressure values are out of range.");
@@ -301,7 +305,7 @@ function assertPayloadValid(payload: HealthKitEventPayload, event: HealthKitSync
       return;
     }
     case "blood_glucose": {
-      if (event.scopeKey !== "blood_glucose") throw new HttpError(400, "payload_invalid", "glucose scope mismatch.");
+      if (op.scopeKey !== "blood_glucose") throw new HttpError(400, "payload_invalid", "glucose scope mismatch.");
       assertDateSanity(payload.measuredAtUtc);
       if (payload.valueMgDl < 20 || payload.valueMgDl > 700) {
         throw new HttpError(400, "payload_invalid", "glucose value is out of range.");
@@ -309,7 +313,7 @@ function assertPayloadValid(payload: HealthKitEventPayload, event: HealthKitSync
       return;
     }
     case "workout": {
-      if (event.scopeKey !== "workout") throw new HttpError(400, "payload_invalid", "workout scope mismatch.");
+      if (op.scopeKey !== "workout") throw new HttpError(400, "payload_invalid", "workout scope mismatch.");
       assertDateSanity(payload.startedAtUtc);
       assertDateSanity(payload.endedAtUtc);
       const start = Date.parse(payload.startedAtUtc);
@@ -317,7 +321,11 @@ function assertPayloadValid(payload: HealthKitEventPayload, event: HealthKitSync
       if (end < start) {
         throw new HttpError(400, "payload_invalid", "workout end must be >= start.");
       }
-      if (!Number.isInteger(payload.durationSeconds) || payload.durationSeconds < 0 || payload.durationSeconds > 7 * 24 * 60 * 60) {
+      if (
+        !Number.isInteger(payload.durationSeconds) ||
+        payload.durationSeconds < 0 ||
+        payload.durationSeconds > 7 * 24 * 60 * 60
+      ) {
         throw new HttpError(400, "payload_invalid", "workout duration is invalid.");
       }
       if (
@@ -334,7 +342,7 @@ function assertPayloadValid(payload: HealthKitEventPayload, event: HealthKitSync
     }
     default: {
       const _exhaustive: never = payload;
-      throw new HttpError(400, "payload_invalid", `Unknown payload kind ${(_exhaustive as HealthKitEventPayload).kind}`);
+      throw new HttpError(400, "payload_invalid", `Unknown payload kind ${(_exhaustive as HealthKitOpPayload).kind}`);
     }
   }
 }
@@ -342,48 +350,5 @@ function assertPayloadValid(payload: HealthKitEventPayload, event: HealthKitSync
 function assertYmd(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw new HttpError(400, "payload_invalid", "Date must be YYYY-MM-DD.");
-  }
-}
-
-export function assertEventInBackfillRange(event: HealthKitSyncEvent, range: HealthKitBackfillRange): void {
-  if (event.op === "delete") {
-    // Delete entity keys encode the bucket/source; range is soft for deletes.
-    return;
-  }
-  const payload = event.payload!;
-  const rangeStartMs = Date.parse(range.rangeStartIso);
-  const rangeEndMs = Date.parse(range.rangeEndIso);
-
-  switch (payload.kind) {
-    case "steps_hour": {
-      const t = Date.parse(payload.hourStartUtc);
-      if (t < rangeStartMs || t > rangeEndMs) {
-        throw new HttpError(400, "payload_invalid", "steps hour is outside the backfill range.");
-      }
-      return;
-    }
-    case "sleep_day":
-    case "daily_metric": {
-      const day = payload.kind === "daily_metric" ? payload.localDay : payload.sleepDay;
-      if (day < range.rangeStartDay || day > range.rangeEndDay) {
-        throw new HttpError(400, "payload_invalid", "daily record is outside the backfill range.");
-      }
-      return;
-    }
-    case "blood_pressure":
-    case "blood_glucose": {
-      const t = Date.parse(payload.measuredAtUtc);
-      if (t < rangeStartMs || t > rangeEndMs) {
-        throw new HttpError(400, "payload_invalid", "reading is outside the backfill range.");
-      }
-      return;
-    }
-    case "workout": {
-      const t = Date.parse(payload.startedAtUtc);
-      if (t < rangeStartMs || t > rangeEndMs) {
-        throw new HttpError(400, "payload_invalid", "workout is outside the backfill range.");
-      }
-      return;
-    }
   }
 }

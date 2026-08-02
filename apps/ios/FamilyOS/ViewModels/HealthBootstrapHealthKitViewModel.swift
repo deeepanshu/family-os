@@ -59,7 +59,7 @@ extension HealthBootstrapViewModel {
                 try await healthKitClient.requestAuthorization(for: Set(status.enabledMetrics))
             }
             return status.consentActive
-                ? "HealthKit settings saved. Device sync will return after the rewrite."
+                ? "HealthKit settings saved."
                 : "HealthKit consent withdrawn."
         }
     }
@@ -83,10 +83,85 @@ extension HealthBootstrapViewModel {
             reportActionFailure(statusMessage)
             return
         }
+        guard healthKit.consentGranted, healthKit.enabledMetrics.contains(.vitals) else {
+            isError = true
+            statusMessage = "Enable vitals consent before blood pressure sync."
+            reportActionFailure(statusMessage)
+            return
+        }
 
-        isError = true
-        statusMessage = "HealthKit device sync was removed for rewrite. Settings still save; upload pipeline is coming back simple and correct."
-        reportActionFailure(statusMessage)
+        healthKit.isSyncing = true
+        defer { healthKit.isSyncing = false }
+
+        await request {
+            let installationId = try HealthKitInstallationId.current(using: keychain)
+            let status = try await client.healthKitSettings(
+                baseURL: connection.baseURL,
+                accessToken: auth.accessToken,
+                personId: personId
+            )
+            healthKit.apply(status: status)
+
+            let syncStore = try HealthKitSyncStore()
+            try syncStore.saveConfiguration(
+                userId: auth.signedInUserId ?? "",
+                personId: personId,
+                installationId: installationId,
+                healthTimezone: status.healthTimezone,
+                timezoneVersion: status.healthTimezoneVersion,
+                enabledGroups: status.enabledGroups.map(\.rawValue)
+            )
+
+            // Milestone 1: blood pressure only (vitals group).
+            _ = try await client.startHealthKitImport(
+                baseURL: connection.baseURL,
+                accessToken: auth.accessToken,
+                group: "vitals",
+                installationId: installationId,
+                personId: personId,
+                timezoneVersion: status.healthTimezoneVersion
+            )
+            try syncStore.setGroupStatus("vitals", status: "syncing")
+
+            try await healthKitClient.requestAuthorization(for: [.vitals])
+            let samples = try await HealthKitBloodPressureSync.fetchBloodPressure()
+            try HealthKitBloodPressureSync.enqueueSamples(samples, into: syncStore)
+
+            let worker = HealthKitSyncWorker(store: syncStore) { batch in
+                try await self.client.postHealthKitOpsBatch(
+                    baseURL: self.connection.baseURL,
+                    accessToken: self.auth.accessToken,
+                    body: batch
+                )
+            }
+            let applied = try await worker.drain()
+            let remaining = try syncStore.pendingCount(group: "vitals")
+            guard remaining == 0 else {
+                throw HealthAPIError.badStatus(
+                    409,
+                    "Blood pressure queue still has \(remaining) pending ops after drain.",
+                    code: "sync_incomplete"
+                )
+            }
+
+            _ = try await client.markHealthKitGroupReady(
+                baseURL: connection.baseURL,
+                accessToken: auth.accessToken,
+                group: "vitals",
+                installationId: installationId,
+                personId: personId,
+                timezoneVersion: status.healthTimezoneVersion
+            )
+            try syncStore.setGroupStatus("vitals", status: "ready")
+
+            let refreshed = try await client.healthKitSettings(
+                baseURL: connection.baseURL,
+                accessToken: auth.accessToken,
+                personId: personId
+            )
+            healthKit.apply(status: refreshed)
+            return "Synced \(samples.count) blood pressure reading(s); uploaded \(applied) op(s)."
+        }
     }
 
     func changeHealthTimezone() async {

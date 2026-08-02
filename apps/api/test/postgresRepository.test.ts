@@ -218,9 +218,8 @@ describe("Postgres repository wiring", () => {
     const installationId = "00000000-0000-4000-8000-000000009010";
     await seedHealthKitReadyGroup(api, managerToken, profile.data.id, installationId, "vitals", [
       {
-        eventId: "00000000-0000-4000-8000-000000009011",
-        entityKey: "blood_glucose:00000000-0000-4000-8000-000000009012",
-        entityVersion: 1,
+        opId: "00000000-0000-4000-8000-000000009011",
+        naturalKey: "blood_glucose:00000000-0000-4000-8000-000000009012",
         group: "vitals",
         scopeKey: "blood_glucose",
         op: "upsert",
@@ -274,9 +273,8 @@ describe("Postgres repository wiring", () => {
     expect(settings.status).toBe(200);
 
     const event = {
-      eventId: "00000000-0000-4000-8000-000000009020",
-      entityKey: "steps_hour:2026-07-25T14:00:00.000Z",
-      entityVersion: 1,
+      opId: "00000000-0000-4000-8000-000000009020",
+      naturalKey: "steps_hour:2026-07-25T14:00:00.000Z",
       group: "activity",
       scopeKey: "steps",
       op: "upsert",
@@ -287,14 +285,14 @@ describe("Postgres repository wiring", () => {
       }
     };
     const request = () =>
-      api.request(`${HEALTH_API_PREFIX}/healthkit/events:batch`, {
+      api.request(`${HEALTH_API_PREFIX}/healthkit/ops:batch`, {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({
           installationId,
           personId: profileId,
           timezoneVersion: 1,
-          events: [event]
+          ops: [event]
         })
       });
 
@@ -304,7 +302,7 @@ describe("Postgres repository wiring", () => {
     expect(results.sort()).toEqual(["applied", "duplicate"]);
 
     const receipts = await sql`
-      select event_id from healthkit_sync_events where event_id = ${event.eventId}
+      select op_id from healthkit_op_receipts where op_id = ${event.opId}
     `;
     expect(receipts).toHaveLength(1);
     const steps = await sql`

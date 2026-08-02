@@ -360,9 +360,8 @@ describe("solo-first bootstrap", () => {
     });
     await seedHealthKitReadyGroup(api, secondToken, secondSelfProfile.data.id, installationId, "vitals", [
       {
-        eventId: crypto.randomUUID(),
-        entityKey: "blood_pressure:5e1ed621-4a6c-4e09-969e-31c6f0872c24",
-        entityVersion: 1,
+        opId: crypto.randomUUID(),
+        naturalKey: "blood_pressure:5e1ed621-4a6c-4e09-969e-31c6f0872c24",
         group: "vitals",
         scopeKey: "blood_pressure",
         op: "upsert",
@@ -486,14 +485,14 @@ describe("solo-first bootstrap", () => {
     expect(settings.status).toBe(200);
 
     const event = stepsHourEvent("2026-06-30T00:00:00.000Z", 8000);
-    const response = await api.request(`${HEALTH_API_PREFIX}/healthkit/events:batch`, {
+    const response = await api.request(`${HEALTH_API_PREFIX}/healthkit/ops:batch`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({
         installationId,
         personId: profile.data.id,
         timezoneVersion: 1,
-        events: [event]
+        ops: [event]
       })
     });
 

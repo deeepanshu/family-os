@@ -178,16 +178,17 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertFalse(AccessTokenExpiry.requiresRefresh("dev-token"))
     }
 
-    func testHealthKitSyncNowReportsRewriteInProgress() async {
+    func testHealthKitSyncNowRequiresVitalsConsent() async {
         let viewModel = HealthBootstrapViewModel()
         viewModel.auth.signedInUserId = "user-1"
         let selfProfile = makeProfile(id: "p1", linkedUserId: "user-1", displayName: "Me", relationshipLabel: "Self")
         viewModel.profiles.profiles = [selfProfile]
         viewModel.healthKit.linkedProfileId = selfProfile.id
         viewModel.healthKit.isAvailable = true
+        viewModel.healthKit.consentGranted = false
         await viewModel.syncHealthKitNow()
         XCTAssertTrue(viewModel.isError)
-        XCTAssertTrue(viewModel.statusMessage.contains("rewrite"))
+        XCTAssertTrue(viewModel.statusMessage.lowercased().contains("vitals"))
     }
 
     func testStartupRefreshesExpiredSessionBeforeBootstrap() async {

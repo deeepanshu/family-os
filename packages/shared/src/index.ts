@@ -5,6 +5,7 @@ export const HEALTH_API_PREFIX = "/health/api/v1" as const;
 
 export * from "./healthkitRegistry";
 export * from "./healthkitCanonical";
+export * from "./healthkitOps";
 export * from "./healthkitEvents";
 export * from "./healthkitFixtures";
 
@@ -147,6 +148,7 @@ export type HealthKitMetric = HealthKitConsentGroup;
 
 export type HealthMetricSyncStatusCode =
   | "never_synced"
+  | "syncing"
   | "ready"
   | "backfilling"
   | "error"

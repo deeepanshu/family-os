@@ -45,6 +45,11 @@
 		DE3000000000000000000030 /* StatusText.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE3000000000000000000010 /* StatusText.swift */; };
 		DE4000000000000000000001 /* HealthKitClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE4000000000000000000011 /* HealthKitClient.swift */; };
 		DE6000000000000000000005 /* HealthKit/HealthKitInstallationId.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE6000000000000000000015 /* HealthKit/HealthKitInstallationId.swift */; };
+DE8000000000000000000001 /* HealthKit/HealthKitSyncStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8000000000000000000011 /* HealthKit/HealthKitSyncStore.swift */; };
+DE8000000000000000000002 /* HealthKit/HealthKitSyncWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8000000000000000000012 /* HealthKit/HealthKitSyncWorker.swift */; };
+DE8000000000000000000003 /* HealthKit/HealthKitBloodPressureSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8000000000000000000013 /* HealthKit/HealthKitBloodPressureSync.swift */; };
+DE8000000000000000000004 /* HealthKitOpsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8000000000000000000014 /* HealthKitOpsModels.swift */; };
+DE8000000000000000000005 /* HealthKitSyncStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8000000000000000000015 /* HealthKitSyncStoreTests.swift */; };
 		DE4000000000000000000002 /* HealthKitSyncStateViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE4000000000000000000012 /* HealthKitSyncStateViewModel.swift */; };
 		DE4000000000000000000003 /* HealthBootstrapHealthKitViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE4000000000000000000013 /* HealthBootstrapHealthKitViewModel.swift */; };
 		DE4000000000000000000004 /* HealthKitSyncView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE4000000000000000000014 /* HealthKitSyncView.swift */; };
@@ -110,6 +115,11 @@
 		DE3000000000000000000010 /* StatusText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusText.swift; sourceTree = "<group>"; };
 		DE4000000000000000000011 /* HealthKitClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitClient.swift; sourceTree = "<group>"; };
 		DE6000000000000000000015 /* HealthKit/HealthKitInstallationId.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitInstallationId.swift; sourceTree = "<group>"; };
+DE8000000000000000000011 /* HealthKit/HealthKitSyncStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitSyncStore.swift; sourceTree = "<group>"; };
+DE8000000000000000000012 /* HealthKit/HealthKitSyncWorker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitSyncWorker.swift; sourceTree = "<group>"; };
+DE8000000000000000000013 /* HealthKit/HealthKitBloodPressureSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitBloodPressureSync.swift; sourceTree = "<group>"; };
+DE8000000000000000000014 /* HealthKitOpsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitOpsModels.swift; sourceTree = "<group>"; };
+DE8000000000000000000015 /* HealthKitSyncStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitSyncStoreTests.swift; sourceTree = "<group>"; };
 		DE4000000000000000000012 /* HealthKitSyncStateViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitSyncStateViewModel.swift; sourceTree = "<group>"; };
 		DE4000000000000000000013 /* HealthBootstrapHealthKitViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthBootstrapHealthKitViewModel.swift; sourceTree = "<group>"; };
 		DE4000000000000000000014 /* HealthKitSyncView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitSyncView.swift; sourceTree = "<group>"; };
@@ -222,6 +232,10 @@
 				DE7000000000000000000001 /* CrashReporting.swift */,
 				DE1000000000000000000017 /* KeychainStore.swift */,
 				DE6000000000000000000015 /* HealthKit/HealthKitInstallationId.swift */,
+				DE8000000000000000000011 /* HealthKit/HealthKitSyncStore.swift */,
+				DE8000000000000000000012 /* HealthKit/HealthKitSyncWorker.swift */,
+				DE8000000000000000000013 /* HealthKit/HealthKitBloodPressureSync.swift */,
+
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -270,6 +284,7 @@
 			isa = PBXGroup;
 			children = (
 				DE1000000000000000000025 /* HealthModels.swift */,
+				DE8000000000000000000014 /* HealthKitOpsModels.swift */,
 				DE1000000000000000000026 /* SupabaseModels.swift */,
 			);
 			path = Models;
@@ -302,6 +317,7 @@
 			isa = PBXGroup;
 			children = (
 				DE5000000000000000000001 /* SoloFirstTests.swift */,
+				DE8000000000000000000015 /* HealthKitSyncStoreTests.swift */,
 			);
 			path = FamilyOSTests;
 			sourceTree = "<group>";
@@ -471,6 +487,11 @@
 				DE3000000000000000000030 /* StatusText.swift in Sources */,
 				DE4000000000000000000001 /* HealthKitClient.swift in Sources */,
 				DE6000000000000000000005 /* HealthKit/HealthKitInstallationId.swift in Sources */,
+				DE8000000000000000000001 /* HealthKit/HealthKitSyncStore.swift in Sources */,
+				DE8000000000000000000002 /* HealthKit/HealthKitSyncWorker.swift in Sources */,
+				DE8000000000000000000003 /* HealthKit/HealthKitBloodPressureSync.swift in Sources */,
+				DE8000000000000000000004 /* HealthKitOpsModels.swift in Sources */,
+
 				DE4000000000000000000002 /* HealthKitSyncStateViewModel.swift in Sources */,
 				DE4000000000000000000003 /* HealthBootstrapHealthKitViewModel.swift in Sources */,
 				DE4000000000000000000004 /* HealthKitSyncView.swift in Sources */,
@@ -483,6 +504,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				DE5000000000000000000003 /* SoloFirstTests.swift in Sources */,
+				DE8000000000000000000005 /* HealthKitSyncStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

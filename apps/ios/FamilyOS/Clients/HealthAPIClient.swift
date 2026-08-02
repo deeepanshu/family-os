@@ -177,8 +177,53 @@ struct HealthAPIClient {
         )
     }
 
-    // Device upload pipeline (events:batch / sessions / manifests) removed with the iOS
-    // sync stack. Settings GET/PUT remain for consent + groups until the rewrite lands.
+    func postHealthKitOpsBatch(
+        baseURL: String,
+        accessToken: String,
+        body: HealthKitOpsBatchRequest
+    ) async throws -> HealthKitOpsBatchResult {
+        try await post(path: "healthkit/ops:batch", baseURL: baseURL, accessToken: accessToken, body: body)
+    }
+
+    func startHealthKitImport(
+        baseURL: String,
+        accessToken: String,
+        group: String,
+        installationId: String,
+        personId: String,
+        timezoneVersion: Int
+    ) async throws -> HealthKitGroupImportStartResult {
+        try await post(
+            path: "healthkit/groups/\(group)/start-import",
+            baseURL: baseURL,
+            accessToken: accessToken,
+            body: HealthKitGroupActionRequest(
+                installationId: installationId,
+                personId: personId,
+                timezoneVersion: timezoneVersion
+            )
+        )
+    }
+
+    func markHealthKitGroupReady(
+        baseURL: String,
+        accessToken: String,
+        group: String,
+        installationId: String,
+        personId: String,
+        timezoneVersion: Int
+    ) async throws -> HealthKitGroupReadyResult {
+        try await post(
+            path: "healthkit/groups/\(group)/ready",
+            baseURL: baseURL,
+            accessToken: accessToken,
+            body: HealthKitGroupActionRequest(
+                installationId: installationId,
+                personId: personId,
+                timezoneVersion: timezoneVersion
+            )
+        )
+    }
 
     private func put<T: Decodable, Body: Encodable>(
         path: String,
