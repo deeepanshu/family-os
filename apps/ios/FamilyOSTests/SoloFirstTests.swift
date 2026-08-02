@@ -128,15 +128,19 @@ final class SoloFirstTests: XCTestCase {
         // Self profile exists, but linked HealthKit target is someone else.
         viewModel.healthKit.linkedProfileId = otherProfile.id
         viewModel.healthKit.isAvailable = true
+        viewModel.healthKit.consentGranted = true
+        viewModel.healthKit.enabledMetrics = [.vitals]
         await viewModel.syncHealthKitNow()
         XCTAssertTrue(viewModel.isError)
         XCTAssertEqual(viewModel.statusMessage, "HealthKit sync must target your own profile.")
     }
 
     func testHealthKitMetricDisplayNames() {
-        XCTAssertEqual(HealthKitSyncMetric.steps.displayName, "Steps")
+        XCTAssertEqual(HealthKitSyncMetric.activity.displayName, "Activity")
         XCTAssertEqual(HealthKitSyncMetric.sleep.displayName, "Sleep")
-        XCTAssertEqual(HealthKitSyncMetric.bloodPressure.displayName, "Blood pressure")
+        XCTAssertEqual(HealthKitSyncMetric.vitals.displayName, "Vitals")
+        // Legacy alias still points at vitals.
+        XCTAssertEqual(HealthKitSyncMetric.bloodPressure, HealthKitSyncMetric.vitals)
     }
 
     func testConnectionMigratesRetiredPublicAPIURL() {

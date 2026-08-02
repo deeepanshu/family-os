@@ -126,8 +126,10 @@ final class HealthBootstrapViewModel: ObservableObject {
     }
 
     var selfProfile: HealthProfile? {
+        // Prefer the HealthKit-linked profile only when it is actually Self.
         if let linked = healthKit.linkedProfileId,
-           let match = profiles.profiles.first(where: { $0.id == linked }) {
+           let match = profiles.profiles.first(where: { $0.id == linked }),
+           match.relationshipLabel == "Self" {
             return match
         }
         if let selected = profiles.selectedProfile,
