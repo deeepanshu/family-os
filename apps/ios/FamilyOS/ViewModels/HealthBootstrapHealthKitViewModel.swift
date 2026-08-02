@@ -144,7 +144,8 @@ extension HealthBootstrapViewModel {
         defer { healthKit.isSyncing = false }
         CrashReporting.healthKit(.syncStarted, group: "vitals", metric: "blood_pressure")
 
-        await request {
+        // Always surface success/failure so "ready with 0 samples" is not silent.
+        await request(showsFeedback: true) {
             do {
                 let installationId = try HealthKitInstallationId.current(using: keychain)
                 var status = try await client.healthKitSettings(
@@ -256,6 +257,22 @@ extension HealthBootstrapViewModel {
                     metric: "blood_pressure",
                     count: samples.count
                 )
+                // Do not mark the group ready with zero uploads — that looked like success while
+                // BP never left the phone (denied read / no correlations / empty Health data).
+                guard !samples.isEmpty else {
+                    CrashReporting.healthKitNonFatal(
+                        .fetchFailed,
+                        stage: .samplesFetched,
+                        message: "bp_samples_empty",
+                        group: "vitals",
+                        metric: "blood_pressure"
+                    )
+                    throw HealthAPIError.badStatus(
+                        404,
+                        "No blood pressure readings found in Apple Health for the last 90 days. If you have readings, open Settings → Health → Data Access → this app and turn on Blood Pressure Systolic and Diastolic, then Sync again.",
+                        code: "bp_samples_empty"
+                    )
+                }
                 try HealthKitBloodPressureSync.enqueueSamples(samples, into: syncStore)
                 CrashReporting.healthKit(
                     .samplesEnqueued,
@@ -332,9 +349,6 @@ extension HealthBootstrapViewModel {
                     count: samples.count,
                     extra: ["applied": String(applied)]
                 )
-                if samples.isEmpty {
-                    return "Vitals marked ready, but 0 blood pressure readings were found in Health for the last 90 days. If you expected data, check Settings → Health → Data Access for Blood Pressure (systolic/diastolic)."
-                }
                 return "Synced \(samples.count) blood pressure reading(s); uploaded \(applied) op(s)."
             } catch {
                 CrashReporting.healthKitNonFatal(
