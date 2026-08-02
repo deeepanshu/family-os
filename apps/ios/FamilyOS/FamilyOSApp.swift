@@ -14,6 +14,11 @@ struct FamilyOSApp: App {
                         NotificationAppDelegate.pendingNotificationUserInfo = nil
                         viewModel.handleNotification(userInfo: pending)
                     }
+                    #if DEBUG
+                    if ProcessInfo.processInfo.arguments.contains("-FamilyOSLocalSmoke") {
+                        Task { await viewModel.runLocalSmokeIfRequested() }
+                    }
+                    #endif
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .didOpenReminderNotification)) { notification in
                     viewModel.handleNotification(userInfo: notification.userInfo ?? [:])

@@ -21,10 +21,15 @@ actor HealthKitSyncWorker {
         defer { isDraining = false }
 
         var appliedTotal = 0
+        var batchIndex = 0
         while true {
             let batch = try store.claimBatch(limit: 50)
             guard !batch.isEmpty else { break }
             guard let config = try store.configuration() else {
+                CrashReporting.healthKit(
+                    .drainBatch,
+                    extra: ["reason": "missing_config", "batch_size": String(batch.count)]
+                )
                 try store.markBackoff(opIds: batch.map(\.opId), delaySeconds: 5)
                 break
             }
@@ -51,23 +56,59 @@ actor HealthKitSyncWorker {
                 ops: ops
             )
 
+            batchIndex += 1
+            CrashReporting.healthKit(
+                .drainBatch,
+                count: ops.count,
+                extra: [
+                    "batch_index": String(batchIndex),
+                    "tz_version": String(config.timezoneVersion)
+                ]
+            )
+
             do {
                 let result = try await postBatch(request)
                 var appliedIds: [String] = []
+                var rejected = 0
                 for item in result.results {
                     switch item.result {
                     case "applied", "duplicate":
                         appliedIds.append(item.opId)
                     case "rejected":
-                        try store.markRejected(opId: item.opId, errorCode: item.errorCode ?? "payload_invalid")
+                        rejected += 1
+                        let code = item.errorCode ?? "payload_invalid"
+                        try store.markRejected(opId: item.opId, errorCode: code)
+                        CrashReporting.healthKitNonFatal(
+                            .opRejected,
+                            stage: .opRejected,
+                            message: "op_rejected",
+                            group: ops.first?.group,
+                            metric: ops.first?.scopeKey
+                        )
                     default:
                         try store.markBackoff(opIds: [item.opId], delaySeconds: 30)
                     }
                 }
                 try store.markApplied(opIds: appliedIds)
                 appliedTotal += appliedIds.count
+                if rejected > 0 {
+                    CrashReporting.healthKit(
+                        .drainBatch,
+                        count: appliedIds.count,
+                        extra: [
+                            "rejected": String(rejected),
+                            "batch_index": String(batchIndex)
+                        ]
+                    )
+                }
             } catch {
                 // Network / 5xx — keep ops, backoff.
+                CrashReporting.healthKitNonFatal(
+                    .batchFailed,
+                    stage: .drainBatch,
+                    message: "ops_batch_transport_failed",
+                    underlying: error
+                )
                 try store.markBackoff(opIds: batch.map(\.opId), delaySeconds: 15)
                 throw error
             }

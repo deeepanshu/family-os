@@ -38,11 +38,28 @@ HealthKit BP correlations
 - Steps, sleep, HR, workouts, nutrition
 - Entity versions, manifests, dual stores
 
+## Crashlytics / logging
+
+Pipeline stages and non-fatals go through `CrashReporting.healthKit` /
+`healthKitNonFatal` (OSLog always; Firebase collection in **Release** only).
+
+| Stage | When |
+|-------|------|
+| `sync_started` | Sync now begins |
+| `import_started` | Server start-import OK |
+| `samples_fetched` / `samples_enqueued` | Counts only (no BP values) |
+| `drain_batch` / `drain_finished` | Worker upload |
+| `group_ready` / `sync_completed` | Success |
+| `sync_failed` / `op_rejected` / `store_open_failed` | Non-fatals |
+
+**Never logged:** systolic/diastolic/pulse, sample UUIDs, tokens, free-text notes.
+
 ## Crashlytics constraints
 
 - No `@MainActor` BG coordinator (BG not enabled yet)
 - Fail soft on metric isolation when expanding later
 - Narrow v1 metrics only
+- DEBUG builds keep Crashlytics collection off (use Console.app / OSLog)
 
 ## Deleted (do not resurrect)
 

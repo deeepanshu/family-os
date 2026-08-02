@@ -6,12 +6,12 @@ struct HealthKitSyncView: View {
 
     var body: some View {
         Section("Health Data") {
-            Text("Device → server HealthKit sync was removed for a correctness rewrite. You can still save consent and groups; upload will return as a thin outbox (see docs/HEALTHKIT_CORRECTNESS_FIRST_SYNC_PLAN.md).")
+            Text("Milestone 1: foreground blood pressure sync when Vitals is enabled. Other metrics will return after soak.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             Toggle(isOn: $viewModel.healthKit.consentGranted) {
-                Text("Upload HealthKit data (when rewrite ships)")
+                Text("Upload HealthKit data")
             }
             .disabled(viewModel.selfProfile == nil)
 
@@ -48,10 +48,15 @@ struct HealthKitSyncView: View {
             }
             .disabled(viewModel.selfProfile == nil || isSavingSettings)
 
-            Button("Sync now (disabled)") {
+            Button(viewModel.healthKit.isSyncing ? "Syncing..." : "Sync now") {
                 Task { await viewModel.syncHealthKitNow() }
             }
-            .disabled(true)
+            .disabled(
+                viewModel.selfProfile == nil
+                    || viewModel.healthKit.isSyncing
+                    || !viewModel.healthKit.consentGranted
+                    || !viewModel.healthKit.enabledMetrics.contains(.vitals)
+            )
         }
     }
 

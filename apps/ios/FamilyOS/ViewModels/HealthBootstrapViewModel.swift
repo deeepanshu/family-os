@@ -58,8 +58,14 @@ final class HealthBootstrapViewModel: ObservableObject {
     }
 
     var hasSupabaseConfiguration: Bool {
-        !connection.supabaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !connection.supabaseAnonKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let url = connection.supabaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = connection.supabaseAnonKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !url.isEmpty, !key.isEmpty else { return false }
+        // Treat Local.private.xcconfig.example placeholders as unconfigured.
+        if url.contains("your-project") || key.hasPrefix("your-") {
+            return false
+        }
+        return true
     }
 
     var usesLocalDevSignIn: Bool {
@@ -120,8 +126,19 @@ final class HealthBootstrapViewModel: ObservableObject {
     }
 
     var selfProfile: HealthProfile? {
-        profiles.profiles.first {
-            $0.relationshipLabel == "Self" && ($0.linkedUserId == auth.signedInUserId || auth.signedInUserId == nil)
+        if let linked = healthKit.linkedProfileId,
+           let match = profiles.profiles.first(where: { $0.id == linked }) {
+            return match
+        }
+        if let selected = profiles.selectedProfile,
+           selected.relationshipLabel == "Self" {
+            return selected
+        }
+        return profiles.profiles.first {
+            $0.relationshipLabel == "Self"
+                && (auth.signedInUserId == nil
+                    || $0.linkedUserId == nil
+                    || $0.linkedUserId == auth.signedInUserId)
         }
     }
 
@@ -200,6 +217,12 @@ final class HealthBootstrapViewModel: ObservableObject {
         } catch {
             isError = true
             statusMessage = error.localizedDescription
+            // Generic non-fatal for unexpected API failures outside HealthKit-specific paths.
+            if let api = error as? HealthAPIError, let code = api.errorCode {
+                CrashReporting.log("api_request_failed code=\(code)")
+            } else {
+                CrashReporting.record(error: error, userInfo: ["source": "bootstrap_request"])
+            }
             if showsFeedback {
                 reportActionFailure(statusMessage)
             }

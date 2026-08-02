@@ -25,6 +25,11 @@ extension HealthBootstrapViewModel {
         guard let personId = selfProfile?.id else {
             isError = true
             statusMessage = "Create your profile before enabling HealthKit."
+            CrashReporting.healthKitNonFatal(
+                .missingSelfProfile,
+                stage: .settingsSaved,
+                message: "settings_blocked_missing_self_profile"
+            )
             if showsFeedback {
                 reportActionFailure(statusMessage)
             }
@@ -44,23 +49,41 @@ extension HealthBootstrapViewModel {
             let enabled = healthKit.consentGranted
                 ? Array(healthKit.enabledMetrics).sorted { $0.rawValue < $1.rawValue }
                 : []
-            let status = try await client.putHealthKitSettings(
-                baseURL: connection.baseURL,
-                accessToken: auth.accessToken,
-                personId: personId,
-                consentVersion: consentVersion,
-                enabledGroups: enabled,
-                healthTimezone: healthKit.selectedTimezone,
-                installationId: installationId,
-                replaceActiveInstallation: replaceInstallation
-            )
-            healthKit.apply(status: status)
-            if status.consentActive {
-                try await healthKitClient.requestAuthorization(for: Set(status.enabledMetrics))
+            do {
+                let status = try await client.putHealthKitSettings(
+                    baseURL: connection.baseURL,
+                    accessToken: auth.accessToken,
+                    personId: personId,
+                    consentVersion: consentVersion,
+                    enabledGroups: enabled,
+                    healthTimezone: healthKit.selectedTimezone,
+                    installationId: installationId,
+                    replaceActiveInstallation: replaceInstallation
+                )
+                healthKit.apply(status: status)
+                if status.consentActive {
+                    try await healthKitClient.requestAuthorization(for: Set(status.enabledMetrics))
+                }
+                CrashReporting.healthKit(
+                    .settingsSaved,
+                    extra: [
+                        "consent_active": status.consentActive ? "1" : "0",
+                        "enabled_group_count": String(status.enabledGroups.count),
+                        "replace_install": replaceInstallation ? "1" : "0"
+                    ]
+                )
+                return status.consentActive
+                    ? "HealthKit settings saved."
+                    : "HealthKit consent withdrawn."
+            } catch {
+                CrashReporting.healthKitNonFatal(
+                    .settingsFailed,
+                    stage: .settingsSaved,
+                    message: "settings_put_failed",
+                    underlying: error
+                )
+                throw error
             }
-            return status.consentActive
-                ? "HealthKit settings saved."
-                : "HealthKit consent withdrawn."
         }
     }
 
@@ -68,99 +91,218 @@ extension HealthBootstrapViewModel {
         guard let personId = selfProfile?.id else {
             isError = true
             statusMessage = "Create your profile before syncing HealthKit."
+            CrashReporting.healthKitNonFatal(
+                .missingSelfProfile,
+                stage: .syncFailed,
+                message: "sync_blocked_missing_self_profile",
+                group: "vitals",
+                metric: "blood_pressure"
+            )
             reportActionFailure(statusMessage)
             return
         }
         guard healthKit.linkedProfileId == nil || healthKit.linkedProfileId == personId else {
             isError = true
             statusMessage = "HealthKit sync must target your own profile."
+            CrashReporting.healthKitNonFatal(
+                .wrongProfileTarget,
+                stage: .syncFailed,
+                message: "sync_blocked_wrong_profile",
+                group: "vitals"
+            )
             reportActionFailure(statusMessage)
             return
         }
         guard healthKitClient.isAvailable || healthKit.isAvailable else {
             isError = true
             statusMessage = "HealthKit is not available on this device."
+            CrashReporting.healthKitNonFatal(
+                .healthKitUnavailable,
+                stage: .syncFailed,
+                message: "sync_blocked_healthkit_unavailable",
+                group: "vitals"
+            )
             reportActionFailure(statusMessage)
             return
         }
         guard healthKit.consentGranted, healthKit.enabledMetrics.contains(.vitals) else {
             isError = true
             statusMessage = "Enable vitals consent before blood pressure sync."
+            CrashReporting.healthKitNonFatal(
+                .consentMissing,
+                stage: .syncFailed,
+                message: "sync_blocked_vitals_consent",
+                group: "vitals",
+                metric: "blood_pressure"
+            )
             reportActionFailure(statusMessage)
             return
         }
 
         healthKit.isSyncing = true
         defer { healthKit.isSyncing = false }
+        CrashReporting.healthKit(.syncStarted, group: "vitals", metric: "blood_pressure")
 
         await request {
-            let installationId = try HealthKitInstallationId.current(using: keychain)
-            let status = try await client.healthKitSettings(
-                baseURL: connection.baseURL,
-                accessToken: auth.accessToken,
-                personId: personId
-            )
-            healthKit.apply(status: status)
-
-            let syncStore = try HealthKitSyncStore()
-            try syncStore.saveConfiguration(
-                userId: auth.signedInUserId ?? "",
-                personId: personId,
-                installationId: installationId,
-                healthTimezone: status.healthTimezone,
-                timezoneVersion: status.healthTimezoneVersion,
-                enabledGroups: status.enabledGroups.map(\.rawValue)
-            )
-
-            // Milestone 1: blood pressure only (vitals group).
-            _ = try await client.startHealthKitImport(
-                baseURL: connection.baseURL,
-                accessToken: auth.accessToken,
-                group: "vitals",
-                installationId: installationId,
-                personId: personId,
-                timezoneVersion: status.healthTimezoneVersion
-            )
-            try syncStore.setGroupStatus("vitals", status: "syncing")
-
-            try await healthKitClient.requestAuthorization(for: [.vitals])
-            let samples = try await HealthKitBloodPressureSync.fetchBloodPressure()
-            try HealthKitBloodPressureSync.enqueueSamples(samples, into: syncStore)
-
-            let worker = HealthKitSyncWorker(store: syncStore) { batch in
-                try await self.client.postHealthKitOpsBatch(
-                    baseURL: self.connection.baseURL,
-                    accessToken: self.auth.accessToken,
-                    body: batch
+            do {
+                let installationId = try HealthKitInstallationId.current(using: keychain)
+                let status = try await client.healthKitSettings(
+                    baseURL: connection.baseURL,
+                    accessToken: auth.accessToken,
+                    personId: personId
                 )
-            }
-            let applied = try await worker.drain()
-            let remaining = try syncStore.pendingCount(group: "vitals")
-            guard remaining == 0 else {
-                throw HealthAPIError.badStatus(
-                    409,
-                    "Blood pressure queue still has \(remaining) pending ops after drain.",
-                    code: "sync_incomplete"
+                healthKit.apply(status: status)
+                CrashReporting.healthKit(
+                    .settingsLoaded,
+                    group: "vitals",
+                    extra: ["tz_version": String(status.healthTimezoneVersion)]
                 )
+
+                let syncStore: HealthKitSyncStore
+                do {
+                    syncStore = try HealthKitSyncStore()
+                } catch {
+                    CrashReporting.healthKitNonFatal(
+                        .storeOpenFailed,
+                        stage: .storeOpenFailed,
+                        message: "sqlite_store_open_failed",
+                        group: "vitals",
+                        underlying: error
+                    )
+                    throw error
+                }
+                try syncStore.saveConfiguration(
+                    userId: auth.signedInUserId ?? "",
+                    personId: personId,
+                    installationId: installationId,
+                    healthTimezone: status.healthTimezone,
+                    timezoneVersion: status.healthTimezoneVersion,
+                    enabledGroups: status.enabledGroups.map(\.rawValue)
+                )
+
+                // Milestone 1: blood pressure only (vitals group).
+                _ = try await client.startHealthKitImport(
+                    baseURL: connection.baseURL,
+                    accessToken: auth.accessToken,
+                    group: "vitals",
+                    installationId: installationId,
+                    personId: personId,
+                    timezoneVersion: status.healthTimezoneVersion
+                )
+                try syncStore.setGroupStatus("vitals", status: "syncing")
+                CrashReporting.healthKit(.importStarted, group: "vitals", metric: "blood_pressure")
+
+                try await healthKitClient.requestAuthorization(for: [.vitals])
+                CrashReporting.healthKit(.authRequested, group: "vitals")
+
+                let samples: [HealthKitBloodPressureSync.BPSample]
+                do {
+                    samples = try await HealthKitBloodPressureSync.fetchBloodPressure()
+                } catch {
+                    CrashReporting.healthKitNonFatal(
+                        .fetchFailed,
+                        stage: .samplesFetched,
+                        message: "bp_fetch_failed",
+                        group: "vitals",
+                        metric: "blood_pressure",
+                        underlying: error
+                    )
+                    throw error
+                }
+                CrashReporting.healthKit(
+                    .samplesFetched,
+                    group: "vitals",
+                    metric: "blood_pressure",
+                    count: samples.count
+                )
+                try HealthKitBloodPressureSync.enqueueSamples(samples, into: syncStore)
+                CrashReporting.healthKit(
+                    .samplesEnqueued,
+                    group: "vitals",
+                    metric: "blood_pressure",
+                    count: samples.count
+                )
+
+                let worker = HealthKitSyncWorker(store: syncStore) { batch in
+                    try await self.client.postHealthKitOpsBatch(
+                        baseURL: self.connection.baseURL,
+                        accessToken: self.auth.accessToken,
+                        body: batch
+                    )
+                }
+                CrashReporting.healthKit(.drainStarted, group: "vitals", count: try syncStore.pendingCount())
+                let applied: Int
+                do {
+                    applied = try await worker.drain()
+                } catch {
+                    CrashReporting.healthKitNonFatal(
+                        .batchFailed,
+                        stage: .drainFinished,
+                        message: "ops_batch_drain_failed",
+                        group: "vitals",
+                        metric: "blood_pressure",
+                        underlying: error
+                    )
+                    throw error
+                }
+                let remaining = try syncStore.pendingCount(group: "vitals")
+                CrashReporting.healthKit(
+                    .drainFinished,
+                    group: "vitals",
+                    count: applied,
+                    extra: ["pending_remaining": String(remaining)]
+                )
+                guard remaining == 0 else {
+                    CrashReporting.healthKitNonFatal(
+                        .queueIncomplete,
+                        stage: .drainFinished,
+                        message: "pending_ops_remain_after_drain",
+                        group: "vitals",
+                        metric: "blood_pressure"
+                    )
+                    throw HealthAPIError.badStatus(
+                        409,
+                        "Blood pressure queue still has \(remaining) pending ops after drain.",
+                        code: "sync_incomplete"
+                    )
+                }
+
+                _ = try await client.markHealthKitGroupReady(
+                    baseURL: connection.baseURL,
+                    accessToken: auth.accessToken,
+                    group: "vitals",
+                    installationId: installationId,
+                    personId: personId,
+                    timezoneVersion: status.healthTimezoneVersion
+                )
+                try syncStore.setGroupStatus("vitals", status: "ready")
+                CrashReporting.healthKit(.groupReady, group: "vitals", metric: "blood_pressure")
+
+                let refreshed = try await client.healthKitSettings(
+                    baseURL: connection.baseURL,
+                    accessToken: auth.accessToken,
+                    personId: personId
+                )
+                healthKit.apply(status: refreshed)
+                CrashReporting.healthKit(
+                    .syncCompleted,
+                    group: "vitals",
+                    metric: "blood_pressure",
+                    count: samples.count,
+                    extra: ["applied": String(applied)]
+                )
+                return "Synced \(samples.count) blood pressure reading(s); uploaded \(applied) op(s)."
+            } catch {
+                CrashReporting.healthKitNonFatal(
+                    .syncFailed,
+                    stage: .syncFailed,
+                    message: "sync_healthkit_now_failed",
+                    group: "vitals",
+                    metric: "blood_pressure",
+                    underlying: error
+                )
+                throw error
             }
-
-            _ = try await client.markHealthKitGroupReady(
-                baseURL: connection.baseURL,
-                accessToken: auth.accessToken,
-                group: "vitals",
-                installationId: installationId,
-                personId: personId,
-                timezoneVersion: status.healthTimezoneVersion
-            )
-            try syncStore.setGroupStatus("vitals", status: "ready")
-
-            let refreshed = try await client.healthKitSettings(
-                baseURL: connection.baseURL,
-                accessToken: auth.accessToken,
-                personId: personId
-            )
-            healthKit.apply(status: refreshed)
-            return "Synced \(samples.count) blood pressure reading(s); uploaded \(applied) op(s)."
         }
     }
 

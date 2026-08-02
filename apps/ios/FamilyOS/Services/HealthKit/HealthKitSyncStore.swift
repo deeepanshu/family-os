@@ -29,9 +29,22 @@ final class HealthKitSyncStore: @unchecked Sendable {
         config.prepareDatabase { db in
             try db.execute(sql: "PRAGMA foreign_keys = ON")
         }
-        dbQueue = try DatabaseQueue(path: fileURL.path, configuration: config)
-        try migrator.migrate(dbQueue)
-        try resetInFlightToPending()
+        do {
+            dbQueue = try DatabaseQueue(path: fileURL.path, configuration: config)
+            try migrator.migrate(dbQueue)
+            try resetInFlightToPending()
+            CrashReporting.log(
+                "healthkit_store_opened path_kind=\(path == nil ? "app_support" : "explicit")"
+            )
+        } catch {
+            CrashReporting.healthKitNonFatal(
+                .storeOpenFailed,
+                stage: .storeOpenFailed,
+                message: "healthkit_sync_store_init_failed",
+                underlying: error
+            )
+            throw error
+        }
     }
 
     private var migrator: DatabaseMigrator {
