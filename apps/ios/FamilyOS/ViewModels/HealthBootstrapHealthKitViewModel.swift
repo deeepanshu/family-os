@@ -215,8 +215,26 @@ extension HealthBootstrapViewModel {
                 try syncStore.setGroupStatus("vitals", status: "syncing")
                 CrashReporting.healthKit(.importStarted, group: "vitals", metric: "blood_pressure")
 
-                // Soft auth on sync path as well — empty share set + exception catcher.
-                await healthKitClient.requestAuthorizationSoft(for: [.vitals])
+                // Hard auth on sync: must succeed before we mark the group ready.
+                // (Settings save still uses soft auth so a PUT is never rolled back by HK.)
+                do {
+                    try await healthKitClient.requestAuthorization(for: [.vitals])
+                    CrashReporting.healthKit(.authRequested, group: "vitals", metric: "blood_pressure")
+                } catch {
+                    CrashReporting.healthKitNonFatal(
+                        .fetchFailed,
+                        stage: .authRequested,
+                        message: "healthkit_auth_sync_failed",
+                        group: "vitals",
+                        metric: "blood_pressure",
+                        underlying: error
+                    )
+                    throw HealthAPIError.badStatus(
+                        403,
+                        "Health access for blood pressure was not granted. Open Settings → Health → Data Access and enable Blood Pressure for this app, then try Sync again.",
+                        code: "healthkit_auth_failed"
+                    )
+                }
 
                 let samples: [HealthKitBloodPressureSync.BPSample]
                 do {
@@ -314,6 +332,9 @@ extension HealthBootstrapViewModel {
                     count: samples.count,
                     extra: ["applied": String(applied)]
                 )
+                if samples.isEmpty {
+                    return "Vitals marked ready, but 0 blood pressure readings were found in Health for the last 90 days. If you expected data, check Settings → Health → Data Access for Blood Pressure (systolic/diastolic)."
+                }
                 return "Synced \(samples.count) blood pressure reading(s); uploaded \(applied) op(s)."
             } catch {
                 CrashReporting.healthKitNonFatal(

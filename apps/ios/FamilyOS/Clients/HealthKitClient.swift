@@ -85,17 +85,22 @@ struct HealthKitClient {
     }
 
     /// Milestone 1: blood-pressure types only under vitals. No full registry matrix.
+    ///
+    /// Do **not** request `HKCorrelationType.bloodPressure` for authorization — HealthKit
+    /// rejects it with `NSInvalidArgumentException` ("Authorization to read … is disallowed").
+    /// Request the underlying quantity types; correlation samples are still queryable after.
     private func readTypes(for metrics: Set<HealthKitSyncMetric>) -> Set<HKObjectType> {
         var types = Set<HKObjectType>()
         if metrics.contains(.vitals) {
-            if let correlation = HKObjectType.correlationType(forIdentifier: .bloodPressure) {
-                types.insert(correlation)
-            }
             if let systolic = HKObjectType.quantityType(forIdentifier: .bloodPressureSystolic) {
                 types.insert(systolic)
             }
             if let diastolic = HKObjectType.quantityType(forIdentifier: .bloodPressureDiastolic) {
                 types.insert(diastolic)
+            }
+            // Optional pulse attached to BP correlations.
+            if let heartRate = HKObjectType.quantityType(forIdentifier: .heartRate) {
+                types.insert(heartRate)
             }
         }
         return types
