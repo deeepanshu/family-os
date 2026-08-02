@@ -6,7 +6,7 @@ struct HealthKitSyncView: View {
 
     var body: some View {
         Section("Health Data") {
-            Text("Milestone 1: foreground blood pressure sync when Vitals is enabled. Other metrics will return after soak.")
+            Text("Milestone 1: enable Vitals (blood pressure) and Sync now. Other groups are listed for consent but only BP uploads today.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -16,7 +16,8 @@ struct HealthKitSyncView: View {
             .disabled(viewModel.selfProfile == nil)
 
             if viewModel.healthKit.consentGranted {
-                ForEach(HealthKitSyncMetric.allCases) { metric in
+                // Surface BP clearly; API group remains "vitals".
+                ForEach(milestoneToggleGroups) { metric in
                     Toggle(isOn: binding(for: metric)) {
                         metricToggleLabel(metric)
                     }
@@ -60,15 +61,34 @@ struct HealthKitSyncView: View {
         }
     }
 
+    /// Groups shown in Settings for milestone 1 (avoid dumping nutrition matrix).
+    private var milestoneToggleGroups: [HealthKitSyncMetric] {
+        [.vitals, .activity, .sleep, .body, .workouts]
+    }
+
     @ViewBuilder
     private func metricToggleLabel(_ metric: HealthKitSyncMetric) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(metric.displayName)
+            Text(toggleTitle(for: metric))
+            if metric == .vitals {
+                Text("Blood pressure")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             if let state = metricState(for: metric) {
                 Text(state.status.displayName)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private func toggleTitle(for metric: HealthKitSyncMetric) -> String {
+        switch metric {
+        case .vitals:
+            return "Vitals (blood pressure)"
+        default:
+            return metric.displayName
         }
     }
 

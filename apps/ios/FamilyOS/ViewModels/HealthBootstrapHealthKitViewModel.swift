@@ -61,8 +61,9 @@ extension HealthBootstrapViewModel {
                     replaceActiveInstallation: replaceInstallation
                 )
                 healthKit.apply(status: status)
+                // Soft auth: never let HK NSException abort after a successful settings PUT.
                 if status.consentActive {
-                    try await healthKitClient.requestAuthorization(for: Set(status.enabledMetrics))
+                    await healthKitClient.requestAuthorizationSoft(for: Set(status.enabledMetrics))
                 }
                 CrashReporting.healthKit(
                     .settingsSaved,
@@ -214,8 +215,8 @@ extension HealthBootstrapViewModel {
                 try syncStore.setGroupStatus("vitals", status: "syncing")
                 CrashReporting.healthKit(.importStarted, group: "vitals", metric: "blood_pressure")
 
-                try await healthKitClient.requestAuthorization(for: [.vitals])
-                CrashReporting.healthKit(.authRequested, group: "vitals")
+                // Soft auth on sync path as well — empty share set + exception catcher.
+                await healthKitClient.requestAuthorizationSoft(for: [.vitals])
 
                 let samples: [HealthKitBloodPressureSync.BPSample]
                 do {
