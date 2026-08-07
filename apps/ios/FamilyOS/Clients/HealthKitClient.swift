@@ -5,7 +5,14 @@ import HealthKit
 ///
 /// Auth must never process-kill: HealthKit can raise NSExceptions from
 /// `requestAuthorization` (`_throwIfAuthorizationDisallowedForSharing`).
+///
+/// **One request only** — never chain BP → pulse → sleep → workouts sheets.
+/// Chained `requestAuthorization` calls hang indefinitely when permissions
+/// are already granted in Settings.
 struct HealthKitClient {
+    /// Hard ceiling so Save/Sync UI can never spin forever on a missing HK callback.
+    static let authorizationTimeoutSeconds: TimeInterval = 45
+
     private let store = HKHealthStore()
 
     var isAvailable: Bool {
@@ -27,12 +34,11 @@ struct HealthKitClient {
         }
     }
 
-    /// Sequential Health permission overlays per enabled group:
-    /// - vitals: BP (required) then pulse (best-effort)
-    /// - sleep: sleepAnalysis
+    /// Single Health permission request for **all** types needed by `metrics`.
     ///
-    /// Never request `HKCorrelationType.bloodPressure` for auth (HealthKit rejects it).
-    /// Request quantity types only; correlations remain queryable after grant.
+    /// - Never requests `HKCorrelationType.bloodPressure` (HealthKit rejects it).
+    /// - Uses quantity types for BP; correlations stay queryable after grant.
+    /// - Times out if Apple never calls back (common when access already granted).
     func requestAuthorization(for metrics: Set<HealthKitSyncMetric>) async throws {
         guard isAvailable else { return }
         #if DEBUG
@@ -47,61 +53,23 @@ struct HealthKitClient {
             return
         }
 
-        // Stable order: vitals overlays then sleep. Never early-return past later groups.
-        if metrics.contains(.vitals) {
-            let bpTypes = Self.bloodPressureReadTypes()
-            if bpTypes.isEmpty {
-                CrashReporting.log("healthkit_auth_skipped_empty_bp_types")
-            } else {
-                CrashReporting.log("healthkit_auth_requesting_bp \(Self.typeIds(bpTypes))")
-                try await performAuthorizationRequest(read: bpTypes)
-
-                // Overlay 2: Pulse (heart rate). Best-effort so a deny/skip cannot block BP.
-                let pulseTypes = Self.pulseReadTypes()
-                if !pulseTypes.isEmpty {
-                    CrashReporting.log("healthkit_auth_requesting_pulse \(Self.typeIds(pulseTypes))")
-                    do {
-                        try await performAuthorizationRequest(read: pulseTypes)
-                    } catch {
-                        CrashReporting.healthKitNonFatal(
-                            .fetchFailed,
-                            stage: .authRequested,
-                            message: "healthkit_auth_pulse_soft_failed",
-                            group: "vitals",
-                            metric: "heart_rate",
-                            underlying: error
-                        )
-                    }
-                }
-            }
+        let types = Self.readTypes(for: metrics)
+        guard !types.isEmpty else {
+            CrashReporting.log("healthkit_auth_skipped_empty_types")
+            return
         }
 
-        if metrics.contains(.sleep) {
-            let sleepTypes = Self.sleepReadTypes()
-            if sleepTypes.isEmpty {
-                CrashReporting.log("healthkit_auth_skipped_empty_sleep_types")
-            } else {
-                CrashReporting.log("healthkit_auth_requesting_sleep \(Self.typeIds(sleepTypes))")
-                try await performAuthorizationRequest(read: sleepTypes)
-            }
-        }
-
-        if metrics.contains(.workouts) {
-            let workoutTypes = Self.workoutReadTypes()
-            if workoutTypes.isEmpty {
-                CrashReporting.log("healthkit_auth_skipped_empty_workout_types")
-            } else {
-                CrashReporting.log("healthkit_auth_requesting_workouts \(Self.typeIds(workoutTypes))")
-                try await performAuthorizationRequest(read: workoutTypes)
-            }
-        }
+        CrashReporting.log(
+            "healthkit_auth_requesting_once groups=\(metrics.map(\.rawValue).sorted().joined(separator: ",")) types=\(Self.typeIds(types))"
+        )
+        try await performAuthorizationRequest(read: types)
     }
 
     func ensureReadAuthorization(for metrics: Set<HealthKitSyncMetric>) async throws {
         try await requestAuthorization(for: metrics)
     }
 
-    /// Combined set for tests / diagnostics.
+    /// Combined set for auth, tests, and diagnostics.
     static func readTypes(for metrics: Set<HealthKitSyncMetric>) -> Set<HKObjectType> {
         var types = Set<HKObjectType>()
         if metrics.contains(.vitals) {
@@ -153,6 +121,28 @@ struct HealthKitClient {
     }
 
     private func performAuthorizationRequest(read types: Set<HKObjectType>) async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                try await self.performAuthorizationRequestOnce(read: types)
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(Self.authorizationTimeoutSeconds * 1_000_000_000))
+                throw NSError(
+                    domain: CrashReporting.healthKitErrorDomain,
+                    code: CrashReporting.HealthKitCode.fetchFailed.rawValue,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "Health authorization timed out after \(Int(Self.authorizationTimeoutSeconds))s. If you already enabled access in Settings → Health → Data Access → Kinstead, pull to dismiss and tap Sync again."
+                    ]
+                )
+            }
+            // First finished wins: success/failure from HK, or timeout.
+            try await group.next()
+            group.cancelAll()
+        }
+    }
+
+    private func performAuthorizationRequestOnce(read types: Set<HKObjectType>) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             DispatchQueue.main.async {
                 var resumed = false

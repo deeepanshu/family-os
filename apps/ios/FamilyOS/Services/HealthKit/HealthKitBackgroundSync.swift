@@ -307,23 +307,20 @@ enum HealthKitBackgroundSync {
                 allowEmptySleep: true
             )
 
-            // Per-group isolation: one failure must not block the other.
-            for group in groups {
-                do {
-                    _ = try await HealthKitSyncCoordinator.run(
-                        groups: [group],
-                        syncStore: store,
-                        deps: deps
-                    )
-                } catch {
-                    CrashReporting.healthKitNonFatal(
-                        .syncFailed,
-                        stage: .syncFailed,
-                        message: "bg_group_sync_failed",
-                        group: group.rawValue,
-                        underlying: error
-                    )
-                }
+            // One coordinator run = one auth request for all groups, then isolated imports.
+            do {
+                _ = try await HealthKitSyncCoordinator.run(
+                    groups: groups,
+                    syncStore: store,
+                    deps: deps
+                )
+            } catch {
+                CrashReporting.healthKitNonFatal(
+                    .syncFailed,
+                    stage: .syncFailed,
+                    message: "bg_group_sync_failed",
+                    underlying: error
+                )
             }
             CrashReporting.healthKit(.syncCompleted, extra: ["reason": reason, "mode": "background"])
         } catch {

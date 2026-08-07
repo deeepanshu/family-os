@@ -61,13 +61,32 @@ enum HealthKitSyncCoordinator {
 
     /// Run import+drain+ready for each group in `groups` (already filtered to implemented ∩ enabled).
     ///
-    /// Groups are isolated: one failure does not skip the rest. Throws only when **every**
-    /// requested group fails (or the list is empty). Partial success returns successes + failures.
+    /// - **One** HealthKit auth for the whole set (never per-group sheets).
+    /// - Auth runs **before** start-import so a hung sheet cannot leave status=`syncing`.
+    /// - Groups are isolated: one failure does not skip the rest. Throws only when **every**
+    ///   requested group fails (or the list is empty).
     static func run(
         groups: [HealthKitSyncMetric],
         syncStore: HealthKitSyncStore,
         deps: Dependencies
     ) async throws -> SyncOutcome {
+        // Auth once for all groups before any start-import.
+        do {
+            try await deps.ensureAuth(Set(groups))
+            CrashReporting.healthKit(
+                .authRequested,
+                extra: ["groups": groups.map(\.rawValue).joined(separator: ",")]
+            )
+        } catch {
+            CrashReporting.healthKitNonFatal(
+                .fetchFailed,
+                stage: .authRequested,
+                message: "healthkit_auth_sync_failed",
+                underlying: error
+            )
+            throw mapAuthError(error)
+        }
+
         var summaries: [GroupSyncSummary] = []
         var failures: [GroupSyncFailure] = []
 
@@ -104,23 +123,9 @@ enum HealthKitSyncCoordinator {
         let groupKey = group.rawValue
         CrashReporting.healthKit(.importStarted, group: groupKey, metric: scopeMetric(for: group))
 
+        // Auth already completed for the batch. start-import only after that.
         try await deps.startImport(groupKey)
         try syncStore.setGroupStatus(groupKey, status: "syncing")
-
-        do {
-            try await deps.ensureAuth([group])
-            CrashReporting.healthKit(.authRequested, group: groupKey, metric: scopeMetric(for: group))
-        } catch {
-            CrashReporting.healthKitNonFatal(
-                .fetchFailed,
-                stage: .authRequested,
-                message: "healthkit_auth_sync_failed",
-                group: groupKey,
-                metric: scopeMetric(for: group),
-                underlying: error
-            )
-            throw mapAuthError(error)
-        }
 
         let sampleCount: Int
         do {
