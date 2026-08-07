@@ -81,9 +81,6 @@ struct HealthKitSyncView: View {
     private func metricLabel(_ metric: HealthKitSyncMetric) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title(for: metric))
-            Text(subtitle(for: metric))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
             if let state = metricState(for: metric) {
                 Text(state.status.displayName)
                     .font(.caption2)
@@ -99,13 +96,6 @@ struct HealthKitSyncView: View {
         case .workouts: return "Workouts"
         default: return metric.displayName
         }
-    }
-
-    private func subtitle(for metric: HealthKitSyncMetric) -> String {
-        if HealthKitSyncStateViewModel.implementedSyncMetrics.contains(metric) {
-            return "Sync now uploads this data"
-        }
-        return "Coming next — consent only for now"
     }
 
     private func metricState(for metric: HealthKitSyncMetric) -> HealthKitMetricState? {

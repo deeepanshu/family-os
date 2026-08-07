@@ -40,6 +40,7 @@ final class HealthBootstrapViewModel: ObservableObject {
         healthKit = HealthKitSyncStateViewModel()
 
         clearInvalidCachedReleaseTokenIfNeeded()
+        clearStaleLocalSessionIfNeeded()
 
         republishChanges(from: connection)
         republishChanges(from: auth)
@@ -304,6 +305,24 @@ final class HealthBootstrapViewModel: ObservableObject {
             statusMessage = "Please sign in."
             isError = false
         }
+    }
+
+    /// Drop production Apple sessions when running a local Debug build without real Supabase.
+    /// Otherwise the app stays "signed in" with a JWT aimed at prod and never hits the Mac API.
+    private func clearStaleLocalSessionIfNeeded() {
+        guard connection.environmentName == .local, hasAccessToken else {
+            return
+        }
+        guard !hasSupabaseConfiguration else {
+            return
+        }
+        let token = auth.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard token != "dev-token" else {
+            return
+        }
+        auth.clear(defaults: defaults, keychain: keychain)
+        statusMessage = "Local development sign in required."
+        isError = false
     }
 }
 

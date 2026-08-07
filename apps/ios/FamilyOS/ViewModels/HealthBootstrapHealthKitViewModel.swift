@@ -55,16 +55,41 @@ extension HealthBootstrapViewModel {
                 ).sorted { $0.rawValue < $1.rawValue }
                 : []
             do {
-                let status = try await client.putHealthKitSettings(
-                    baseURL: connection.baseURL,
-                    accessToken: auth.accessToken,
-                    personId: personId,
-                    consentVersion: consentVersion,
-                    enabledGroups: enabled,
-                    healthTimezone: healthKit.selectedTimezone,
-                    installationId: installationId,
-                    replaceActiveInstallation: replaceInstallation
-                )
+                // One active install per person. Saving settings on this device claims it —
+                // same as sync's auto-replace when another phone/sim holds the active slot
+                // (common with shared local dev-token).
+                var claimedInstall = replaceInstallation
+                let status: HealthKitSyncStatus
+                do {
+                    status = try await client.putHealthKitSettings(
+                        baseURL: connection.baseURL,
+                        accessToken: auth.accessToken,
+                        personId: personId,
+                        consentVersion: consentVersion,
+                        enabledGroups: enabled,
+                        healthTimezone: healthKit.selectedTimezone,
+                        installationId: installationId,
+                        replaceActiveInstallation: claimedInstall
+                    )
+                } catch let HealthAPIError.badStatus(code, _, errorCode)
+                    where code == 409 && errorCode == "installation_inactive" && !claimedInstall
+                {
+                    CrashReporting.healthKit(
+                        .settingsSaved,
+                        extra: ["install_replace_retry": "1"]
+                    )
+                    claimedInstall = true
+                    status = try await client.putHealthKitSettings(
+                        baseURL: connection.baseURL,
+                        accessToken: auth.accessToken,
+                        personId: personId,
+                        consentVersion: consentVersion,
+                        enabledGroups: enabled,
+                        healthTimezone: healthKit.selectedTimezone,
+                        installationId: installationId,
+                        replaceActiveInstallation: true
+                    )
+                }
                 healthKit.apply(status: status)
                 // Soft auth only for groups we actually sync (BP). Never block settings PUT.
                 if status.consentActive {
@@ -76,11 +101,13 @@ extension HealthBootstrapViewModel {
                     extra: [
                         "consent_active": status.consentActive ? "1" : "0",
                         "enabled_group_count": String(status.enabledGroups.count),
-                        "replace_install": replaceInstallation ? "1" : "0"
+                        "replace_install": claimedInstall ? "1" : "0"
                     ]
                 )
                 return status.consentActive
-                    ? "HealthKit settings saved."
+                    ? (claimedInstall && !replaceInstallation
+                        ? "HealthKit settings saved (this device is now the active sync source)."
+                        : "HealthKit settings saved.")
                     : "HealthKit consent withdrawn."
             } catch {
                 CrashReporting.healthKitNonFatal(

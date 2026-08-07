@@ -1,3 +1,4 @@
+import HealthKit
 import XCTest
 @testable import FamilyOS
 
@@ -173,6 +174,44 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertEqual(connection.baseURL, customURL)
     }
 
+    func testLocalEnvironmentIgnoresStickyBaseURLAndSupabase() {
+        let suiteName = "HealthConnectionLocalSticky-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("http://localhost:3001/health/api/v1", forKey: DefaultsKey.baseURL)
+        defaults.set("https://real-project.supabase.co", forKey: DefaultsKey.supabaseURL)
+        defaults.set("real-anon-key", forKey: DefaultsKey.supabaseAnonKey)
+
+        let environment = AppEnvironment(
+            name: .local,
+            apiBaseURL: "http://192.168.1.64:3001/health/api/v1",
+            supabaseURL: "https://your-project.supabase.co",
+            supabaseAnonKey: "your-supabase-anon-key"
+        )
+        let connection = HealthConnectionViewModel(defaults: defaults, environment: environment)
+
+        XCTAssertEqual(connection.baseURL, environment.apiBaseURL)
+        XCTAssertEqual(connection.supabaseURL, environment.supabaseURL)
+        XCTAssertEqual(connection.supabaseAnonKey, environment.supabaseAnonKey)
+        XCTAssertEqual(defaults.string(forKey: DefaultsKey.baseURL), environment.apiBaseURL)
+    }
+
+    func testConnectionMigratesLocalhostSavedURLOnRelease() {
+        let suiteName = "HealthConnectionLocalhostMigration-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("http://localhost:3001/health/api/v1", forKey: DefaultsKey.baseURL)
+
+        let environment = AppEnvironment(
+            name: .release,
+            apiBaseURL: "https://familyos.deepanshujain.me/health/api/v1",
+            supabaseURL: ""
+        )
+        let connection = HealthConnectionViewModel(defaults: defaults, environment: environment)
+
+        XCTAssertEqual(connection.baseURL, environment.apiBaseURL)
+    }
+
     func testAccessTokenExpiryRequiresRefreshForExpiredToken() {
         let expiredToken = "eyJhbGciOiJub25lIn0.eyJleHAiOjF9.signature"
         XCTAssertTrue(AccessTokenExpiry.requiresRefresh(expiredToken, now: Date(timeIntervalSince1970: 2)))
@@ -180,6 +219,36 @@ final class SoloFirstTests: XCTestCase {
 
     func testAccessTokenExpiryKeepsLocalDevelopmentToken() {
         XCTAssertFalse(AccessTokenExpiry.requiresRefresh("dev-token"))
+    }
+
+    func testHealthKitVitalsAuthTypesAreBPThenPulseNotCorrelation() {
+        let bp = HealthKitClient.bloodPressureReadTypes()
+        let pulse = HealthKitClient.pulseReadTypes()
+        let combined = HealthKitClient.readTypes(for: [.vitals])
+
+        let systolic = HKObjectType.quantityType(forIdentifier: .bloodPressureSystolic)
+        let diastolic = HKObjectType.quantityType(forIdentifier: .bloodPressureDiastolic)
+        let heartRate = HKObjectType.quantityType(forIdentifier: .heartRate)
+        let correlation = HKObjectType.correlationType(forIdentifier: .bloodPressure)
+
+        XCTAssertEqual(bp.count, 2)
+        XCTAssertEqual(pulse.count, 1)
+        XCTAssertEqual(combined, bp.union(pulse))
+        if let systolic { XCTAssertTrue(bp.contains(systolic)) }
+        if let diastolic { XCTAssertTrue(bp.contains(diastolic)) }
+        if let heartRate {
+            XCTAssertFalse(bp.contains(heartRate))
+            XCTAssertTrue(pulse.contains(heartRate))
+        }
+        if let correlation {
+            XCTAssertFalse(bp.contains(correlation))
+            XCTAssertFalse(combined.contains(correlation))
+        }
+
+        let bpIds = HealthKitClient.typeIds(bp)
+        XCTAssertTrue(bpIds.contains("BloodPressureSystolic"))
+        XCTAssertTrue(bpIds.contains("BloodPressureDiastolic"))
+        XCTAssertFalse(bpIds.contains("HeartRate"))
     }
 
     func testHealthKitSyncNowRequiresVitalsConsent() async {
