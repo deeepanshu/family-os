@@ -6,7 +6,7 @@ struct HealthKitSyncView: View {
 
     var body: some View {
         Section("Health Data") {
-            Text("Milestone 1: enable Vitals (blood pressure) and Sync now. Other groups are listed for consent but only BP uploads today.")
+            Text("Only blood pressure is synced today. This toggle requests Health access for BP and is what Sync uploads.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -14,12 +14,27 @@ struct HealthKitSyncView: View {
                 Text("Upload HealthKit data")
             }
             .disabled(viewModel.selfProfile == nil)
+            .onChange(of: viewModel.healthKit.consentGranted) { _, granted in
+                // Keep enabled set honest: consent on → vitals only; off → none.
+                if granted {
+                    viewModel.healthKit.enabledMetrics = [.vitals]
+                } else {
+                    viewModel.healthKit.enabledMetrics = []
+                }
+            }
 
             if viewModel.healthKit.consentGranted {
-                // Surface BP clearly; API group remains "vitals".
-                ForEach(milestoneToggleGroups) { metric in
-                    Toggle(isOn: binding(for: metric)) {
-                        metricToggleLabel(metric)
+                Toggle(isOn: binding(for: .vitals)) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Blood pressure")
+                        Text("Requests Health permission · Sync now uploads BP only")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        if let state = metricState(for: .vitals) {
+                            Text(state.status.displayName)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -39,6 +54,12 @@ struct HealthKitSyncView: View {
                 Task {
                     isSavingSettings = true
                     defer { isSavingSettings = false }
+                    // Never persist cosmetic non-BP groups from older app state.
+                    if viewModel.healthKit.consentGranted {
+                        viewModel.healthKit.enabledMetrics = [.vitals]
+                    } else {
+                        viewModel.healthKit.enabledMetrics = []
+                    }
                     if let current = viewModel.healthKit.status?.healthTimezone,
                        current != viewModel.healthKit.selectedTimezone {
                         await viewModel.changeHealthTimezone()
@@ -61,37 +82,6 @@ struct HealthKitSyncView: View {
         }
     }
 
-    /// Groups shown in Settings for milestone 1 (avoid dumping nutrition matrix).
-    private var milestoneToggleGroups: [HealthKitSyncMetric] {
-        [.vitals, .activity, .sleep, .body, .workouts]
-    }
-
-    @ViewBuilder
-    private func metricToggleLabel(_ metric: HealthKitSyncMetric) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(toggleTitle(for: metric))
-            if metric == .vitals {
-                Text("Blood pressure")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            if let state = metricState(for: metric) {
-                Text(state.status.displayName)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private func toggleTitle(for metric: HealthKitSyncMetric) -> String {
-        switch metric {
-        case .vitals:
-            return "Vitals (blood pressure)"
-        default:
-            return metric.displayName
-        }
-    }
-
     private func metricState(for metric: HealthKitSyncMetric) -> HealthKitMetricState? {
         viewModel.healthKit.metricRows.first { $0.metric == metric }
     }
@@ -101,9 +91,14 @@ struct HealthKitSyncView: View {
             get: { viewModel.healthKit.enabledMetrics.contains(metric) },
             set: { enabled in
                 if enabled {
-                    viewModel.healthKit.enabledMetrics.insert(metric)
+                    // Milestone 1: only vitals is implementable.
+                    viewModel.healthKit.enabledMetrics = [.vitals]
+                    viewModel.healthKit.consentGranted = true
                 } else {
                     viewModel.healthKit.enabledMetrics.remove(metric)
+                    if viewModel.healthKit.enabledMetrics.isEmpty {
+                        viewModel.healthKit.consentGranted = false
+                    }
                 }
             }
         )

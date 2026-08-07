@@ -9,7 +9,10 @@ final class HealthKitSyncStateViewModel: ObservableObject {
     @Published var linkedProfileId: String?
     @Published var consentGranted = false
     @Published var selectedTimezone = TimeZone.current.identifier
-    @Published var enabledMetrics: Set<HealthKitSyncMetric> = Set(HealthKitSyncMetric.allCases)
+    /// Only groups the app can actually request + sync (milestone 1: BP under vitals).
+    static let syncableMetrics: Set<HealthKitSyncMetric> = [.vitals]
+
+    @Published var enabledMetrics: Set<HealthKitSyncMetric> = []
     @Published var confirmTimezoneChange = false
     @Published var backgroundSyncAlertsEnabled = false
 
@@ -21,7 +24,7 @@ final class HealthKitSyncStateViewModel: ObservableObject {
         linkedProfileId = nil
         consentGranted = false
         selectedTimezone = TimeZone.current.identifier
-        enabledMetrics = Set(HealthKitSyncMetric.allCases)
+        enabledMetrics = []
         confirmTimezoneChange = false
         backgroundSyncAlertsEnabled = false
     }
@@ -31,7 +34,13 @@ final class HealthKitSyncStateViewModel: ObservableObject {
         linkedProfileId = status.personId
         consentGranted = status.consentActive
         selectedTimezone = status.healthTimezone
-        enabledMetrics = Set(status.enabledMetrics.isEmpty ? HealthKitSyncMetric.allCases : status.enabledMetrics)
+        // Never re-enable cosmetic groups from the API; only keep syncable ones.
+        let fromServer = Set(status.enabledMetrics).intersection(Self.syncableMetrics)
+        if status.consentActive {
+            enabledMetrics = fromServer.isEmpty ? Self.syncableMetrics : fromServer
+        } else {
+            enabledMetrics = []
+        }
     }
 
     var metricRows: [HealthKitMetricState] {

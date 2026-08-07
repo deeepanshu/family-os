@@ -24,7 +24,7 @@ struct ProfileView: View {
 
                 HealthKitSyncView(viewModel: viewModel)
             }
-            .navigationTitle("Profile")
+            .navigationTitle("HealthKit Sync")
             .task {
                 await viewModel.loadHealthKitStatus()
             }

@@ -47,8 +47,12 @@ extension HealthBootstrapViewModel {
         await request(showsFeedback: showsFeedback) {
             let installationId = try HealthKitInstallationId.current(using: keychain)
             let consentVersion = healthKit.consentGranted ? HealthKitConsent.version : nil
+            // Only persist groups the app can actually sync (milestone 1: vitals/BP).
             let enabled = healthKit.consentGranted
-                ? Array(healthKit.enabledMetrics).sorted { $0.rawValue < $1.rawValue }
+                ? Array(
+                    healthKit.enabledMetrics
+                        .intersection(HealthKitSyncStateViewModel.syncableMetrics)
+                ).sorted { $0.rawValue < $1.rawValue }
                 : []
             do {
                 let status = try await client.putHealthKitSettings(
@@ -62,9 +66,10 @@ extension HealthBootstrapViewModel {
                     replaceActiveInstallation: replaceInstallation
                 )
                 healthKit.apply(status: status)
-                // Soft auth: never let HK NSException abort after a successful settings PUT.
+                // Soft auth only for groups we actually sync (BP). Never block settings PUT.
                 if status.consentActive {
-                    await healthKitClient.requestAuthorizationSoft(for: Set(status.enabledMetrics))
+                    let syncable = Set(status.enabledMetrics).intersection(HealthKitSyncStateViewModel.syncableMetrics)
+                    await healthKitClient.requestAuthorizationSoft(for: syncable.isEmpty ? [.vitals] : syncable)
                 }
                 CrashReporting.healthKit(
                     .settingsSaved,
