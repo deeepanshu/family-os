@@ -3,10 +3,10 @@ import {
   MCP_HEALTH_DISCLAIMER,
   MCP_HEALTH_METRICS,
   type McpConnectionGrant,
-  type HealthKitMetricKey,
   type McpGetHealthDataInput,
   type McpGetHealthDataResult,
   type McpDailyMetricPoint,
+  type McpHealthMetric,
   type McpSleepPoint,
   type McpListAuthorizedProfilesResult,
   type McpSeriesPoint
@@ -38,7 +38,10 @@ export type McpCallerContext = {
   correlationId?: string;
 };
 
-type DailyMcpMetric = Exclude<HealthKitMetricKey, "steps" | "sleep" | "blood_pressure" | "blood_glucose" | "workout">;
+type DailyMcpMetric = Exclude<
+  McpHealthMetric,
+  "steps" | "sleep" | "blood_pressure" | "blood_glucose" | "workout"
+>;
 
 export type HealthMcpReadServiceDeps = {
   families: FamilyStore;
@@ -70,12 +73,15 @@ export class HealthMcpReadService {
     return this.withAudit(caller, "family_os.list_authorized_profiles", undefined, async () => {
       await this.requireActiveConnection(caller);
       const profiles = await this.deps.profiles.listProfiles(caller.userId);
-      return {
-        profiles: profiles.map((profile) => ({
+      const listed = await Promise.all(
+        profiles.map(async (profile) => ({
           personId: profile.id,
           label: profile.relationshipLabel?.trim() || profile.displayName,
-          availableMetrics: [...MCP_HEALTH_METRICS]
-        })),
+          availableMetrics: await this.availableMetricsForProfile(caller.userId, profile.id)
+        }))
+      );
+      return {
+        profiles: listed,
         disclaimer: MCP_HEALTH_DISCLAIMER
       };
     });
@@ -98,6 +104,8 @@ export class HealthMcpReadService {
       }
 
       await this.deps.profiles.getProfile(caller.userId, input.personId);
+      // Match list_authorized_profiles: refuse metrics whose consent group is not enabled.
+      await this.assertMetricConsented(caller.userId, input.personId, query.metric);
       const freshness = await this.deps.healthKit.getHealthMetricFreshness(
         caller.userId,
         input.personId,
@@ -115,7 +123,7 @@ export class HealthMcpReadService {
         rangeStart: `${rangeStart}T00:00:00.000Z`,
         rangeEnd: `${rangeEnd}T23:59:59.999Z`
       });
-      // Incomplete repairs write canonical rows early; withhold them from MCP until completion.
+      // Incomplete repairs / disabled consent must not expose stored rows until ready.
       const withhold = shouldWithholdMetricRecords(freshness.status);
 
       if (query.metric === "steps" && query.granularity === "hourly") {
@@ -283,39 +291,112 @@ export class HealthMcpReadService {
         };
       }
 
-      const { readings, truncated } = withhold
-        ? { readings: [], truncated: false }
-        : await this.loadBloodPressureTable(
-            caller.userId,
-            input.personId,
+      if (query.metric === "blood_pressure") {
+        const { readings, truncated } = withhold
+          ? { readings: [], truncated: false }
+          : await this.loadBloodPressureTable(
+              caller.userId,
+              input.personId,
+              rangeStart,
+              rangeEnd,
+              presentationTimezone,
+              maxReadings
+            );
+        return {
+          personId: input.personId,
+          healthMetric: "blood_pressure",
+          viewType: "daily_reading_table",
+          unit: query.unit,
+          healthTimezone,
+          timezone: presentationTimezone,
+          coverage: {
+            requestedRangeDays: query.rangeDays,
             rangeStart,
             rangeEnd,
-            presentationTimezone,
-            maxReadings
-          );
-      return {
-        personId: input.personId,
-        healthMetric: "blood_pressure",
-        viewType: "daily_reading_table",
-        unit: query.unit,
-        healthTimezone,
-        timezone: presentationTimezone,
-        coverage: {
-          requestedRangeDays: query.rangeDays,
-          rangeStart,
-          rangeEnd,
-          daysWithData: countDistinctDaysFromBuckets(readings.map((r) => r.localDate)),
-          complete,
-          availableStart: withhold ? undefined : freshness.coverageStartAt,
-          availableEnd: withhold ? undefined : freshness.coverageEndAt
-        },
-        lastSyncedAt: freshness.lastSuccessfulAt,
-        metricSyncStatus: freshness.status,
-        disclaimer: MCP_HEALTH_DISCLAIMER,
-        readings,
-        truncated
-      };
+            daysWithData: countDistinctDaysFromBuckets(readings.map((r) => r.localDate)),
+            complete,
+            availableStart: withhold ? undefined : freshness.coverageStartAt,
+            availableEnd: withhold ? undefined : freshness.coverageEndAt
+          },
+          lastSyncedAt: freshness.lastSuccessfulAt,
+          metricSyncStatus: freshness.status,
+          disclaimer: MCP_HEALTH_DISCLAIMER,
+          readings,
+          truncated
+        };
+      }
+
+      // Never fall through to an unrelated table shape.
+      throw new HttpError(
+        400,
+        "unsupported_metric",
+        `healthMetric ${query.metric} is not supported by Family OS MCP.`
+      );
     });
+  }
+
+  /**
+   * Metrics whose consent group is enabled for this person.
+   * HealthKit settings are Self-only today; other profiles get an empty list.
+   * Only expected access/settings failures collapse to []; unexpected errors rethrow.
+   */
+  private async availableMetricsForProfile(userId: string, personId: string): Promise<McpHealthMetric[]> {
+    try {
+      const settings = await this.deps.healthKit.getHealthKitSettings(userId, personId);
+      const enabled = new Set(settings.enabledGroups);
+      return MCP_HEALTH_METRICS.filter((metric) => enabled.has(HEALTHKIT_METRIC_REGISTRY[metric].group));
+    } catch (error) {
+      if (error instanceof HttpError) {
+        // Self-only settings, missing profile, or no HealthKit config → advertise nothing.
+        if (
+          error.code === "profile_forbidden" ||
+          error.code === "profile_not_found" ||
+          error.code === "healthkit_self_profile_required" ||
+          error.code === "healthkit_self_only" ||
+          error.status === 403 ||
+          error.status === 404 ||
+          error.status === 409
+        ) {
+          return [];
+        }
+      }
+      throw error;
+    }
+  }
+
+  /** Fail closed when the metric's consent group is not enabled for this Self profile. */
+  private async assertMetricConsented(
+    userId: string,
+    personId: string,
+    metric: McpHealthMetric
+  ): Promise<void> {
+    const group = HEALTHKIT_METRIC_REGISTRY[metric].group;
+    try {
+      const settings = await this.deps.healthKit.getHealthKitSettings(userId, personId);
+      if (!settings.enabledGroups.includes(group)) {
+        throw new HttpError(
+          403,
+          "group_disabled",
+          `HealthKit group "${group}" is not enabled for this profile. Re-enable it in Family OS before querying ${metric}.`
+        );
+      }
+    } catch (error) {
+      if (error instanceof HttpError && error.code === "group_disabled") {
+        throw error;
+      }
+      if (
+        error instanceof HttpError &&
+        (error.status === 403 || error.status === 404 || error.status === 409)
+      ) {
+        // No Self settings / wrong person: treat as unavailable for MCP reads.
+        throw new HttpError(
+          403,
+          "group_disabled",
+          `HealthKit group "${group}" is not available for this profile.`
+        );
+      }
+      throw error;
+    }
   }
 
   private async loadDailySteps(
@@ -553,10 +634,7 @@ export class HealthMcpReadService {
     if (!connection.capabilities.includes("health_read")) {
       throw new HttpError(403, "mcp_capability_denied", "This connection is not permitted to read health data.");
     }
-    const current = await this.deps.families.getCurrentFamily(caller.userId);
-    if (!current) {
-      throw new HttpError(403, "active_member_required", "Active family membership is required.");
-    }
+    // Solo-first: an active MCP grant is enough. Profile access is enforced per personId.
     return connection;
   }
 
@@ -567,42 +645,38 @@ export class HealthMcpReadService {
     work: () => Promise<T>
   ): Promise<T> {
     const correlationId = caller.correlationId ?? randomUUID();
-    let familyId: string | undefined;
+    let familyId: string | null = null;
     try {
       const current = await this.deps.families.getCurrentFamily(caller.userId);
-      familyId = current?.family.id;
+      familyId = current?.family.id ?? null;
       const result = await work();
-      if (familyId) {
-        await this.recordToolAudit({
-          familyId,
-          actorUserId: caller.userId,
-          toolName,
-          profileId,
-          oauthClientId: caller.oauthClientId,
-          correlationId,
-          outcome: "allowed"
-        });
-      }
+      await this.recordToolAudit({
+        familyId,
+        actorUserId: caller.userId,
+        toolName,
+        profileId,
+        oauthClientId: caller.oauthClientId,
+        correlationId,
+        outcome: "allowed"
+      });
       return result;
     } catch (error) {
-      if (familyId) {
-        await this.recordToolAudit({
-          familyId,
-          actorUserId: caller.userId,
-          toolName,
-          profileId,
-          oauthClientId: caller.oauthClientId,
-          correlationId,
-          outcome: error instanceof HttpError && (error.status === 403 || error.status === 404) ? "denied" : "failed",
-          errorCode: error instanceof HttpError ? error.code : "internal_error"
-        });
-      }
+      await this.recordToolAudit({
+        familyId,
+        actorUserId: caller.userId,
+        toolName,
+        profileId,
+        oauthClientId: caller.oauthClientId,
+        correlationId,
+        outcome: error instanceof HttpError && (error.status === 403 || error.status === 404) ? "denied" : "failed",
+        errorCode: error instanceof HttpError ? error.code : "internal_error"
+      });
       throw error;
     }
   }
 
   private async recordToolAudit(input: {
-    familyId: string;
+    familyId: string | null;
     actorUserId: string;
     toolName: string;
     profileId?: string;
@@ -616,7 +690,7 @@ export class HealthMcpReadService {
       actorUserId: input.actorUserId,
       action: "mcp.tool_called",
       resourceType: "mcp_tool",
-      resourceId: input.profileId ?? input.familyId,
+      resourceId: input.profileId ?? input.familyId ?? input.actorUserId,
       metadata: {
         tool_name: input.toolName,
         oauth_client_id: input.oauthClientId,

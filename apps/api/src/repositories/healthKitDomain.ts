@@ -133,7 +133,9 @@ export function shouldWithholdMetricRecords(status: HealthMetricSyncStatusCode):
     status === "syncing" ||
     status === "backfilling" ||
     status === "never_synced" ||
-    status === "error"
+    status === "error" ||
+    // Disabled consent must not expose historical rows via MCP/history.
+    status === "disabled"
   );
 }
 

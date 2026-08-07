@@ -319,12 +319,12 @@ export class PostgresFamilyStore {
   }
 
   async getProfile(actorUserId: string, profileId: string): Promise<HealthProfile> {
-    const current = await this.context.requireActiveMember(actorUserId);
+    // Solo-first: Self owner or same-family active member (via requirePersonAccess).
+    await this.context.requirePersonAccess(actorUserId, profileId);
     const [profile] = await this.context.sql`
       select *
       from people
       where id = ${profileId}
-        and family_id = ${current.family.id}
         and status = 'active'
     `;
     if (!profile) {
