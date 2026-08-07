@@ -251,7 +251,37 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertFalse(bpIds.contains("HeartRate"))
     }
 
-    func testHealthKitSyncNowRequiresVitalsConsent() async {
+    func testHealthKitSleepAuthTypesIncludeSleepAnalysis() {
+        let sleep = HealthKitClient.sleepReadTypes()
+        let combined = HealthKitClient.readTypes(for: [.sleep])
+        let both = HealthKitClient.readTypes(for: [.vitals, .sleep])
+
+        let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis)
+        XCTAssertEqual(sleep.count, 1)
+        XCTAssertEqual(combined, sleep)
+        if let sleepType {
+            XCTAssertTrue(sleep.contains(sleepType))
+            XCTAssertTrue(both.contains(sleepType))
+        }
+        // Sleep set must not require BP correlation for auth.
+        let correlation = HKObjectType.correlationType(forIdentifier: .bloodPressure)
+        if let correlation {
+            XCTAssertFalse(sleep.contains(correlation))
+        }
+        let ids = HealthKitClient.typeIds(sleep)
+        XCTAssertTrue(ids.contains("SleepAnalysis"))
+    }
+
+    func testHealthKitImplementedSyncMetricsIncludeVitalsAndSleep() {
+        XCTAssertEqual(
+            HealthKitSyncStateViewModel.implementedSyncMetrics,
+            [.vitals, .sleep]
+        )
+        XCTAssertTrue(HealthKitSyncStateViewModel.syncableMetrics.contains(.workouts))
+        XCTAssertFalse(HealthKitSyncStateViewModel.implementedSyncMetrics.contains(.workouts))
+    }
+
+    func testHealthKitSyncNowRequiresConsentAndImplementedMetric() async {
         let viewModel = HealthBootstrapViewModel()
         viewModel.auth.signedInUserId = "user-1"
         let selfProfile = makeProfile(id: "p1", linkedUserId: "user-1", displayName: "Me", relationshipLabel: "Self")
@@ -261,7 +291,26 @@ final class SoloFirstTests: XCTestCase {
         viewModel.healthKit.consentGranted = false
         await viewModel.syncHealthKitNow()
         XCTAssertTrue(viewModel.isError)
-        XCTAssertTrue(viewModel.statusMessage.lowercased().contains("vitals"))
+        XCTAssertTrue(viewModel.statusMessage.lowercased().contains("consent"))
+    }
+
+    func testHealthKitSyncNowAllowsSleepOnly() async {
+        // Guard path: sleep-only enabled should not fail for "vitals consent" specifically.
+        let viewModel = HealthBootstrapViewModel()
+        viewModel.auth.signedInUserId = "user-1"
+        let selfProfile = makeProfile(id: "p1", linkedUserId: "user-1", displayName: "Me", relationshipLabel: "Self")
+        viewModel.profiles.profiles = [selfProfile]
+        viewModel.healthKit.linkedProfileId = selfProfile.id
+        viewModel.healthKit.isAvailable = true
+        viewModel.healthKit.consentGranted = true
+        viewModel.healthKit.enabledMetrics = [.sleep]
+        // Will fail later on network/settings, but must pass the consent/metric gate.
+        await viewModel.syncHealthKitNow()
+        XCTAssertFalse(viewModel.statusMessage.lowercased().contains("vitals consent"))
+        XCTAssertNotEqual(
+            viewModel.statusMessage,
+            "Enable HealthKit consent and at least one supported metric before syncing."
+        )
     }
 
     func testStartupRefreshesExpiredSessionBeforeBootstrap() async {

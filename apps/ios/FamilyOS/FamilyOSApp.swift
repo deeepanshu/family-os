@@ -4,6 +4,7 @@ import UserNotifications
 @main
 struct FamilyOSApp: App {
     @UIApplicationDelegateAdaptor(NotificationAppDelegate.self) private var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel = HealthBootstrapViewModel()
 
     var body: some Scene {
@@ -27,6 +28,14 @@ struct FamilyOSApp: App {
                 .onOpenURL { url in
                     _ = viewModel.handleInviteURL(url)
                 }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active {
+                        HealthKitBackgroundSync.scheduleBackgroundSync()
+                        Task {
+                            await HealthKitBackgroundSync.drainIfConfigured()
+                        }
+                    }
+                }
         }
     }
 }
@@ -40,7 +49,9 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, @preconcur
     ) -> Bool {
         CrashReporting.configure()
         UNUserNotificationCenter.current().delegate = self
-        // HealthKit BG sync stack removed pending correctness-first rewrite.
+        // Nonisolated BG registration — never own handlers on a @MainActor coordinator.
+        HealthKitBackgroundSync.registerBackgroundTask()
+        HealthKitBackgroundSync.scheduleBackgroundSync()
         return true
     }
 

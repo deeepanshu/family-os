@@ -72,7 +72,9 @@ struct HealthKitSyncView: View {
                 viewModel.selfProfile == nil
                     || viewModel.healthKit.isSyncing
                     || !viewModel.healthKit.consentGranted
-                    || !viewModel.healthKit.enabledMetrics.contains(.vitals)
+                    || viewModel.healthKit.enabledMetrics
+                        .intersection(HealthKitSyncStateViewModel.implementedSyncMetrics)
+                        .isEmpty
             )
         }
     }

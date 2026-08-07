@@ -47,7 +47,7 @@ extension HealthBootstrapViewModel {
         await request(showsFeedback: showsFeedback) {
             let installationId = try HealthKitInstallationId.current(using: keychain)
             let consentVersion = healthKit.consentGranted ? HealthKitConsent.version : nil
-            // Only persist groups the app can actually sync (milestone 1: vitals/BP).
+            // Only persist groups the app can surface in settings (syncable UI set).
             let enabled = healthKit.consentGranted
                 ? Array(
                     healthKit.enabledMetrics
@@ -91,10 +91,13 @@ extension HealthBootstrapViewModel {
                     )
                 }
                 healthKit.apply(status: status)
-                // Soft auth only for groups we actually sync (BP). Never block settings PUT.
+                // Soft auth only for groups we actually sync. Never block settings PUT.
                 if status.consentActive {
-                    let syncable = Set(status.enabledMetrics).intersection(HealthKitSyncStateViewModel.syncableMetrics)
-                    await healthKitClient.requestAuthorizationSoft(for: syncable.isEmpty ? [.vitals] : syncable)
+                    let implemented = Set(status.enabledMetrics)
+                        .intersection(HealthKitSyncStateViewModel.implementedSyncMetrics)
+                    if !implemented.isEmpty {
+                        await healthKitClient.requestAuthorizationSoft(for: implemented)
+                    }
                 }
                 CrashReporting.healthKit(
                     .settingsSaved,
@@ -128,9 +131,7 @@ extension HealthBootstrapViewModel {
             CrashReporting.healthKitNonFatal(
                 .missingSelfProfile,
                 stage: .syncFailed,
-                message: "sync_blocked_missing_self_profile",
-                group: "vitals",
-                metric: "blood_pressure"
+                message: "sync_blocked_missing_self_profile"
             )
             reportActionFailure(statusMessage)
             return
@@ -141,8 +142,7 @@ extension HealthBootstrapViewModel {
             CrashReporting.healthKitNonFatal(
                 .wrongProfileTarget,
                 stage: .syncFailed,
-                message: "sync_blocked_wrong_profile",
-                group: "vitals"
+                message: "sync_blocked_wrong_profile"
             )
             reportActionFailure(statusMessage)
             return
@@ -153,21 +153,22 @@ extension HealthBootstrapViewModel {
             CrashReporting.healthKitNonFatal(
                 .healthKitUnavailable,
                 stage: .syncFailed,
-                message: "sync_blocked_healthkit_unavailable",
-                group: "vitals"
+                message: "sync_blocked_healthkit_unavailable"
             )
             reportActionFailure(statusMessage)
             return
         }
-        guard healthKit.consentGranted, healthKit.enabledMetrics.contains(.vitals) else {
+
+        let groupsToSync = HealthKitSyncCoordinator.orderedGroups(
+            from: healthKit.enabledMetrics.intersection(HealthKitSyncStateViewModel.implementedSyncMetrics)
+        )
+        guard healthKit.consentGranted, !groupsToSync.isEmpty else {
             isError = true
-            statusMessage = "Enable vitals consent before blood pressure sync."
+            statusMessage = "Enable HealthKit consent and at least one supported metric before syncing."
             CrashReporting.healthKitNonFatal(
                 .consentMissing,
                 stage: .syncFailed,
-                message: "sync_blocked_vitals_consent",
-                group: "vitals",
-                metric: "blood_pressure"
+                message: "sync_blocked_no_implemented_metrics"
             )
             reportActionFailure(statusMessage)
             return
@@ -175,9 +176,11 @@ extension HealthBootstrapViewModel {
 
         healthKit.isSyncing = true
         defer { healthKit.isSyncing = false }
-        CrashReporting.healthKit(.syncStarted, group: "vitals", metric: "blood_pressure")
+        CrashReporting.healthKit(
+            .syncStarted,
+            extra: ["groups": groupsToSync.map(\.rawValue).joined(separator: ",")]
+        )
 
-        // Always surface success/failure so "ready with 0 samples" is not silent.
         await request(showsFeedback: true) {
             do {
                 let installationId = try HealthKitInstallationId.current(using: keychain)
@@ -191,7 +194,6 @@ extension HealthBootstrapViewModel {
                 if let active = status.activeInstallationId, active != installationId {
                     CrashReporting.healthKit(
                         .settingsLoaded,
-                        group: "vitals",
                         extra: ["install_replace": "1"]
                     )
                     let enabled = status.enabledGroups.isEmpty
@@ -211,7 +213,6 @@ extension HealthBootstrapViewModel {
                 healthKit.apply(status: status)
                 CrashReporting.healthKit(
                     .settingsLoaded,
-                    group: "vitals",
                     extra: ["tz_version": String(status.healthTimezoneVersion)]
                 )
 
@@ -223,7 +224,6 @@ extension HealthBootstrapViewModel {
                         .storeOpenFailed,
                         stage: .storeOpenFailed,
                         message: "sqlite_store_open_failed",
-                        group: "vitals",
                         underlying: error
                     )
                     throw error
@@ -237,135 +237,52 @@ extension HealthBootstrapViewModel {
                     enabledGroups: status.enabledGroups.map(\.rawValue)
                 )
 
-                // Milestone 1: blood pressure only (vitals group).
-                _ = try await client.startHealthKitImport(
-                    baseURL: connection.baseURL,
-                    accessToken: auth.accessToken,
-                    group: "vitals",
-                    installationId: installationId,
-                    personId: personId,
-                    timezoneVersion: status.healthTimezoneVersion
-                )
-                try syncStore.setGroupStatus("vitals", status: "syncing")
-                CrashReporting.healthKit(.importStarted, group: "vitals", metric: "blood_pressure")
+                let baseURL = connection.baseURL
+                let accessToken = auth.accessToken
+                let apiClient = client
+                let hkClient = healthKitClient
+                let healthTimezone = status.healthTimezone
+                let timezoneVersion = status.healthTimezoneVersion
 
-                // Hard auth on sync: must succeed before we mark the group ready.
-                // (Settings save still uses soft auth so a PUT is never rolled back by HK.)
-                do {
-                    try await healthKitClient.ensureReadAuthorization(for: [.vitals])
-                    CrashReporting.healthKit(.authRequested, group: "vitals", metric: "blood_pressure")
-                } catch {
-                    CrashReporting.healthKitNonFatal(
-                        .fetchFailed,
-                        stage: .authRequested,
-                        message: "healthkit_auth_sync_failed",
-                        group: "vitals",
-                        metric: "blood_pressure",
-                        underlying: error
-                    )
-                    throw Self.healthKitAuthError(from: error)
-                }
-
-                let samples: [HealthKitBloodPressureSync.BPSample]
-                do {
-                    samples = try await HealthKitBloodPressureSync.fetchBloodPressure()
-                } catch {
-                    CrashReporting.healthKitNonFatal(
-                        .fetchFailed,
-                        stage: .samplesFetched,
-                        message: "bp_fetch_failed",
-                        group: "vitals",
-                        metric: "blood_pressure",
-                        underlying: error
-                    )
-                    // Map HK "not determined" / denied into HealthAPIError so Crashlytics
-                    // does not log a generic bootstrap_request nonfatal.
-                    throw Self.healthKitAuthError(from: error)
-                }
-                CrashReporting.healthKit(
-                    .samplesFetched,
-                    group: "vitals",
-                    metric: "blood_pressure",
-                    count: samples.count
-                )
-                // Do not mark the group ready with zero uploads — that looked like success while
-                // BP never left the phone (denied read / no correlations / empty Health data).
-                guard !samples.isEmpty else {
-                    CrashReporting.healthKitNonFatal(
-                        .fetchFailed,
-                        stage: .samplesFetched,
-                        message: "bp_samples_empty",
-                        group: "vitals",
-                        metric: "blood_pressure"
-                    )
-                    throw HealthAPIError.badStatus(
-                        404,
-                        "No blood pressure readings found in Apple Health for the last 90 days. If you have readings, open Settings → Health → Data Access → this app and turn on Blood Pressure Systolic and Diastolic, then Sync again.",
-                        code: "bp_samples_empty"
-                    )
-                }
-                try HealthKitBloodPressureSync.enqueueSamples(samples, into: syncStore)
-                CrashReporting.healthKit(
-                    .samplesEnqueued,
-                    group: "vitals",
-                    metric: "blood_pressure",
-                    count: samples.count
+                let deps = HealthKitSyncCoordinator.Dependencies(
+                    startImport: { group in
+                        _ = try await apiClient.startHealthKitImport(
+                            baseURL: baseURL,
+                            accessToken: accessToken,
+                            group: group,
+                            installationId: installationId,
+                            personId: personId,
+                            timezoneVersion: timezoneVersion
+                        )
+                    },
+                    markReady: { group in
+                        _ = try await apiClient.markHealthKitGroupReady(
+                            baseURL: baseURL,
+                            accessToken: accessToken,
+                            group: group,
+                            installationId: installationId,
+                            personId: personId,
+                            timezoneVersion: timezoneVersion
+                        )
+                    },
+                    postBatch: { batch in
+                        try await apiClient.postHealthKitOpsBatch(
+                            baseURL: baseURL,
+                            accessToken: accessToken,
+                            body: batch
+                        )
+                    },
+                    ensureAuth: { metrics in
+                        try await hkClient.ensureReadAuthorization(for: metrics)
+                    },
+                    healthTimezone: healthTimezone
                 )
 
-                let worker = HealthKitSyncWorker(store: syncStore) { batch in
-                    try await self.client.postHealthKitOpsBatch(
-                        baseURL: self.connection.baseURL,
-                        accessToken: self.auth.accessToken,
-                        body: batch
-                    )
-                }
-                CrashReporting.healthKit(.drainStarted, group: "vitals", count: try syncStore.pendingCount())
-                let applied: Int
-                do {
-                    applied = try await worker.drain()
-                } catch {
-                    CrashReporting.healthKitNonFatal(
-                        .batchFailed,
-                        stage: .drainFinished,
-                        message: "ops_batch_drain_failed",
-                        group: "vitals",
-                        metric: "blood_pressure",
-                        underlying: error
-                    )
-                    throw error
-                }
-                let remaining = try syncStore.pendingCount(group: "vitals")
-                CrashReporting.healthKit(
-                    .drainFinished,
-                    group: "vitals",
-                    count: applied,
-                    extra: ["pending_remaining": String(remaining)]
+                let outcome = try await HealthKitSyncCoordinator.run(
+                    groups: groupsToSync,
+                    syncStore: syncStore,
+                    deps: deps
                 )
-                guard remaining == 0 else {
-                    CrashReporting.healthKitNonFatal(
-                        .queueIncomplete,
-                        stage: .drainFinished,
-                        message: "pending_ops_remain_after_drain",
-                        group: "vitals",
-                        metric: "blood_pressure"
-                    )
-                    throw HealthAPIError.badStatus(
-                        409,
-                        "Blood pressure queue still has \(remaining) pending ops after drain.",
-                        code: "sync_incomplete"
-                    )
-                }
-
-                _ = try await client.markHealthKitGroupReady(
-                    baseURL: connection.baseURL,
-                    accessToken: auth.accessToken,
-                    group: "vitals",
-                    installationId: installationId,
-                    personId: personId,
-                    timezoneVersion: status.healthTimezoneVersion
-                )
-                try syncStore.setGroupStatus("vitals", status: "ready")
-                CrashReporting.healthKit(.groupReady, group: "vitals", metric: "blood_pressure")
 
                 let refreshed = try await client.healthKitSettings(
                     baseURL: connection.baseURL,
@@ -373,21 +290,38 @@ extension HealthBootstrapViewModel {
                     personId: personId
                 )
                 healthKit.apply(status: refreshed)
+
+                // Register BG for groups that actually succeeded this run.
+                let bgMetrics = Set(outcome.succeededGroups)
+                if !bgMetrics.isEmpty {
+                    await HealthKitBackgroundSync.enableDeliveryAndObservers(for: bgMetrics)
+                    HealthKitBackgroundSync.scheduleBackgroundSync()
+                }
+
                 CrashReporting.healthKit(
                     .syncCompleted,
-                    group: "vitals",
-                    metric: "blood_pressure",
-                    count: samples.count,
-                    extra: ["applied": String(applied)]
+                    count: outcome.totalSamples,
+                    extra: [
+                        "applied": String(outcome.totalApplied),
+                        "failures": String(outcome.failures.count)
+                    ]
                 )
-                return "Synced \(samples.count) blood pressure reading(s); uploaded \(applied) op(s)."
+
+                let successParts = outcome.groups.map { summary in
+                    "\(summary.group.displayName): \(summary.sampleCount) sample(s), \(summary.applied) op(s)"
+                }
+                if outcome.failures.isEmpty {
+                    return "Synced \(successParts.joined(separator: "; "))."
+                }
+                let failParts = outcome.failures.map { failure in
+                    "\(failure.group.displayName) failed"
+                }
+                return "Synced \(successParts.joined(separator: "; ")). \(failParts.joined(separator: "; "))."
             } catch {
                 CrashReporting.healthKitNonFatal(
                     .syncFailed,
                     stage: .syncFailed,
                     message: "sync_healthkit_now_failed",
-                    group: "vitals",
-                    metric: "blood_pressure",
                     underlying: error
                 )
                 throw error
@@ -404,37 +338,5 @@ extension HealthBootstrapViewModel {
         }
         await saveHealthKitSettings(showsFeedback: true)
         healthKit.confirmTimezoneChange = false
-    }
-
-    /// Maps HealthKit auth/query failures to user-facing API errors (avoids generic bootstrap_request).
-    private static func healthKitAuthError(from error: Error) -> HealthAPIError {
-        if let api = error as? HealthAPIError {
-            return api
-        }
-        let ns = error as NSError
-        let isHealthKit = ns.domain == HKError.errorDomain || ns.domain == "com.apple.healthkit"
-        let notDetermined =
-            isHealthKit && ns.code == HKError.Code.errorAuthorizationNotDetermined.rawValue
-        let denied = isHealthKit && ns.code == HKError.Code.errorAuthorizationDenied.rawValue
-
-        if notDetermined {
-            return .badStatus(
-                403,
-                "Health permission is not set yet. When the Health sheet appears, turn ON Blood Pressure Systolic and Diastolic for Kinstead. If no sheet appears: Settings → Health → Data Access & Devices → Kinstead → enable those types, then Sync again.",
-                code: "healthkit_auth_not_determined"
-            )
-        }
-        if denied {
-            return .badStatus(
-                403,
-                "Health access was denied. Open Settings → Health → Data Access & Devices → Kinstead and enable Blood Pressure Systolic and Diastolic, then Sync again.",
-                code: "healthkit_auth_denied"
-            )
-        }
-        return .badStatus(
-            403,
-            "Health access for blood pressure failed: \(ns.localizedDescription). Open Settings → Health → Data Access & Devices → Kinstead and enable Blood Pressure, then Sync again.",
-            code: "healthkit_auth_failed"
-        )
     }
 }

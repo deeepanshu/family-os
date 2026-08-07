@@ -21,11 +21,23 @@ struct HealthKitSyncOpWire: Codable, Sendable {
 enum HealthKitOpPayloadWire: Codable, Sendable {
     case bloodPressure(sourceObjectKey: String, measuredAtUtc: String, systolic: Int, diastolic: Int, pulse: Int?)
     case stepsHour(hourStartUtc: String, count: Int)
+    case sleepDay(
+        sleepDay: String,
+        totalMinutes: Int,
+        coreMinutes: Int,
+        deepMinutes: Int,
+        remMinutes: Int,
+        unspecifiedAsleepMinutes: Int,
+        awakeMinutes: Int,
+        inBedMinutes: Int
+    )
     case unknown
 
     private enum CodingKeys: String, CodingKey {
         case kind, sourceObjectKey, measuredAtUtc, systolic, diastolic, pulse
         case hourStartUtc, count
+        case sleepDay, totalMinutes, coreMinutes, deepMinutes, remMinutes
+        case unspecifiedAsleepMinutes, awakeMinutes, inBedMinutes
     }
 
     init(from decoder: Decoder) throws {
@@ -44,6 +56,17 @@ enum HealthKitOpPayloadWire: Codable, Sendable {
             self = .stepsHour(
                 hourStartUtc: try container.decode(String.self, forKey: .hourStartUtc),
                 count: try container.decode(Int.self, forKey: .count)
+            )
+        case "sleep_day":
+            self = .sleepDay(
+                sleepDay: try container.decode(String.self, forKey: .sleepDay),
+                totalMinutes: try container.decode(Int.self, forKey: .totalMinutes),
+                coreMinutes: try container.decode(Int.self, forKey: .coreMinutes),
+                deepMinutes: try container.decode(Int.self, forKey: .deepMinutes),
+                remMinutes: try container.decode(Int.self, forKey: .remMinutes),
+                unspecifiedAsleepMinutes: try container.decode(Int.self, forKey: .unspecifiedAsleepMinutes),
+                awakeMinutes: try container.decode(Int.self, forKey: .awakeMinutes),
+                inBedMinutes: try container.decode(Int.self, forKey: .inBedMinutes)
             )
         default:
             self = .unknown
@@ -64,6 +87,19 @@ enum HealthKitOpPayloadWire: Codable, Sendable {
             try container.encode("steps_hour", forKey: .kind)
             try container.encode(hourStartUtc, forKey: .hourStartUtc)
             try container.encode(count, forKey: .count)
+        case let .sleepDay(
+            sleepDay, totalMinutes, coreMinutes, deepMinutes, remMinutes,
+            unspecifiedAsleepMinutes, awakeMinutes, inBedMinutes
+        ):
+            try container.encode("sleep_day", forKey: .kind)
+            try container.encode(sleepDay, forKey: .sleepDay)
+            try container.encode(totalMinutes, forKey: .totalMinutes)
+            try container.encode(coreMinutes, forKey: .coreMinutes)
+            try container.encode(deepMinutes, forKey: .deepMinutes)
+            try container.encode(remMinutes, forKey: .remMinutes)
+            try container.encode(unspecifiedAsleepMinutes, forKey: .unspecifiedAsleepMinutes)
+            try container.encode(awakeMinutes, forKey: .awakeMinutes)
+            try container.encode(inBedMinutes, forKey: .inBedMinutes)
         case .unknown:
             throw EncodingError.invalidValue(
                 self,

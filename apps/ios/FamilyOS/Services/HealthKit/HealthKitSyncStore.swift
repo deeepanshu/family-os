@@ -256,16 +256,21 @@ final class HealthKitSyncStore: @unchecked Sendable {
     func markRejected(opId: String, errorCode: String) throws {
         let now = Date().timeIntervalSince1970
         try dbQueue.write { db in
+            // Lookup group before delete so sleep/vitals rejections surface correctly.
+            let groupKey = try String.fetchOne(
+                db,
+                sql: "SELECT group_key FROM pending_ops WHERE op_id = ?",
+                arguments: [opId]
+            ) ?? "vitals"
             try db.execute(sql: "DELETE FROM pending_ops WHERE op_id = ?", arguments: [opId])
-            // Surface on group; keep simple for BP milestone.
             try db.execute(
                 sql: """
                     INSERT INTO group_state (group_key, status, last_error_code)
-                    VALUES ('vitals', 'error', ?)
+                    VALUES (?, 'error', ?)
                     ON CONFLICT(group_key) DO UPDATE SET
                       status = 'error', last_error_code = excluded.last_error_code
                     """,
-                arguments: [errorCode]
+                arguments: [groupKey, errorCode]
             )
             _ = now
         }

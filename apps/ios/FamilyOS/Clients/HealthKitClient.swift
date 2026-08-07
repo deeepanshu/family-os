@@ -27,9 +27,9 @@ struct HealthKitClient {
         }
     }
 
-    /// Two sequential Health permission overlays for vitals:
-    /// 1) Blood pressure (systolic + diastolic) — required for sync
-    /// 2) Heart rate (pulse on BP readings) — best-effort; deny does not block BP
+    /// Sequential Health permission overlays per enabled group:
+    /// - vitals: BP (required) then pulse (best-effort)
+    /// - sleep: sleepAnalysis
     ///
     /// Never request `HKCorrelationType.bloodPressure` for auth (HealthKit rejects it).
     /// Request quantity types only; correlations remain queryable after grant.
@@ -42,36 +42,47 @@ struct HealthKitClient {
         }
         #endif
 
-        guard metrics.contains(.vitals) else {
-            CrashReporting.log("healthkit_auth_skipped_empty_types")
+        guard !metrics.isEmpty else {
+            CrashReporting.log("healthkit_auth_skipped_empty_metrics")
             return
         }
 
-        let bpTypes = Self.bloodPressureReadTypes()
-        guard !bpTypes.isEmpty else {
-            CrashReporting.log("healthkit_auth_skipped_empty_types")
-            return
+        // Stable order: vitals overlays then sleep. Never early-return past later groups.
+        if metrics.contains(.vitals) {
+            let bpTypes = Self.bloodPressureReadTypes()
+            if bpTypes.isEmpty {
+                CrashReporting.log("healthkit_auth_skipped_empty_bp_types")
+            } else {
+                CrashReporting.log("healthkit_auth_requesting_bp \(Self.typeIds(bpTypes))")
+                try await performAuthorizationRequest(read: bpTypes)
+
+                // Overlay 2: Pulse (heart rate). Best-effort so a deny/skip cannot block BP.
+                let pulseTypes = Self.pulseReadTypes()
+                if !pulseTypes.isEmpty {
+                    CrashReporting.log("healthkit_auth_requesting_pulse \(Self.typeIds(pulseTypes))")
+                    do {
+                        try await performAuthorizationRequest(read: pulseTypes)
+                    } catch {
+                        CrashReporting.healthKitNonFatal(
+                            .fetchFailed,
+                            stage: .authRequested,
+                            message: "healthkit_auth_pulse_soft_failed",
+                            group: "vitals",
+                            metric: "heart_rate",
+                            underlying: error
+                        )
+                    }
+                }
+            }
         }
 
-        // Overlay 1: Blood Pressure only.
-        CrashReporting.log("healthkit_auth_requesting_bp \(Self.typeIds(bpTypes))")
-        try await performAuthorizationRequest(read: bpTypes)
-
-        // Overlay 2: Pulse (heart rate). Best-effort so a deny/skip cannot block BP.
-        let pulseTypes = Self.pulseReadTypes()
-        if !pulseTypes.isEmpty {
-            CrashReporting.log("healthkit_auth_requesting_pulse \(Self.typeIds(pulseTypes))")
-            do {
-                try await performAuthorizationRequest(read: pulseTypes)
-            } catch {
-                CrashReporting.healthKitNonFatal(
-                    .fetchFailed,
-                    stage: .authRequested,
-                    message: "healthkit_auth_pulse_soft_failed",
-                    group: "vitals",
-                    metric: "heart_rate",
-                    underlying: error
-                )
+        if metrics.contains(.sleep) {
+            let sleepTypes = Self.sleepReadTypes()
+            if sleepTypes.isEmpty {
+                CrashReporting.log("healthkit_auth_skipped_empty_sleep_types")
+            } else {
+                CrashReporting.log("healthkit_auth_requesting_sleep \(Self.typeIds(sleepTypes))")
+                try await performAuthorizationRequest(read: sleepTypes)
             }
         }
     }
@@ -82,8 +93,15 @@ struct HealthKitClient {
 
     /// Combined set for tests / diagnostics.
     static func readTypes(for metrics: Set<HealthKitSyncMetric>) -> Set<HKObjectType> {
-        guard metrics.contains(.vitals) else { return [] }
-        return bloodPressureReadTypes().union(pulseReadTypes())
+        var types = Set<HKObjectType>()
+        if metrics.contains(.vitals) {
+            types.formUnion(bloodPressureReadTypes())
+            types.formUnion(pulseReadTypes())
+        }
+        if metrics.contains(.sleep) {
+            types.formUnion(sleepReadTypes())
+        }
+        return types
     }
 
     static func bloodPressureReadTypes() -> Set<HKObjectType> {
@@ -101,6 +119,14 @@ struct HealthKitClient {
         var types = Set<HKObjectType>()
         if let heartRate = HKObjectType.quantityType(forIdentifier: .heartRate) {
             types.insert(heartRate)
+        }
+        return types
+    }
+
+    static func sleepReadTypes() -> Set<HKObjectType> {
+        var types = Set<HKObjectType>()
+        if let sleep = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) {
+            types.insert(sleep)
         }
         return types
     }
@@ -131,7 +157,7 @@ struct HealthKitClient {
                                         code: HKError.Code.errorAuthorizationNotDetermined.rawValue,
                                         userInfo: [
                                             NSLocalizedDescriptionKey:
-                                                "Health authorization was not completed. Enable Blood Pressure for Kinstead in Settings → Health → Data Access."
+                                                "Health authorization was not completed. Enable the requested types for Kinstead in Settings → Health → Data Access."
                                         ]
                                     )
                                 )
