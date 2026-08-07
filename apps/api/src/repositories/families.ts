@@ -454,12 +454,19 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   }
 
   async getProfile(actorUserId: string, profileId: string): Promise<HealthProfile> {
-    const current = this.requireActiveMember(actorUserId);
     const profile = this.profiles.get(profileId);
-    if (!profile || profile.familyId !== current.family.id || profile.status !== "active") {
+    if (!profile || profile.status !== "active") {
       throw new HttpError(404, "profile_not_found", "Health profile was not found.");
     }
-    return profile;
+    // Solo-first: owner of Self may read their profile without a household.
+    if (profile.linkedUserId === actorUserId) {
+      return profile;
+    }
+    const current = this.getCurrentFamilySync(actorUserId);
+    if (current && profile.familyId === current.family.id) {
+      return profile;
+    }
+    throw new HttpError(403, "profile_forbidden", "You do not have access to this health profile.");
   }
 
   async createProfile(input: CreateProfileInput): Promise<HealthProfile> {

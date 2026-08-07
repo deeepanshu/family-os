@@ -1,4 +1,9 @@
-import { HEALTHKIT_METRIC_KEYS, type HealthKitConsentGroup, type HealthKitMetricKey } from "./healthkitRegistry";
+import {
+  HEALTHKIT_METRIC_KEYS,
+  isHealthKitMetricKey,
+  type HealthKitConsentGroup,
+  type HealthKitMetricKey
+} from "./healthkitRegistry";
 
 /** Canonical public prefix for the Family OS health API. */
 export const HEALTH_API_PREFIX = "/health/api/v1" as const;
@@ -336,8 +341,19 @@ export type AuditLog = {
   createdAt: string;
 };
 
-/** MCP accepts every metric explicitly present in the shared HealthKit registry. */
-export type McpHealthMetric = HealthKitMetricKey;
+/**
+ * Sleep-day attribute fields stored on the sleep row. They are returned inside
+ * the `sleep` MCP result and are not independent get_health_data metrics.
+ */
+export const MCP_SLEEP_ATTRIBUTE_METRICS = [
+  "sleeping_wrist_temperature",
+  "sleep_breathing_disturbance_events"
+] as const satisfies readonly HealthKitMetricKey[];
+
+export type McpSleepAttributeMetric = (typeof MCP_SLEEP_ATTRIBUTE_METRICS)[number];
+
+/** Metrics accepted by MCP get_health_data (registry keys minus sleep attributes). */
+export type McpHealthMetric = Exclude<HealthKitMetricKey, McpSleepAttributeMetric>;
 
 export type McpHealthViewType =
   | "hourly_series"
@@ -533,4 +549,13 @@ export type McpGetHealthDataResult =
 export const MCP_HEALTH_DISCLAIMER =
   "Informational only. Not medical advice. Coverage and freshness metadata describe the stored Family OS data and may be incomplete or delayed." as const;
 
-export const MCP_HEALTH_METRICS: readonly McpHealthMetric[] = HEALTHKIT_METRIC_KEYS;
+const MCP_SLEEP_ATTRIBUTE_METRIC_SET = new Set<string>(MCP_SLEEP_ATTRIBUTE_METRICS);
+
+export function isMcpHealthMetric(value: string): value is McpHealthMetric {
+  return isHealthKitMetricKey(value) && !MCP_SLEEP_ATTRIBUTE_METRIC_SET.has(value);
+}
+
+/** Queryable MCP metrics: full HealthKit registry except sleep-day attribute keys. */
+export const MCP_HEALTH_METRICS: readonly McpHealthMetric[] = Object.freeze(
+  HEALTHKIT_METRIC_KEYS.filter(isMcpHealthMetric)
+);

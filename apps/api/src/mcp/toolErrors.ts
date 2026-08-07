@@ -8,15 +8,15 @@ export function toSafeToolErrorMessage(error: unknown): string {
       case "mcp_capability_denied":
         return "This connection is not allowed to read health data.";
       case "profile_not_found":
+      case "profile_forbidden":
         return "The requested profile was not found or is not authorized for this user.";
-      case "active_member_required":
-        return "Active family membership is required.";
       case "unsupported_metric":
       case "invalid_range_days":
       case "range_days_exceeded":
       case "granularity_not_supported":
       case "invalid_granularity":
       case "invalid_timezone":
+      case "group_disabled":
         return error.message;
       case "rate_limited":
         return "Too many MCP requests. Try again later.";

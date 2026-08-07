@@ -251,7 +251,8 @@ describe("health profiles", () => {
       }
     });
 
-    expect(response.status).toBe(404);
+    // Profile exists in another household; access denied (same as Postgres requirePersonAccess).
+    expect(response.status).toBe(403);
   });
 
   it("validates profile input", async () => {

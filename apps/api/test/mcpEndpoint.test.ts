@@ -70,7 +70,7 @@ async function seedWithSteps(repo: InMemoryFamilyRepository, subject: string) {
   ).json();
   const profileId = profile.data.id as string;
 
-  // MCP connection currently requires a household membership.
+  // Household optional for MCP; seed keeps one for profile access consistency with older tests.
   await api.request(`${HEALTH_API_PREFIX}/families`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },

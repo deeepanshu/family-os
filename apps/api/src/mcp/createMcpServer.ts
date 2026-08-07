@@ -1,17 +1,20 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { HEALTHKIT_METRIC_KEYS } from "@family-os/shared";
+import { MCP_HEALTH_METRICS, type McpHealthMetric } from "@family-os/shared";
 import { z } from "zod";
 import type { AppConfig } from "../config";
 import type { McpCallerContext, HealthMcpReadService } from "./HealthMcpReadService";
 import { encodeCappedJson, withTimeout } from "./responseCap";
 import { toSafeToolErrorMessage } from "./toolErrors";
 
-const healthMetricSchema = z.enum(HEALTHKIT_METRIC_KEYS);
+// MCP_HEALTH_METRICS is a non-empty allowlist (registry minus sleep attributes).
+const healthMetricSchema = z.enum(MCP_HEALTH_METRICS as [McpHealthMetric, ...McpHealthMetric[]]);
 const granularitySchema = z.enum(["hourly", "daily"]);
 
 const getHealthDataInput = {
   personId: z.string().uuid().describe("Untrusted profile ID from list_authorized_profiles"),
-  healthMetric: healthMetricSchema.describe("Allowlisted Family OS HealthKit metric"),
+  healthMetric: healthMetricSchema.describe(
+    "Allowlisted Family OS HealthKit metric. Use sleep for night summaries (includes stages, optional wrist temperature and breathing disturbances)."
+  ),
   rangeDays: z.number().int().min(1).max(90).describe("Number of local days to include, inclusive of today"),
   granularity: granularitySchema
     .optional()
@@ -60,7 +63,7 @@ export function createFamilyOsMcpServer(options: {
     {
       title: "Get health data",
       description:
-        "Returns bounded, metric-specific health data for one authorized profile. Steps support hourly or daily series; daily metrics include aggregate statistics; sleep includes stages; blood pressure, glucose, and workouts return bounded tables. Always includes coverage and freshness. Informational only, not medical advice, diagnosis, or treatment guidance.",
+        "Returns bounded, metric-specific health data for one authorized profile. Steps support hourly or daily series; daily metrics include aggregate statistics; sleep returns a per-night summary (stages plus optional wrist temperature and breathing disturbance fields); blood pressure, glucose, and workouts return bounded tables. Always includes coverage and freshness. Informational only, not medical advice, diagnosis, or treatment guidance.",
       inputSchema: getHealthDataInput
     },
     async (args) => {
