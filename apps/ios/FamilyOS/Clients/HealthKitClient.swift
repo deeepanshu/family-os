@@ -28,6 +28,8 @@ struct HealthKitClient {
     }
 
     /// Requests read access for types we actually sync (narrow v1: BP under vitals).
+    ///
+    /// Prefer `ensureReadAuthorization` on the sync path so we only prompt when needed.
     func requestAuthorization(for metrics: Set<HealthKitSyncMetric>) async throws {
         guard isAvailable else { return }
         #if DEBUG
@@ -43,6 +45,51 @@ struct HealthKitClient {
             return
         }
 
+        try await performAuthorizationRequest(read: types)
+    }
+
+    /// Ensures HealthKit read access for milestone metrics. Prompts when status is
+    /// `.shouldRequest` / `.unknown`. Does not prove the user enabled every toggle
+    /// (Apple hides denied-vs-granted for reads); callers must still handle empty queries.
+    func ensureReadAuthorization(for metrics: Set<HealthKitSyncMetric>) async throws {
+        guard isAvailable else { return }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-FamilyOSLocalSmoke") {
+            CrashReporting.log("healthkit_auth_skipped_for_local_smoke")
+            return
+        }
+        #endif
+
+        let types = readTypes(for: metrics)
+        guard !types.isEmpty else {
+            CrashReporting.log("healthkit_auth_skipped_empty_types")
+            return
+        }
+
+        let requestStatus = try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<HKAuthorizationRequestStatus, Error>) in
+            store.getRequestStatusForAuthorization(toShare: Set<HKSampleType>(), read: types) { status, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: status)
+                }
+            }
+        }
+
+        switch requestStatus {
+        case .unnecessary:
+            CrashReporting.log("healthkit_auth_status=unnecessary")
+            return
+        case .shouldRequest, .unknown:
+            CrashReporting.log("healthkit_auth_status=\(String(describing: requestStatus)) prompting")
+            try await performAuthorizationRequest(read: types)
+        @unknown default:
+            try await performAuthorizationRequest(read: types)
+        }
+    }
+
+    private func performAuthorizationRequest(read types: Set<HKObjectType>) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             DispatchQueue.main.async {
                 var resumed = false
@@ -54,9 +101,23 @@ struct HealthKitClient {
 
                 let exception = HealthKitAuthExceptionCatcher.performAndReturnException {
                     // Empty share set — we never write to HealthKit.
-                    self.store.requestAuthorization(toShare: Set<HKSampleType>(), read: types) { _, error in
+                    self.store.requestAuthorization(toShare: Set<HKSampleType>(), read: types) { success, error in
                         if let error {
                             resumeOnce(.failure(error))
+                        } else if !success {
+                            // Rare: no NSError but system did not complete authorization.
+                            resumeOnce(
+                                .failure(
+                                    NSError(
+                                        domain: HKError.errorDomain,
+                                        code: HKError.Code.errorAuthorizationNotDetermined.rawValue,
+                                        userInfo: [
+                                            NSLocalizedDescriptionKey:
+                                                "Health authorization was not completed. Enable Blood Pressure for Kinstead in Settings → Health → Data Access."
+                                        ]
+                                    )
+                                )
+                            )
                         } else {
                             resumeOnce(.success(()))
                         }

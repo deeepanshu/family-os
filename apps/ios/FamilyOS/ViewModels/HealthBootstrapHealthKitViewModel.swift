@@ -1,4 +1,5 @@
 import Foundation
+import HealthKit
 
 extension HealthBootstrapViewModel {
     func loadHealthKitStatus() async {
@@ -219,7 +220,7 @@ extension HealthBootstrapViewModel {
                 // Hard auth on sync: must succeed before we mark the group ready.
                 // (Settings save still uses soft auth so a PUT is never rolled back by HK.)
                 do {
-                    try await healthKitClient.requestAuthorization(for: [.vitals])
+                    try await healthKitClient.ensureReadAuthorization(for: [.vitals])
                     CrashReporting.healthKit(.authRequested, group: "vitals", metric: "blood_pressure")
                 } catch {
                     CrashReporting.healthKitNonFatal(
@@ -230,11 +231,7 @@ extension HealthBootstrapViewModel {
                         metric: "blood_pressure",
                         underlying: error
                     )
-                    throw HealthAPIError.badStatus(
-                        403,
-                        "Health access for blood pressure was not granted. Open Settings → Health → Data Access and enable Blood Pressure for this app, then try Sync again.",
-                        code: "healthkit_auth_failed"
-                    )
+                    throw Self.healthKitAuthError(from: error)
                 }
 
                 let samples: [HealthKitBloodPressureSync.BPSample]
@@ -249,7 +246,9 @@ extension HealthBootstrapViewModel {
                         metric: "blood_pressure",
                         underlying: error
                     )
-                    throw error
+                    // Map HK "not determined" / denied into HealthAPIError so Crashlytics
+                    // does not log a generic bootstrap_request nonfatal.
+                    throw Self.healthKitAuthError(from: error)
                 }
                 CrashReporting.healthKit(
                     .samplesFetched,
@@ -373,5 +372,37 @@ extension HealthBootstrapViewModel {
         }
         await saveHealthKitSettings(showsFeedback: true)
         healthKit.confirmTimezoneChange = false
+    }
+
+    /// Maps HealthKit auth/query failures to user-facing API errors (avoids generic bootstrap_request).
+    private static func healthKitAuthError(from error: Error) -> HealthAPIError {
+        if let api = error as? HealthAPIError {
+            return api
+        }
+        let ns = error as NSError
+        let isHealthKit = ns.domain == HKError.errorDomain || ns.domain == "com.apple.healthkit"
+        let notDetermined =
+            isHealthKit && ns.code == HKError.Code.errorAuthorizationNotDetermined.rawValue
+        let denied = isHealthKit && ns.code == HKError.Code.errorAuthorizationDenied.rawValue
+
+        if notDetermined {
+            return .badStatus(
+                403,
+                "Health permission is not set yet. When the Health sheet appears, turn ON Blood Pressure Systolic and Diastolic for Kinstead. If no sheet appears: Settings → Health → Data Access & Devices → Kinstead → enable those types, then Sync again.",
+                code: "healthkit_auth_not_determined"
+            )
+        }
+        if denied {
+            return .badStatus(
+                403,
+                "Health access was denied. Open Settings → Health → Data Access & Devices → Kinstead and enable Blood Pressure Systolic and Diastolic, then Sync again.",
+                code: "healthkit_auth_denied"
+            )
+        }
+        return .badStatus(
+            403,
+            "Health access for blood pressure failed: \(ns.localizedDescription). Open Settings → Health → Data Access & Devices → Kinstead and enable Blood Pressure, then Sync again.",
+            code: "healthkit_auth_failed"
+        )
     }
 }
