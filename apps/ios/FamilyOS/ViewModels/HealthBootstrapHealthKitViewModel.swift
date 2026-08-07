@@ -91,12 +91,17 @@ extension HealthBootstrapViewModel {
                     )
                 }
                 healthKit.apply(status: status)
-                // Soft auth only for groups we actually sync. Never block settings PUT.
+                // Soft auth must not block Save UI — Health permission sheets can hang forever
+                // (or wait on user), which left the button stuck on "Saving...".
+                // Fire-and-forget after settings are already persisted.
                 if status.consentActive {
                     let implemented = Set(status.enabledMetrics)
                         .intersection(HealthKitSyncStateViewModel.implementedSyncMetrics)
                     if !implemented.isEmpty {
-                        await healthKitClient.requestAuthorizationSoft(for: implemented)
+                        let client = healthKitClient
+                        Task {
+                            await client.requestAuthorizationSoft(for: implemented)
+                        }
                     }
                 }
                 CrashReporting.healthKit(
