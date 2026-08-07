@@ -6,10 +6,6 @@ struct HealthKitSyncView: View {
 
     var body: some View {
         Section("Health Data") {
-            Text("Only blood pressure is synced today. This toggle requests Health access for BP and is what Sync uploads.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
             Toggle(isOn: $viewModel.healthKit.consentGranted) {
                 Text("Upload HealthKit data")
             }
