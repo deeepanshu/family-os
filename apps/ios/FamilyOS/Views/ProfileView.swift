@@ -15,14 +15,13 @@ struct ProfileView: View {
                     }
                 }
 
-                Section("Account") {
-                    LabeledContent("Signed in", value: viewModel.signedInSummary)
+                HealthKitSyncView(viewModel: viewModel)
+
+                Section {
                     Button("Sign Out", role: .destructive) {
                         viewModel.signOut()
                     }
                 }
-
-                HealthKitSyncView(viewModel: viewModel)
             }
             .navigationTitle("HealthKit Sync")
             .task {
