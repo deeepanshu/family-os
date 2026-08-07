@@ -85,6 +85,16 @@ struct HealthKitClient {
                 try await performAuthorizationRequest(read: sleepTypes)
             }
         }
+
+        if metrics.contains(.workouts) {
+            let workoutTypes = Self.workoutReadTypes()
+            if workoutTypes.isEmpty {
+                CrashReporting.log("healthkit_auth_skipped_empty_workout_types")
+            } else {
+                CrashReporting.log("healthkit_auth_requesting_workouts \(Self.typeIds(workoutTypes))")
+                try await performAuthorizationRequest(read: workoutTypes)
+            }
+        }
     }
 
     func ensureReadAuthorization(for metrics: Set<HealthKitSyncMetric>) async throws {
@@ -100,6 +110,9 @@ struct HealthKitClient {
         }
         if metrics.contains(.sleep) {
             types.formUnion(sleepReadTypes())
+        }
+        if metrics.contains(.workouts) {
+            types.formUnion(workoutReadTypes())
         }
         return types
     }
@@ -121,6 +134,10 @@ struct HealthKitClient {
             types.insert(heartRate)
         }
         return types
+    }
+
+    static func workoutReadTypes() -> Set<HKObjectType> {
+        [HKObjectType.workoutType()]
     }
 
     static func sleepReadTypes() -> Set<HKObjectType> {

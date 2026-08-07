@@ -138,6 +138,18 @@ export class MemoryHealthKitEngine {
       distanceMeters?: number;
       averageHeartRateBpm?: number;
       maximumHeartRateBpm?: number;
+      minimumHeartRateBpm?: number;
+      sourceName?: string;
+      sourceBundleId?: string;
+      deviceName?: string;
+      deviceManufacturer?: string;
+      isIndoor?: boolean;
+      elevationAscendedMeters?: number;
+      averageMETs?: number;
+      swimmingStrokeCount?: number;
+      totalFlightsClimbed?: number;
+      events?: HealthWorkoutRecord["events"];
+      activities?: HealthWorkoutRecord["activities"];
     }
   >();
 
@@ -560,7 +572,19 @@ export class MemoryHealthKitEngine {
         activeEnergyKcal: r.activeEnergyKcal,
         distanceMeters: r.distanceMeters,
         averageHeartRateBpm: r.averageHeartRateBpm,
-        maximumHeartRateBpm: r.maximumHeartRateBpm
+        maximumHeartRateBpm: r.maximumHeartRateBpm,
+        minimumHeartRateBpm: r.minimumHeartRateBpm,
+        sourceName: r.sourceName,
+        sourceBundleId: r.sourceBundleId,
+        deviceName: r.deviceName,
+        deviceManufacturer: r.deviceManufacturer,
+        isIndoor: r.isIndoor,
+        elevationAscendedMeters: r.elevationAscendedMeters,
+        averageMETs: r.averageMETs,
+        swimmingStrokeCount: r.swimmingStrokeCount,
+        totalFlightsClimbed: r.totalFlightsClimbed,
+        events: r.events,
+        activities: r.activities
       }));
   }
 
@@ -678,7 +702,19 @@ export class MemoryHealthKitEngine {
           activeEnergyKcal: payload.activeEnergyKcal,
           distanceMeters: payload.distanceMeters,
           averageHeartRateBpm: payload.averageHeartRateBpm,
-          maximumHeartRateBpm: payload.maximumHeartRateBpm
+          maximumHeartRateBpm: payload.maximumHeartRateBpm,
+          minimumHeartRateBpm: payload.minimumHeartRateBpm,
+          sourceName: payload.sourceName,
+          sourceBundleId: payload.sourceBundleId,
+          deviceName: payload.deviceName,
+          deviceManufacturer: payload.deviceManufacturer,
+          isIndoor: payload.isIndoor,
+          elevationAscendedMeters: payload.elevationAscendedMeters,
+          averageMETs: payload.averageMETs,
+          swimmingStrokeCount: payload.swimmingStrokeCount,
+          totalFlightsClimbed: payload.totalFlightsClimbed,
+          events: payload.events,
+          activities: payload.activities
         });
         return;
       }

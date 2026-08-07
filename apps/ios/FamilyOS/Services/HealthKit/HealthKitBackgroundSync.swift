@@ -125,6 +125,9 @@ enum HealthKitBackgroundSync {
                 types.append(hr)
             }
         }
+        if metrics.contains(.workouts) {
+            types.append(HKObjectType.workoutType())
+        }
         return types
     }
 
@@ -247,7 +250,7 @@ enum HealthKitBackgroundSync {
             }
             let enabled = Set(enabledRaw.compactMap { HealthKitSyncMetric(rawValue: $0) })
             // Local set avoids touching MainActor ViewModel types from BG entry.
-            let implemented: Set<HealthKitSyncMetric> = [.vitals, .sleep]
+            let implemented: Set<HealthKitSyncMetric> = [.vitals, .sleep, .workouts]
             let groups = HealthKitSyncCoordinator.orderedGroups(
                 from: enabled.intersection(implemented)
             )

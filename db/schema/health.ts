@@ -335,6 +335,18 @@ export const healthWorkouts = pgTable(
     distanceMeters: numeric("distance_meters", { precision: 14, scale: 3 }),
     averageHeartRateBpm: numeric("average_heart_rate_bpm", { precision: 8, scale: 2 }),
     maximumHeartRateBpm: numeric("maximum_heart_rate_bpm", { precision: 8, scale: 2 }),
+    minimumHeartRateBpm: numeric("minimum_heart_rate_bpm", { precision: 8, scale: 2 }),
+    sourceName: text("source_name"),
+    sourceBundleId: text("source_bundle_id"),
+    deviceName: text("device_name"),
+    deviceManufacturer: text("device_manufacturer"),
+    isIndoor: boolean("is_indoor"),
+    elevationAscendedMeters: numeric("elevation_ascended_meters", { precision: 14, scale: 3 }),
+    averageMets: numeric("average_mets", { precision: 8, scale: 3 }),
+    swimmingStrokeCount: integer("swimming_stroke_count"),
+    totalFlightsClimbed: integer("total_flights_climbed"),
+    eventsJson: jsonb("events_json"),
+    activitiesJson: jsonb("activities_json"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
@@ -342,7 +354,15 @@ export const healthWorkouts = pgTable(
     uniqueIndex("health_workouts_person_source_sample_idx").on(table.personId, table.sourceSampleKey),
     index("health_workouts_family_person_started_idx").on(table.familyId, table.personId, table.startedAt),
     check("health_workouts_duration_check", sql`${table.durationSeconds} >= 0`),
-    check("health_workouts_time_order_check", sql`${table.endedAt} >= ${table.startedAt}`)
+    check("health_workouts_time_order_check", sql`${table.endedAt} >= ${table.startedAt}`),
+    check(
+      "health_workouts_swimming_stroke_check",
+      sql`${table.swimmingStrokeCount} is null or ${table.swimmingStrokeCount} >= 0`
+    ),
+    check(
+      "health_workouts_flights_check",
+      sql`${table.totalFlightsClimbed} is null or ${table.totalFlightsClimbed} >= 0`
+    )
   ]
 );
 

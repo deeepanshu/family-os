@@ -19,6 +19,19 @@ struct HealthKitSyncOpWire: Codable, Sendable {
 }
 
 enum HealthKitOpPayloadWire: Codable, Sendable {
+    struct WorkoutEvent: Codable, Sendable {
+        let type: String
+        let dateUtc: String
+        let endDateUtc: String?
+    }
+
+    struct WorkoutActivity: Codable, Sendable {
+        let workoutType: String
+        let startedAtUtc: String
+        let endedAtUtc: String
+        let durationSeconds: Int
+    }
+
     case bloodPressure(sourceObjectKey: String, measuredAtUtc: String, systolic: Int, diastolic: Int, pulse: Int?)
     case stepsHour(hourStartUtc: String, count: Int)
     case sleepDay(
@@ -31,6 +44,29 @@ enum HealthKitOpPayloadWire: Codable, Sendable {
         awakeMinutes: Int,
         inBedMinutes: Int
     )
+    case workout(
+        sourceSampleKey: String,
+        workoutType: String,
+        startedAtUtc: String,
+        endedAtUtc: String,
+        durationSeconds: Int,
+        activeEnergyKcal: Double?,
+        distanceMeters: Double?,
+        averageHeartRateBpm: Double?,
+        maximumHeartRateBpm: Double?,
+        minimumHeartRateBpm: Double?,
+        sourceName: String?,
+        sourceBundleId: String?,
+        deviceName: String?,
+        deviceManufacturer: String?,
+        isIndoor: Bool?,
+        elevationAscendedMeters: Double?,
+        averageMETs: Double?,
+        swimmingStrokeCount: Int?,
+        totalFlightsClimbed: Int?,
+        events: [WorkoutEvent]?,
+        activities: [WorkoutActivity]?
+    )
     case unknown
 
     private enum CodingKeys: String, CodingKey {
@@ -38,6 +74,11 @@ enum HealthKitOpPayloadWire: Codable, Sendable {
         case hourStartUtc, count
         case sleepDay, totalMinutes, coreMinutes, deepMinutes, remMinutes
         case unspecifiedAsleepMinutes, awakeMinutes, inBedMinutes
+        case sourceSampleKey, workoutType, startedAtUtc, endedAtUtc, durationSeconds
+        case activeEnergyKcal, distanceMeters, averageHeartRateBpm, maximumHeartRateBpm, minimumHeartRateBpm
+        case sourceName, sourceBundleId, deviceName, deviceManufacturer, isIndoor
+        case elevationAscendedMeters, averageMETs, swimmingStrokeCount, totalFlightsClimbed
+        case events, activities
     }
 
     init(from decoder: Decoder) throws {
@@ -67,6 +108,30 @@ enum HealthKitOpPayloadWire: Codable, Sendable {
                 unspecifiedAsleepMinutes: try container.decode(Int.self, forKey: .unspecifiedAsleepMinutes),
                 awakeMinutes: try container.decode(Int.self, forKey: .awakeMinutes),
                 inBedMinutes: try container.decode(Int.self, forKey: .inBedMinutes)
+            )
+        case "workout":
+            self = .workout(
+                sourceSampleKey: try container.decode(String.self, forKey: .sourceSampleKey),
+                workoutType: try container.decode(String.self, forKey: .workoutType),
+                startedAtUtc: try container.decode(String.self, forKey: .startedAtUtc),
+                endedAtUtc: try container.decode(String.self, forKey: .endedAtUtc),
+                durationSeconds: try container.decode(Int.self, forKey: .durationSeconds),
+                activeEnergyKcal: try container.decodeIfPresent(Double.self, forKey: .activeEnergyKcal),
+                distanceMeters: try container.decodeIfPresent(Double.self, forKey: .distanceMeters),
+                averageHeartRateBpm: try container.decodeIfPresent(Double.self, forKey: .averageHeartRateBpm),
+                maximumHeartRateBpm: try container.decodeIfPresent(Double.self, forKey: .maximumHeartRateBpm),
+                minimumHeartRateBpm: try container.decodeIfPresent(Double.self, forKey: .minimumHeartRateBpm),
+                sourceName: try container.decodeIfPresent(String.self, forKey: .sourceName),
+                sourceBundleId: try container.decodeIfPresent(String.self, forKey: .sourceBundleId),
+                deviceName: try container.decodeIfPresent(String.self, forKey: .deviceName),
+                deviceManufacturer: try container.decodeIfPresent(String.self, forKey: .deviceManufacturer),
+                isIndoor: try container.decodeIfPresent(Bool.self, forKey: .isIndoor),
+                elevationAscendedMeters: try container.decodeIfPresent(Double.self, forKey: .elevationAscendedMeters),
+                averageMETs: try container.decodeIfPresent(Double.self, forKey: .averageMETs),
+                swimmingStrokeCount: try container.decodeIfPresent(Int.self, forKey: .swimmingStrokeCount),
+                totalFlightsClimbed: try container.decodeIfPresent(Int.self, forKey: .totalFlightsClimbed),
+                events: try container.decodeIfPresent([WorkoutEvent].self, forKey: .events),
+                activities: try container.decodeIfPresent([WorkoutActivity].self, forKey: .activities)
             )
         default:
             self = .unknown
@@ -100,6 +165,35 @@ enum HealthKitOpPayloadWire: Codable, Sendable {
             try container.encode(unspecifiedAsleepMinutes, forKey: .unspecifiedAsleepMinutes)
             try container.encode(awakeMinutes, forKey: .awakeMinutes)
             try container.encode(inBedMinutes, forKey: .inBedMinutes)
+        case let .workout(
+            sourceSampleKey, workoutType, startedAtUtc, endedAtUtc, durationSeconds,
+            activeEnergyKcal, distanceMeters, averageHeartRateBpm, maximumHeartRateBpm, minimumHeartRateBpm,
+            sourceName, sourceBundleId, deviceName, deviceManufacturer, isIndoor,
+            elevationAscendedMeters, averageMETs, swimmingStrokeCount, totalFlightsClimbed,
+            events, activities
+        ):
+            try container.encode("workout", forKey: .kind)
+            try container.encode(sourceSampleKey, forKey: .sourceSampleKey)
+            try container.encode(workoutType, forKey: .workoutType)
+            try container.encode(startedAtUtc, forKey: .startedAtUtc)
+            try container.encode(endedAtUtc, forKey: .endedAtUtc)
+            try container.encode(durationSeconds, forKey: .durationSeconds)
+            try container.encodeIfPresent(activeEnergyKcal, forKey: .activeEnergyKcal)
+            try container.encodeIfPresent(distanceMeters, forKey: .distanceMeters)
+            try container.encodeIfPresent(averageHeartRateBpm, forKey: .averageHeartRateBpm)
+            try container.encodeIfPresent(maximumHeartRateBpm, forKey: .maximumHeartRateBpm)
+            try container.encodeIfPresent(minimumHeartRateBpm, forKey: .minimumHeartRateBpm)
+            try container.encodeIfPresent(sourceName, forKey: .sourceName)
+            try container.encodeIfPresent(sourceBundleId, forKey: .sourceBundleId)
+            try container.encodeIfPresent(deviceName, forKey: .deviceName)
+            try container.encodeIfPresent(deviceManufacturer, forKey: .deviceManufacturer)
+            try container.encodeIfPresent(isIndoor, forKey: .isIndoor)
+            try container.encodeIfPresent(elevationAscendedMeters, forKey: .elevationAscendedMeters)
+            try container.encodeIfPresent(averageMETs, forKey: .averageMETs)
+            try container.encodeIfPresent(swimmingStrokeCount, forKey: .swimmingStrokeCount)
+            try container.encodeIfPresent(totalFlightsClimbed, forKey: .totalFlightsClimbed)
+            try container.encodeIfPresent(events, forKey: .events)
+            try container.encodeIfPresent(activities, forKey: .activities)
         case .unknown:
             throw EncodingError.invalidValue(
                 self,

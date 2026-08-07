@@ -67,6 +67,22 @@ export type HealthKitBloodGlucosePayload = {
   valueMgDl: number;
 };
 
+/** Pause / resume / lap / marker style events on a workout (layer B). */
+export type HealthKitWorkoutEvent = {
+  type: string;
+  dateUtc: string;
+  endDateUtc?: string;
+};
+
+/** Multi-sport segment from HKWorkoutActivity (layer C). */
+export type HealthKitWorkoutActivitySegment = {
+  workoutType: string;
+  startedAtUtc: string;
+  endedAtUtc: string;
+  durationSeconds: number;
+};
+
+/** Fat workout summary (layer A) + optional events/activities (B/C). No GPS or metric series. */
 export type HealthKitWorkoutPayload = {
   kind: "workout";
   sourceSampleKey: string;
@@ -78,6 +94,18 @@ export type HealthKitWorkoutPayload = {
   distanceMeters?: number;
   averageHeartRateBpm?: number;
   maximumHeartRateBpm?: number;
+  minimumHeartRateBpm?: number;
+  sourceName?: string;
+  sourceBundleId?: string;
+  deviceName?: string;
+  deviceManufacturer?: string;
+  isIndoor?: boolean;
+  elevationAscendedMeters?: number;
+  averageMETs?: number;
+  swimmingStrokeCount?: number;
+  totalFlightsClimbed?: number;
+  events?: HealthKitWorkoutEvent[];
+  activities?: HealthKitWorkoutActivitySegment[];
 };
 
 export type HealthKitOpPayload =

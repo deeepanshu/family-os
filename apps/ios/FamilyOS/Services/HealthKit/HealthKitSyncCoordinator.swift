@@ -7,7 +7,7 @@ import HealthKit
 /// Not MainActor — safe for ViewModel Tasks and background handlers.
 enum HealthKitSyncCoordinator {
     /// Stable processing order: vitals first, then sleep.
-    static let groupOrder: [HealthKitSyncMetric] = [.vitals, .sleep]
+    static let groupOrder: [HealthKitSyncMetric] = [.vitals, .sleep, .workouts]
 
     struct GroupSyncSummary: Sendable {
         let group: HealthKitSyncMetric
@@ -230,6 +230,11 @@ enum HealthKitSyncCoordinator {
             let samples = try await HealthKitSleepDaySync.fetchSleepDays(healthTimezone: healthTimezone)
             try HealthKitSleepDaySync.enqueueSamples(samples, into: syncStore)
             return samples.count
+        case .workouts:
+            let samples = try await HealthKitWorkoutSync.fetchWorkouts()
+            // Empty workout history is OK (same as sleep).
+            try HealthKitWorkoutSync.enqueueSamples(samples, into: syncStore)
+            return samples.count
         default:
             return 0
         }
@@ -239,6 +244,7 @@ enum HealthKitSyncCoordinator {
         switch group {
         case .vitals: return "blood_pressure"
         case .sleep: return "sleep"
+        case .workouts: return "workout"
         default: return group.rawValue
         }
     }

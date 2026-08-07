@@ -55,6 +55,7 @@
 		DE8000000000000000000007 /* HealthKit/HealthKitSleepDaySync.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8000000000000000000017 /* HealthKit/HealthKitSleepDaySync.swift */; };
 		DE8000000000000000000008 /* HealthKit/HealthKitSyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8000000000000000000018 /* HealthKit/HealthKitSyncCoordinator.swift */; };
 		DE8000000000000000000009 /* HealthKit/HealthKitBackgroundSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8000000000000000000019 /* HealthKit/HealthKitBackgroundSync.swift */; };
+		DE800000000000000000000A /* HealthKit/HealthKitWorkoutSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE800000000000000000001A /* HealthKit/HealthKitWorkoutSync.swift */; };
 		DE4000000000000000000002 /* HealthKitSyncStateViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE4000000000000000000012 /* HealthKitSyncStateViewModel.swift */; };
 		DE4000000000000000000003 /* HealthBootstrapHealthKitViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE4000000000000000000013 /* HealthBootstrapHealthKitViewModel.swift */; };
 		DE4000000000000000000004 /* HealthKitSyncView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE4000000000000000000014 /* HealthKitSyncView.swift */; };
@@ -126,6 +127,7 @@
 		DE8000000000000000000011 /* HealthKit/HealthKitSyncStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitSyncStore.swift; sourceTree = "<group>"; };
 		DE8000000000000000000012 /* HealthKit/HealthKitSyncWorker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitSyncWorker.swift; sourceTree = "<group>"; };
 		DE8000000000000000000013 /* HealthKit/HealthKitBloodPressureSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitBloodPressureSync.swift; sourceTree = "<group>"; };
+		DE800000000000000000001A /* HealthKit/HealthKitWorkoutSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitWorkoutSync.swift; sourceTree = "<group>"; };
 		DE8000000000000000000014 /* HealthKitOpsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitOpsModels.swift; sourceTree = "<group>"; };
 		DE8000000000000000000015 /* HealthKitSyncStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitSyncStoreTests.swift; sourceTree = "<group>"; };
 		DE8000000000000000000016 /* HealthKitLocalE2ETests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitLocalE2ETests.swift; sourceTree = "<group>"; };
@@ -250,6 +252,7 @@
 				DE8000000000000000000011 /* HealthKit/HealthKitSyncStore.swift */,
 				DE8000000000000000000012 /* HealthKit/HealthKitSyncWorker.swift */,
 				DE8000000000000000000013 /* HealthKit/HealthKitBloodPressureSync.swift */,
+				DE800000000000000000001A /* HealthKit/HealthKitWorkoutSync.swift */,
 				DE8000000000000000000017 /* HealthKit/HealthKitSleepDaySync.swift */,
 				DE8000000000000000000018 /* HealthKit/HealthKitSyncCoordinator.swift */,
 				DE8000000000000000000019 /* HealthKit/HealthKitBackgroundSync.swift */,
@@ -509,6 +512,7 @@
 				DE8000000000000000000001 /* HealthKit/HealthKitSyncStore.swift in Sources */,
 				DE8000000000000000000002 /* HealthKit/HealthKitSyncWorker.swift in Sources */,
 				DE8000000000000000000003 /* HealthKit/HealthKitBloodPressureSync.swift in Sources */,
+				DE800000000000000000000A /* HealthKit/HealthKitWorkoutSync.swift in Sources */,
 				DE8000000000000000000004 /* HealthKitOpsModels.swift in Sources */,
 				DE8000000000000000000007 /* HealthKit/HealthKitSleepDaySync.swift in Sources */,
 				DE8000000000000000000008 /* HealthKit/HealthKitSyncCoordinator.swift in Sources */,

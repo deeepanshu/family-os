@@ -202,6 +202,19 @@ export type HealthDailyMetricRecord = {
   sampleCount: number;
 };
 
+export type HealthWorkoutEventRecord = {
+  type: string;
+  dateUtc: string;
+  endDateUtc?: string;
+};
+
+export type HealthWorkoutActivitySegmentRecord = {
+  workoutType: string;
+  startedAtUtc: string;
+  endedAtUtc: string;
+  durationSeconds: number;
+};
+
 export type HealthWorkoutRecord = {
   id: string;
   personId: string;
@@ -213,6 +226,18 @@ export type HealthWorkoutRecord = {
   distanceMeters?: number;
   averageHeartRateBpm?: number;
   maximumHeartRateBpm?: number;
+  minimumHeartRateBpm?: number;
+  sourceName?: string;
+  sourceBundleId?: string;
+  deviceName?: string;
+  deviceManufacturer?: string;
+  isIndoor?: boolean;
+  elevationAscendedMeters?: number;
+  averageMETs?: number;
+  swimmingStrokeCount?: number;
+  totalFlightsClimbed?: number;
+  events?: HealthWorkoutEventRecord[];
+  activities?: HealthWorkoutActivitySegmentRecord[];
 };
 
 export type HealthStepHourRecord = {
@@ -424,6 +449,15 @@ export type McpWorkoutRow = {
   distanceMeters?: number;
   averageHeartRateBpm?: number;
   maximumHeartRateBpm?: number;
+  minimumHeartRateBpm?: number;
+  sourceName?: string;
+  isIndoor?: boolean;
+  elevationAscendedMeters?: number;
+  averageMETs?: number;
+  swimmingStrokeCount?: number;
+  totalFlightsClimbed?: number;
+  eventCount?: number;
+  activitySegmentCount?: number;
 };
 
 export type McpHealthDataBase = {

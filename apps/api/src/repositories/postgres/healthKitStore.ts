@@ -609,7 +609,25 @@ export class PostgresHealthKitStore {
       activeEnergyKcal: row.active_energy_kcal === null ? undefined : Number(row.active_energy_kcal),
       distanceMeters: row.distance_meters === null ? undefined : Number(row.distance_meters),
       averageHeartRateBpm: row.average_heart_rate_bpm === null ? undefined : Number(row.average_heart_rate_bpm),
-      maximumHeartRateBpm: row.maximum_heart_rate_bpm === null ? undefined : Number(row.maximum_heart_rate_bpm)
+      maximumHeartRateBpm: row.maximum_heart_rate_bpm === null ? undefined : Number(row.maximum_heart_rate_bpm),
+      minimumHeartRateBpm: row.minimum_heart_rate_bpm === null || row.minimum_heart_rate_bpm === undefined
+        ? undefined
+        : Number(row.minimum_heart_rate_bpm),
+      sourceName: row.source_name ?? undefined,
+      sourceBundleId: row.source_bundle_id ?? undefined,
+      deviceName: row.device_name ?? undefined,
+      deviceManufacturer: row.device_manufacturer ?? undefined,
+      isIndoor: row.is_indoor ?? undefined,
+      elevationAscendedMeters:
+        row.elevation_ascended_meters === null || row.elevation_ascended_meters === undefined
+          ? undefined
+          : Number(row.elevation_ascended_meters),
+      averageMETs:
+        row.average_mets === null || row.average_mets === undefined ? undefined : Number(row.average_mets),
+      swimmingStrokeCount: row.swimming_stroke_count ?? undefined,
+      totalFlightsClimbed: row.total_flights_climbed ?? undefined,
+      events: Array.isArray(row.events_json) ? row.events_json : undefined,
+      activities: Array.isArray(row.activities_json) ? row.activities_json : undefined
     }));
   }
 
@@ -742,18 +760,36 @@ export class PostgresHealthKitStore {
           insert into health_workouts (
             family_id, person_id, source_sample_key, workout_type, started_at, ended_at,
             duration_seconds, active_energy_kcal, distance_meters, average_heart_rate_bpm,
-            maximum_heart_rate_bpm, updated_at
+            maximum_heart_rate_bpm, minimum_heart_rate_bpm, source_name, source_bundle_id,
+            device_name, device_manufacturer, is_indoor, elevation_ascended_meters, average_mets,
+            swimming_stroke_count, total_flights_climbed, events_json, activities_json, updated_at
           ) values (
             ${input.familyId}, ${input.personId}, ${payload.sourceSampleKey}, ${payload.workoutType},
             ${payload.startedAtUtc}, ${payload.endedAtUtc}, ${payload.durationSeconds},
             ${payload.activeEnergyKcal ?? null}, ${payload.distanceMeters ?? null},
-            ${payload.averageHeartRateBpm ?? null}, ${payload.maximumHeartRateBpm ?? null}, ${input.nowIso}
+            ${payload.averageHeartRateBpm ?? null}, ${payload.maximumHeartRateBpm ?? null},
+            ${payload.minimumHeartRateBpm ?? null}, ${payload.sourceName ?? null},
+            ${payload.sourceBundleId ?? null}, ${payload.deviceName ?? null},
+            ${payload.deviceManufacturer ?? null}, ${payload.isIndoor ?? null},
+            ${payload.elevationAscendedMeters ?? null}, ${payload.averageMETs ?? null},
+            ${payload.swimmingStrokeCount ?? null}, ${payload.totalFlightsClimbed ?? null},
+            ${payload.events ?? null},
+            ${payload.activities ?? null},
+            ${input.nowIso}
           )
           on conflict (person_id, source_sample_key) do update set
             workout_type = excluded.workout_type, started_at = excluded.started_at, ended_at = excluded.ended_at,
             duration_seconds = excluded.duration_seconds, active_energy_kcal = excluded.active_energy_kcal,
             distance_meters = excluded.distance_meters, average_heart_rate_bpm = excluded.average_heart_rate_bpm,
-            maximum_heart_rate_bpm = excluded.maximum_heart_rate_bpm, updated_at = excluded.updated_at
+            maximum_heart_rate_bpm = excluded.maximum_heart_rate_bpm,
+            minimum_heart_rate_bpm = excluded.minimum_heart_rate_bpm,
+            source_name = excluded.source_name, source_bundle_id = excluded.source_bundle_id,
+            device_name = excluded.device_name, device_manufacturer = excluded.device_manufacturer,
+            is_indoor = excluded.is_indoor, elevation_ascended_meters = excluded.elevation_ascended_meters,
+            average_mets = excluded.average_mets, swimming_stroke_count = excluded.swimming_stroke_count,
+            total_flights_climbed = excluded.total_flights_climbed,
+            events_json = excluded.events_json, activities_json = excluded.activities_json,
+            updated_at = excluded.updated_at
         `;
         return;
     }

@@ -75,6 +75,23 @@ const bloodGlucosePayload = z
   })
   .strict();
 
+const workoutEvent = z
+  .object({
+    type: z.string().trim().min(1).max(64),
+    dateUtc: isoInstant,
+    endDateUtc: isoInstant.optional()
+  })
+  .strict();
+
+const workoutActivitySegment = z
+  .object({
+    workoutType: z.string().trim().min(1).max(100),
+    startedAtUtc: isoInstant,
+    endedAtUtc: isoInstant,
+    durationSeconds: z.number().int().min(0).max(7 * 24 * 60 * 60)
+  })
+  .strict();
+
 const workoutPayload = z
   .object({
     kind: z.literal("workout"),
@@ -86,7 +103,19 @@ const workoutPayload = z
     activeEnergyKcal: z.number().min(0).max(100_000).optional(),
     distanceMeters: z.number().min(0).max(10_000_000).optional(),
     averageHeartRateBpm: z.number().min(0).max(300).optional(),
-    maximumHeartRateBpm: z.number().min(0).max(300).optional()
+    maximumHeartRateBpm: z.number().min(0).max(300).optional(),
+    minimumHeartRateBpm: z.number().min(0).max(300).optional(),
+    sourceName: z.string().trim().min(1).max(200).optional(),
+    sourceBundleId: z.string().trim().min(1).max(200).optional(),
+    deviceName: z.string().trim().min(1).max(200).optional(),
+    deviceManufacturer: z.string().trim().min(1).max(200).optional(),
+    isIndoor: z.boolean().optional(),
+    elevationAscendedMeters: z.number().min(0).max(100_000).optional(),
+    averageMETs: z.number().min(0).max(100).optional(),
+    swimmingStrokeCount: z.number().int().min(0).max(1_000_000).optional(),
+    totalFlightsClimbed: z.number().int().min(0).max(100_000).optional(),
+    events: z.array(workoutEvent).max(500).optional(),
+    activities: z.array(workoutActivitySegment).max(100).optional()
   })
   .strict();
 

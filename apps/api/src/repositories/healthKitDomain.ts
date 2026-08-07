@@ -335,8 +335,30 @@ function assertPayloadValid(payload: HealthKitOpPayload, op: HealthKitSyncOp): v
       ) {
         throw new HttpError(400, "payload_invalid", "average heart rate must be <= maximum.");
       }
+      if (
+        payload.minimumHeartRateBpm !== undefined &&
+        payload.averageHeartRateBpm !== undefined &&
+        payload.minimumHeartRateBpm > payload.averageHeartRateBpm
+      ) {
+        throw new HttpError(400, "payload_invalid", "minimum heart rate must be <= average.");
+      }
       if (payload.workoutType.trim().length < 1 || payload.workoutType.length > 100) {
         throw new HttpError(400, "payload_invalid", "workoutType is invalid.");
+      }
+      if (payload.events) {
+        for (const event of payload.events) {
+          assertDateSanity(event.dateUtc);
+          if (event.endDateUtc) assertDateSanity(event.endDateUtc);
+        }
+      }
+      if (payload.activities) {
+        for (const segment of payload.activities) {
+          assertDateSanity(segment.startedAtUtc);
+          assertDateSanity(segment.endedAtUtc);
+          if (Date.parse(segment.endedAtUtc) < Date.parse(segment.startedAtUtc)) {
+            throw new HttpError(400, "payload_invalid", "activity segment end must be >= start.");
+          }
+        }
       }
       return;
     }
