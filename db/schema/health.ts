@@ -205,7 +205,7 @@ export const healthkitSyncState = pgTable(
     check("healthkit_sync_state_group_check", sql`${table.groupKey} in ('activity', 'sleep', 'vitals', 'body', 'mobility', 'workouts', 'mindfulness_environment', 'nutrition')`),
     check(
       "healthkit_sync_state_status_check",
-      sql`${table.status} in ('never_synced', 'ready', 'backfilling', 'error', 'disabled')`
+      sql`${table.status} in ('never_synced', 'syncing', 'ready', 'backfilling', 'error', 'disabled')`
     )
   ]
 );
@@ -232,119 +232,22 @@ export const healthkitSyncInstallations = pgTable(
   ]
 );
 
-export const healthkitSyncEvents = pgTable(
-  "healthkit_sync_events",
+
+export const healthkitOpReceipts = pgTable(
+  "healthkit_op_receipts",
   {
-    eventId: uuid("event_id").primaryKey(),
+    opId: uuid("op_id").primaryKey(),
     personId: uuid("person_id")
       .notNull()
       .references(() => people.id, { onDelete: "cascade" }),
     familyId: uuid("family_id")
       .notNull()
       .references(() => families.id, { onDelete: "cascade" }),
-    installationId: uuid("installation_id").notNull(),
-    entityKey: text("entity_key").notNull(),
-    entityVersion: integer("entity_version").notNull(),
-    groupKey: text("group_key").notNull(),
-    scopeKey: text("scope_key").notNull(),
-    op: text("op").notNull(),
-    sessionId: uuid("session_id"),
-    fingerprint: text("fingerprint").notNull(),
-    applyResult: text("apply_result").notNull(),
-    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow()
+    appliedAt: timestamp("applied_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => [
-    index("healthkit_sync_events_person_received_idx").on(table.personId, table.receivedAt),
-    check("healthkit_sync_events_version_check", sql`${table.entityVersion} >= 1`),
-    check("healthkit_sync_events_op_check", sql`${table.op} in ('upsert', 'delete')`),
-    check("healthkit_sync_events_apply_check", sql`${table.applyResult} in ('applied', 'superseded', 'duplicate')`),
-    check(
-      "healthkit_sync_events_group_check",
-      sql`${table.groupKey} in ('activity', 'sleep', 'vitals', 'body', 'mobility', 'workouts', 'mindfulness_environment', 'nutrition')`
-    )
-  ]
-);
-
-export const healthkitSyncEntities = pgTable(
-  "healthkit_sync_entities",
-  {
-    personId: uuid("person_id")
-      .notNull()
-      .references(() => people.id, { onDelete: "cascade" }),
-    familyId: uuid("family_id")
-      .notNull()
-      .references(() => families.id, { onDelete: "cascade" }),
-    installationId: uuid("installation_id").notNull(),
-    entityKey: text("entity_key").notNull(),
-    entityVersion: integer("entity_version").notNull(),
-    fingerprint: text("fingerprint").notNull(),
-    op: text("op").notNull(),
-    lastEventId: uuid("last_event_id").notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
-  },
-  (table) => [
-    uniqueIndex("healthkit_sync_entities_pk").on(table.personId, table.installationId, table.entityKey),
-    check("healthkit_sync_entities_version_check", sql`${table.entityVersion} >= 1`),
-    check("healthkit_sync_entities_op_check", sql`${table.op} in ('upsert', 'delete')`)
-  ]
-);
-
-export const healthkitBackfillSessions = pgTable(
-  "healthkit_backfill_sessions",
-  {
-    sessionId: uuid("session_id").primaryKey().defaultRandom(),
-    personId: uuid("person_id")
-      .notNull()
-      .references(() => people.id, { onDelete: "cascade" }),
-    familyId: uuid("family_id")
-      .notNull()
-      .references(() => families.id, { onDelete: "cascade" }),
-    groupKey: text("group_key").notNull(),
-    installationId: uuid("installation_id").notNull(),
-    timezoneVersion: integer("timezone_version").notNull(),
-    rangeStart: timestamp("range_start", { withTimezone: true }).notNull(),
-    rangeEnd: timestamp("range_end", { withTimezone: true }).notNull(),
-    rangeStartDay: date("range_start_day").notNull(),
-    rangeEndDay: date("range_end_day").notNull(),
-    requiredScopeKeys: text("required_scope_keys").array().notNull(),
-    status: text("status").notNull().default("open"),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    completedAt: timestamp("completed_at", { withTimezone: true }),
-    abortedAt: timestamp("aborted_at", { withTimezone: true }),
-    abortReason: text("abort_reason"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
-  },
-  (table) => [
-    index("healthkit_backfill_sessions_person_group_idx").on(table.personId, table.groupKey, table.createdAt),
-    check(
-      "healthkit_backfill_sessions_group_check",
-      sql`${table.groupKey} in ('activity', 'sleep', 'vitals', 'body', 'mobility', 'workouts', 'mindfulness_environment', 'nutrition')`
-    ),
-    check("healthkit_backfill_sessions_tz_check", sql`${table.timezoneVersion} >= 1`),
-    check("healthkit_backfill_sessions_day_order_check", sql`${table.rangeStartDay} <= ${table.rangeEndDay}`),
-    check(
-      "healthkit_backfill_sessions_status_check",
-      sql`${table.status} in ('open', 'completing', 'completed', 'aborted', 'expired')`
-    )
-  ]
-);
-
-export const healthkitBackfillScopeManifests = pgTable(
-  "healthkit_backfill_scope_manifests",
-  {
-    sessionId: uuid("session_id")
-      .notNull()
-      .references(() => healthkitBackfillSessions.sessionId, { onDelete: "cascade" }),
-    scopeKey: text("scope_key").notNull(),
-    eventCount: integer("event_count").notNull(),
-    manifestHash: text("manifest_hash").notNull(),
-    status: text("status").notNull().default("accepted"),
-    acceptedAt: timestamp("accepted_at", { withTimezone: true }).notNull().defaultNow()
-  },
-  (table) => [
-    uniqueIndex("healthkit_backfill_scope_manifests_pk").on(table.sessionId, table.scopeKey),
-    check("healthkit_backfill_scope_manifests_count_check", sql`${table.eventCount} >= 0`),
-    check("healthkit_backfill_scope_manifests_status_check", sql`${table.status} in ('accepted')`)
+    index("healthkit_op_receipts_applied_at_idx").on(table.appliedAt),
+    index("healthkit_op_receipts_person_idx").on(table.personId, table.appliedAt)
   ]
 );
 
@@ -432,6 +335,18 @@ export const healthWorkouts = pgTable(
     distanceMeters: numeric("distance_meters", { precision: 14, scale: 3 }),
     averageHeartRateBpm: numeric("average_heart_rate_bpm", { precision: 8, scale: 2 }),
     maximumHeartRateBpm: numeric("maximum_heart_rate_bpm", { precision: 8, scale: 2 }),
+    minimumHeartRateBpm: numeric("minimum_heart_rate_bpm", { precision: 8, scale: 2 }),
+    sourceName: text("source_name"),
+    sourceBundleId: text("source_bundle_id"),
+    deviceName: text("device_name"),
+    deviceManufacturer: text("device_manufacturer"),
+    isIndoor: boolean("is_indoor"),
+    elevationAscendedMeters: numeric("elevation_ascended_meters", { precision: 14, scale: 3 }),
+    averageMets: numeric("average_mets", { precision: 8, scale: 3 }),
+    swimmingStrokeCount: integer("swimming_stroke_count"),
+    totalFlightsClimbed: integer("total_flights_climbed"),
+    eventsJson: jsonb("events_json"),
+    activitiesJson: jsonb("activities_json"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
@@ -439,7 +354,15 @@ export const healthWorkouts = pgTable(
     uniqueIndex("health_workouts_person_source_sample_idx").on(table.personId, table.sourceSampleKey),
     index("health_workouts_family_person_started_idx").on(table.familyId, table.personId, table.startedAt),
     check("health_workouts_duration_check", sql`${table.durationSeconds} >= 0`),
-    check("health_workouts_time_order_check", sql`${table.endedAt} >= ${table.startedAt}`)
+    check("health_workouts_time_order_check", sql`${table.endedAt} >= ${table.startedAt}`),
+    check(
+      "health_workouts_swimming_stroke_check",
+      sql`${table.swimmingStrokeCount} is null or ${table.swimmingStrokeCount} >= 0`
+    ),
+    check(
+      "health_workouts_flights_check",
+      sql`${table.totalFlightsClimbed} is null or ${table.totalFlightsClimbed} >= 0`
+    )
   ]
 );
 

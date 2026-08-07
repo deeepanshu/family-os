@@ -31,6 +31,11 @@ struct SignInView: View {
                                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                             }
                             .buttonStyle(.plain)
+
+                            Text("Local API: \(viewModel.connection.baseURL)")
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.tertiary)
+                                .textSelection(.enabled)
                         } else {
                             SignInWithAppleButton(.continue) { request in
                                 viewModel.prepareAppleSignInRequest(request)

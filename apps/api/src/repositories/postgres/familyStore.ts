@@ -14,6 +14,7 @@ export class PostgresFamilyStore {
       throw new HttpError(409, "family_already_exists", "User already has an active family.");
     }
 
+    // Household is opt-in; default kind is shared "family" (not a fake personal workspace).
     const kind = input.kind ?? "family";
     return this.context.sql.begin(async (tx: any) => {
       const [family] = await tx`
@@ -28,6 +29,17 @@ export class PostgresFamilyStore {
         returning *
       `;
       const createdMembership = requireRow(membership, "Failed to create family membership.");
+
+      // Attach solo Self person to this household when present.
+      await tx`
+        update people
+        set family_id = ${createdFamily.id}, updated_at = now()
+        where linked_user_id = ${input.userId}
+          and relationship_label = 'Self'
+          and status = 'active'
+          and family_id is null
+      `;
+
       await this.context.audit(
         {
           familyId: createdFamily.id,
@@ -73,21 +85,18 @@ export class PostgresFamilyStore {
 
   async bootstrap(userId: string): Promise<BootstrapResponse> {
     await this.context.syncAuthUser(userId);
-    let current = await this.context.getCurrentFamily(userId);
-    if (!current) {
-      const created = await this.createFamily({ name: "My Health", userId, kind: "personal" });
-      if (!created) {
-        throw new HttpError(500, "bootstrap_failed", "Failed to create personal workspace.");
-      }
-      current = created;
-    }
-
-    const profiles = await this.listProfiles(userId);
-    const selfProfile = profiles.find((profile) => profile.linkedUserId === userId && profile.relationshipLabel === "Self") ?? null;
+    // Solo-first: do not auto-create a family. Household is opt-in via createFamily later.
+    const current = await this.context.getCurrentFamily(userId);
+    const selfProfile = await this.getSelfProfile(userId);
+    const profiles = selfProfile
+      ? current
+        ? await this.listProfiles(userId)
+        : [selfProfile]
+      : [];
 
     return {
-      family: current.family,
-      membership: current.membership,
+      family: current?.family ?? null,
+      membership: current?.membership ?? null,
       profiles,
       selfProfile,
       needsProfileSetup: selfProfile === null
@@ -95,20 +104,21 @@ export class PostgresFamilyStore {
   }
 
   async createSelfProfile(actorUserId: string, displayName: string): Promise<HealthProfile> {
-    const current = await this.context.requireActiveMember(actorUserId);
+    await this.context.syncAuthUser(actorUserId);
     const existing = await this.getSelfProfile(actorUserId);
     if (existing) {
       return existing;
     }
 
+    // Self is user-owned; family_id stays null until the user creates a household.
     const [profile] = await this.context.sql`
       insert into people (family_id, linked_user_id, created_by_user_id, display_name, relationship_label, status)
-      values (${current.family.id}, ${actorUserId}, ${actorUserId}, ${displayName}, 'Self', 'active')
+      values (${null}, ${actorUserId}, ${actorUserId}, ${displayName}, 'Self', 'active')
       returning *
     `;
     const createdProfile = requireRow(profile, "Failed to create self profile.");
     await this.context.audit({
-      familyId: current.family.id,
+      familyId: null,
       actorUserId,
       action: "profile.created",
       resourceType: "profile",
@@ -118,17 +128,13 @@ export class PostgresFamilyStore {
   }
 
   async getSelfProfile(actorUserId: string): Promise<HealthProfile | null> {
-    const current = await this.context.getCurrentFamily(actorUserId);
-    if (!current) {
-      return null;
-    }
     const [profile] = await this.context.sql`
       select *
       from people
-      where family_id = ${current.family.id}
-        and linked_user_id = ${actorUserId}
+      where linked_user_id = ${actorUserId}
         and relationship_label = 'Self'
         and status = 'active'
+      limit 1
     `;
     return profile ? mapProfile(profile) : null;
   }
@@ -296,15 +302,20 @@ export class PostgresFamilyStore {
   }
 
   async listProfiles(actorUserId: string): Promise<HealthProfile[]> {
-    const current = await this.context.requireActiveMember(actorUserId);
-    const rows = await this.context.sql`
-      select *
-      from people
-      where family_id = ${current.family.id}
-        and status = 'active'
-      order by created_at asc
-    `;
-    return rows.map(mapProfile);
+    const current = await this.context.getCurrentFamily(actorUserId);
+    if (current) {
+      const rows = await this.context.sql`
+        select *
+        from people
+        where family_id = ${current.family.id}
+          and status = 'active'
+        order by created_at asc
+      `;
+      return rows.map(mapProfile);
+    }
+    // Solo: only the caller's Self person.
+    const self = await this.getSelfProfile(actorUserId);
+    return self ? [self] : [];
   }
 
   async getProfile(actorUserId: string, profileId: string): Promise<HealthProfile> {

@@ -101,12 +101,19 @@ jobs:
             exit 1
           fi
 
+          # rpi-manager allowlists main. Pre-merge workflow_dispatch from a feature
+          # branch still deploys the built image_tag/sha; report ref as main for the hook.
+          HOOK_REF="${GITHUB_REF}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "Pre-merge deploy from ${GITHUB_REF}; using refs/heads/main for manager allowlist"
+            HOOK_REF="refs/heads/main"
+          fi
           RESP="$(curl -fsS --max-time 60 -X POST \
             "https://manager.deepanshujain.me/hooks/deploy/family-os" \
             -H "Content-Type: application/json" \
             -H "X-Deploy-Secret: ${DEPLOY_SECRET}" \
             -d "$(jq -nc \
-              --arg ref "${GITHUB_REF}" \
+              --arg ref "${HOOK_REF}" \
               --arg sha "${GITHUB_SHA}" \
               --arg tag "${IMAGE_TAG}" \
               --arg repo "${GITHUB_REPOSITORY}" \

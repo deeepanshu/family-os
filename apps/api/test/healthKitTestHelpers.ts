@@ -1,15 +1,4 @@
-import { createHash } from "node:crypto";
-import {
-  fingerprintScopeManifest,
-  requiredScopeKeysForGroup,
-  type HealthKitConsentGroup,
-  type HealthKitSyncEvent
-} from "@family-os/shared";
-import { HEALTH_API_PREFIX } from "@family-os/shared";
-
-function nodeSha256(data: Uint8Array): Uint8Array {
-  return createHash("sha256").update(data).digest();
-}
+import { HEALTH_API_PREFIX, bloodPressureNaturalKey, type HealthKitConsentGroup, type HealthKitSyncOp } from "@family-os/shared";
 
 type Api = {
   request: (input: string, init?: RequestInit) => Response | Promise<Response>;
@@ -21,66 +10,39 @@ export async function seedHealthKitReadyGroup(
   profileId: string,
   installationId: string,
   group: HealthKitConsentGroup,
-  events: HealthKitSyncEvent[],
+  ops: HealthKitSyncOp[],
   timezoneVersion = 1
 ) {
-  const sessionRes = await api.request(`${HEALTH_API_PREFIX}/healthkit/sessions`, {
+  const start = await api.request(`${HEALTH_API_PREFIX}/healthkit/groups/${group}/start-import`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({
       installationId,
       personId: profileId,
-      group,
       timezoneVersion
     })
   });
-  if (!sessionRes.ok) {
-    throw new Error(`create session failed: ${sessionRes.status} ${await sessionRes.text()}`);
+  if (!start.ok) {
+    throw new Error(`start-import failed: ${start.status} ${await start.text()}`);
   }
-  const session = (await sessionRes.json()).data;
-  const sessionId = session.sessionId as string;
 
-  const tagged = events.map((event) => ({ ...event, sessionId }));
-  if (tagged.length > 0) {
-    const batch = await api.request(`${HEALTH_API_PREFIX}/healthkit/events:batch`, {
+  if (ops.length > 0) {
+    const batch = await api.request(`${HEALTH_API_PREFIX}/healthkit/ops:batch`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({
         installationId,
         personId: profileId,
         timezoneVersion,
-        events: tagged
+        ops
       })
     });
     if (!batch.ok) {
-      throw new Error(`events batch failed: ${batch.status} ${await batch.text()}`);
+      throw new Error(`ops batch failed: ${batch.status} ${await batch.text()}`);
     }
   }
 
-  const scopes = (session.requiredScopeKeys as string[]) ?? requiredScopeKeysForGroup(group);
-  for (const scopeKey of scopes) {
-    const eventIds = tagged.filter((e) => e.scopeKey === scopeKey).map((e) => e.eventId);
-    const manifestHash = fingerprintScopeManifest({ sessionId, scopeKey, eventIds }, nodeSha256);
-    const put = await api.request(
-      `${HEALTH_API_PREFIX}/healthkit/sessions/${sessionId}/scopes/${scopeKey}/manifest`,
-      {
-        method: "PUT",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({
-          installationId,
-          personId: profileId,
-          timezoneVersion,
-          eventCount: eventIds.length,
-          manifestHash
-        })
-      }
-    );
-    if (!put.ok) {
-      throw new Error(`manifest failed for ${scopeKey}: ${put.status} ${await put.text()}`);
-    }
-  }
-
-  const complete = await api.request(`${HEALTH_API_PREFIX}/healthkit/sessions/${sessionId}/complete`, {
+  const ready = await api.request(`${HEALTH_API_PREFIX}/healthkit/groups/${group}/ready`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({
@@ -89,21 +51,15 @@ export async function seedHealthKitReadyGroup(
       timezoneVersion
     })
   });
-  if (!complete.ok) {
-    throw new Error(`complete session failed: ${complete.status} ${await complete.text()}`);
+  if (!ready.ok) {
+    throw new Error(`ready failed: ${ready.status} ${await ready.text()}`);
   }
-  return sessionId;
 }
 
-export function stepsHourEvent(
-  hourStartUtc: string,
-  count: number,
-  entityVersion = 1
-): HealthKitSyncEvent {
+export function stepsHourOp(hourStartUtc: string, count: number): HealthKitSyncOp {
   return {
-    eventId: crypto.randomUUID(),
-    entityKey: `steps_hour:${hourStartUtc}`,
-    entityVersion,
+    opId: crypto.randomUUID(),
+    naturalKey: `steps_hour:${hourStartUtc}`,
     group: "activity",
     scopeKey: "steps",
     op: "upsert",
@@ -111,7 +67,7 @@ export function stepsHourEvent(
   };
 }
 
-export function sleepDayEvent(
+export function sleepDayOp(
   sleepDay: string,
   overrides: Partial<{
     totalMinutes: number;
@@ -122,16 +78,15 @@ export function sleepDayEvent(
     awakeMinutes: number;
     inBedMinutes: number;
   }> = {}
-): HealthKitSyncEvent {
+): HealthKitSyncOp {
   const totalMinutes = overrides.totalMinutes ?? 480;
   const coreMinutes = overrides.coreMinutes ?? 240;
   const deepMinutes = overrides.deepMinutes ?? 90;
   const remMinutes = overrides.remMinutes ?? 90;
   const unspecifiedAsleepMinutes = overrides.unspecifiedAsleepMinutes ?? 60;
   return {
-    eventId: crypto.randomUUID(),
-    entityKey: `sleep_day:${sleepDay}`,
-    entityVersion: 1,
+    opId: crypto.randomUUID(),
+    naturalKey: `sleep_day:${sleepDay}`,
     group: "sleep",
     scopeKey: "sleep",
     op: "upsert",
@@ -149,23 +104,23 @@ export function sleepDayEvent(
   };
 }
 
-export function bloodPressureEvent(input: {
-  sourceObjectKey: string;
+export function bloodPressureOp(input: {
+  sourceObjectKey?: string;
   measuredAtUtc: string;
   systolic: number;
   diastolic: number;
   pulse?: number;
-}): HealthKitSyncEvent {
+}): HealthKitSyncOp {
+  const sourceObjectKey = input.sourceObjectKey ?? crypto.randomUUID();
   return {
-    eventId: crypto.randomUUID(),
-    entityKey: `blood_pressure:${input.sourceObjectKey}`,
-    entityVersion: 1,
+    opId: crypto.randomUUID(),
+    naturalKey: bloodPressureNaturalKey(sourceObjectKey),
     group: "vitals",
     scopeKey: "blood_pressure",
     op: "upsert",
     payload: {
       kind: "blood_pressure",
-      sourceObjectKey: input.sourceObjectKey,
+      sourceObjectKey,
       measuredAtUtc: input.measuredAtUtc,
       systolic: input.systolic,
       diastolic: input.diastolic,
@@ -173,3 +128,22 @@ export function bloodPressureEvent(input: {
     }
   };
 }
+
+export function bloodPressureDeleteOp(sourceObjectKey: string): HealthKitSyncOp {
+  return {
+    opId: crypto.randomUUID(),
+    naturalKey: bloodPressureNaturalKey(sourceObjectKey),
+    group: "vitals",
+    scopeKey: "blood_pressure",
+    op: "delete",
+    payload: null
+  };
+}
+
+/** @deprecated Use stepsHourOp. */
+export const stepsHourEvent = stepsHourOp;
+/** @deprecated Use sleepDayOp. */
+export const sleepDayEvent = sleepDayOp;
+
+/** @deprecated Use bloodPressureOp. */
+export const bloodPressureEvent = bloodPressureOp;

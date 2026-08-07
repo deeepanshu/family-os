@@ -1,48 +1,44 @@
 import { createHash } from "node:crypto";
 import type {
   AuditLog,
-  CreateInviteResponse,
-  BloodPressureReading,
   BloodGlucoseReading,
+  BloodPressureReading,
   BootstrapResponse,
-  AbortHealthKitBackfillSessionInput,
-  CompleteHealthKitBackfillSessionInput,
-  CreateHealthKitBackfillSessionInput,
-  FamilyMember,
-  HealthKitBackfillSession,
-  HealthKitBackfillSessionAbortResult,
-  HealthKitBackfillSessionCompleteResult,
-  HealthKitEventsBatchInput,
-  HealthKitEventsBatchResult,
-  HealthKitGroupManifest,
-  HealthKitMetric,
-  HealthKitMetricKey,
-  HealthKitScopeManifestResult,
-  HealthKitSettings,
-  HealthDailyMetricRecord,
-  HealthMetricFreshness,
-  HealthSleepDayRecord,
-  HealthStepHourRecord,
-  HealthWorkoutRecord,
-  McpCapability,
-  McpConnectionGrant,
-  PutHealthKitScopeManifestInput,
-  PutHealthKitSettingsInput,
-  Reminder,
-  NotificationDelivery,
-  NotificationDevice,
-  ReminderRecipient,
-  ReminderScheduleKind,
-  ReminderType,
+  CreateInviteResponse,
   CurrentFamilyResponse,
   Family,
   FamilyInvite,
   FamilyKind,
+  FamilyMember,
   FamilyMembership,
   FamilyRole,
+  HealthDailyMetricRecord,
+  HealthKitConsentGroup,
+  HealthKitGroupImportStartResult,
+  HealthKitGroupReadyResult,
+  HealthKitGroupStatus,
+  HealthKitMetricKey,
+  HealthKitOpsBatchInput,
+  HealthKitOpsBatchResult,
+  HealthKitSettings,
+  HealthMetricFreshness,
   HealthProfile,
+  HealthSleepDayRecord,
+  HealthStepHourRecord,
+  HealthWorkoutRecord,
+  MarkHealthKitGroupReadyInput,
+  McpCapability,
+  McpConnectionGrant,
+  NotificationDelivery,
+  NotificationDevice,
   PersonStatus,
-  PublicInviteResponse
+  PublicInviteResponse,
+  PutHealthKitSettingsInput,
+  Reminder,
+  ReminderRecipient,
+  ReminderScheduleKind,
+  ReminderType,
+  StartHealthKitImportInput
 } from "@family-os/shared";
 import { HttpError } from "../errors";
 import type {
@@ -113,7 +109,7 @@ export type RegisterDeviceInput = {
 };
 
 export type AuditInput = {
-  familyId: string;
+  familyId: string | null;
   actorUserId?: string;
   action: string;
   resourceType: string;
@@ -185,6 +181,19 @@ export class InMemoryFamilyRepository implements FamilyRepository {
 
     this.families.set(family.id, family);
     this.memberships.set(membership.id, membership);
+
+    // Attach solo Self person to the new household when present.
+    for (const [id, profile] of this.profiles) {
+      if (
+        profile.linkedUserId === input.userId &&
+        profile.relationshipLabel === "Self" &&
+        profile.status === "active" &&
+        profile.familyId == null
+      ) {
+        this.profiles.set(id, { ...profile, familyId: family.id, updatedAt: now });
+      }
+    }
+
     this.audit({
       familyId: family.id,
       actorUserId: input.userId,
@@ -232,21 +241,18 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   }
 
   async bootstrap(userId: string): Promise<BootstrapResponse> {
-    let current = await this.getCurrentFamily(userId);
-    if (!current) {
-      const created = await this.createFamily({ name: "My Health", userId, kind: "personal" });
-      if (!created) {
-        throw new HttpError(500, "bootstrap_failed", "Failed to create personal workspace.");
-      }
-      current = created;
-    }
-
-    const profiles = await this.listProfiles(userId);
-    const selfProfile = profiles.find((profile) => profile.linkedUserId === userId && profile.relationshipLabel === "Self") ?? null;
+    // Solo-first: no auto-created personal family.
+    const current = await this.getCurrentFamily(userId);
+    const selfProfile = await this.getSelfProfile(userId);
+    const profiles = selfProfile
+      ? current
+        ? await this.listProfiles(userId)
+        : [selfProfile]
+      : [];
 
     return {
-      family: current.family,
-      membership: current.membership,
+      family: current?.family ?? null,
+      membership: current?.membership ?? null,
       profiles,
       selfProfile,
       needsProfileSetup: selfProfile === null
@@ -254,7 +260,6 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   }
 
   async createSelfProfile(actorUserId: string, displayName: string): Promise<HealthProfile> {
-    const current = this.requireActiveMember(actorUserId);
     const existing = await this.getSelfProfile(actorUserId);
     if (existing) {
       return existing;
@@ -263,7 +268,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     const now = new Date().toISOString();
     const profile: HealthProfile = {
       id: crypto.randomUUID(),
-      familyId: current.family.id,
+      familyId: null,
       linkedUserId: actorUserId,
       displayName,
       relationshipLabel: "Self",
@@ -273,7 +278,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     };
     this.profiles.set(profile.id, profile);
     this.audit({
-      familyId: current.family.id,
+      familyId: null,
       actorUserId,
       action: "profile.created",
       resourceType: "profile",
@@ -283,14 +288,9 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   }
 
   async getSelfProfile(actorUserId: string): Promise<HealthProfile | null> {
-    const current = await this.getCurrentFamily(actorUserId);
-    if (!current) {
-      return null;
-    }
     return (
       [...this.profiles.values()].find(
         (profile) =>
-          profile.familyId === current.family.id &&
           profile.linkedUserId === actorUserId &&
           profile.relationshipLabel === "Self" &&
           profile.status === "active"
@@ -443,10 +443,14 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   }
 
   async listProfiles(actorUserId: string): Promise<HealthProfile[]> {
-    const current = this.requireActiveMember(actorUserId);
-    return [...this.profiles.values()].filter(
-      (profile) => profile.familyId === current.family.id && profile.status === "active"
-    );
+    const current = await this.getCurrentFamily(actorUserId);
+    if (current) {
+      return [...this.profiles.values()].filter(
+        (profile) => profile.familyId === current.family.id && profile.status === "active"
+      );
+    }
+    const self = await this.getSelfProfile(actorUserId);
+    return self ? [self] : [];
   }
 
   async getProfile(actorUserId: string, profileId: string): Promise<HealthProfile> {
@@ -526,19 +530,30 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   }
 
   async listBloodPressure(actorUserId: string, personId?: string, limit = 50): Promise<BloodPressureReading[]> {
-    const current = this.requireActiveMember(actorUserId);
+    const self = await this.getSelfProfile(actorUserId);
+    if (!self) {
+      throw new HttpError(400, "self_profile_required", "Create your profile before continuing.");
+    }
+    const target = personId ?? self.id;
+    if (target !== self.id) {
+      // Solo-first: only own Self unless later family access is wired.
+      throw new HttpError(403, "profile_forbidden", "You do not have access to this health profile.");
+    }
     return [...this.bloodPressureReadings.values()]
-      .filter((reading) => reading.familyId === current.family.id && !reading.deletedAt && reading.source === "healthkit")
-      .filter((reading) => !personId || reading.personId === personId)
+      .filter((reading) => !reading.deletedAt && reading.source === "healthkit")
+      .filter((reading) => reading.personId === target)
       .sort((a, b) => Date.parse(b.measuredAt) - Date.parse(a.measuredAt))
       .slice(0, limit)
       .map(stripDeleted);
   }
 
   async getBloodPressure(actorUserId: string, readingId: string): Promise<BloodPressureReading> {
-    const current = this.requireActiveMember(actorUserId);
+    const self = await this.getSelfProfile(actorUserId);
+    if (!self) {
+      throw new HttpError(400, "self_profile_required", "Create your profile before continuing.");
+    }
     const reading = this.bloodPressureReadings.get(readingId);
-    if (!reading || reading.familyId !== current.family.id || reading.deletedAt || reading.source !== "healthkit") {
+    if (!reading || reading.personId !== self.id || reading.deletedAt || reading.source !== "healthkit") {
       throw new HttpError(404, "bp_reading_not_found", "Blood pressure reading was not found.");
     }
     return stripDeleted(reading);
@@ -552,61 +567,32 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     return this.healthKit.putHealthKitSettings(actorUserId, input);
   }
 
-  async applyHealthKitEvents(actorUserId: string, input: HealthKitEventsBatchInput): Promise<HealthKitEventsBatchResult> {
-    return this.healthKit.applyHealthKitEvents(actorUserId, input);
+  async applyHealthKitOps(actorUserId: string, input: HealthKitOpsBatchInput): Promise<HealthKitOpsBatchResult> {
+    return this.healthKit.applyHealthKitOps(actorUserId, input);
   }
 
-  async createBackfillSession(
+  async startHealthKitImport(
     actorUserId: string,
-    input: CreateHealthKitBackfillSessionInput
-  ): Promise<HealthKitBackfillSession> {
-    return this.healthKit.createBackfillSession(actorUserId, input);
+    group: HealthKitConsentGroup,
+    input: StartHealthKitImportInput
+  ): Promise<HealthKitGroupImportStartResult> {
+    return this.healthKit.startHealthKitImport(actorUserId, group, input);
   }
 
-  async putScopeManifest(
+  async markHealthKitGroupReady(
     actorUserId: string,
-    sessionId: string,
-    scopeKey: string,
-    input: PutHealthKitScopeManifestInput
-  ): Promise<HealthKitScopeManifestResult> {
-    return this.healthKit.putScopeManifest(actorUserId, sessionId, scopeKey, input);
+    group: HealthKitConsentGroup,
+    input: MarkHealthKitGroupReadyInput
+  ): Promise<HealthKitGroupReadyResult> {
+    return this.healthKit.markHealthKitGroupReady(actorUserId, group, input);
   }
 
-  async completeBackfillSession(
+  async getHealthKitGroupStatus(
     actorUserId: string,
-    sessionId: string,
-    input: CompleteHealthKitBackfillSessionInput
-  ): Promise<HealthKitBackfillSessionCompleteResult> {
-    return this.healthKit.completeBackfillSession(actorUserId, sessionId, input);
-  }
-
-  async abortBackfillSession(
-    actorUserId: string,
-    sessionId: string,
-    input: AbortHealthKitBackfillSessionInput
-  ): Promise<HealthKitBackfillSessionAbortResult> {
-    return this.healthKit.abortBackfillSession(actorUserId, sessionId, input);
-  }
-
-  async getBackfillSession(actorUserId: string, sessionId: string): Promise<HealthKitBackfillSession> {
-    return this.healthKit.getBackfillSession(actorUserId, sessionId);
-  }
-
-  async listBackfillPending(
-    actorUserId: string,
-    sessionId: string,
-    cursor?: string,
-    limit?: number
-  ): Promise<{ eventIds: string[]; nextCursor?: string }> {
-    return this.healthKit.listBackfillPending(actorUserId, sessionId, cursor, limit);
-  }
-
-  async getGroupManifest(
-    actorUserId: string,
-    group: HealthKitMetric,
+    group: HealthKitConsentGroup,
     personId?: string
-  ): Promise<HealthKitGroupManifest> {
-    return this.healthKit.getGroupManifest(actorUserId, group, personId);
+  ): Promise<HealthKitGroupStatus> {
+    return this.healthKit.getHealthKitGroupStatus(actorUserId, group, personId);
   }
 
   async getHealthMetricFreshness(

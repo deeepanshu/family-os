@@ -27,7 +27,6 @@ enum HealthAPIError: LocalizedError {
 }
 
 struct HealthAPIClient {
-    private static let healthKitEventBatchTimeout: TimeInterval = 45
     let session: URLSession
 
     init(session: URLSession = .shared) {
@@ -178,87 +177,27 @@ struct HealthAPIClient {
         )
     }
 
-    func applyHealthKitEvents(
+    func postHealthKitOpsBatch(
         baseURL: String,
         accessToken: String,
-        installationId: String,
-        personId: String,
-        timezoneVersion: Int,
-        events: [HealthKitWireEvent]
-    ) async throws -> HealthKitEventsBatchResult {
-        try await post(
-            path: "healthkit/events:batch",
-            baseURL: baseURL,
-            accessToken: accessToken,
-            body: HealthKitEventsBatchBody(
-                installationId: installationId,
-                personId: personId,
-                timezoneVersion: timezoneVersion,
-                events: events
-            ),
-            timeoutInterval: Self.healthKitEventBatchTimeout
-        )
+        body: HealthKitOpsBatchRequest
+    ) async throws -> HealthKitOpsBatchResult {
+        try await post(path: "healthkit/ops:batch", baseURL: baseURL, accessToken: accessToken, body: body)
     }
 
-    func createHealthKitBackfillSession(
+    func startHealthKitImport(
         baseURL: String,
         accessToken: String,
-        installationId: String,
-        personId: String,
-        metric: HealthKitSyncMetric,
-        timezoneVersion: Int
-    ) async throws -> HealthKitBackfillSession {
-        try await post(
-            path: "healthkit/sessions",
-            baseURL: baseURL,
-            accessToken: accessToken,
-            body: HealthKitSessionBody(
-                installationId: installationId,
-                personId: personId,
-                group: metric,
-                timezoneVersion: timezoneVersion
-            )
-        )
-    }
-
-    func putHealthKitScopeManifest(
-        baseURL: String,
-        accessToken: String,
-        sessionId: String,
-        scopeKey: String,
-        installationId: String,
-        personId: String,
-        timezoneVersion: Int,
-        eventCount: Int,
-        manifestHash: String
-    ) async throws -> HealthKitScopeManifestResult {
-        try await put(
-            path: "healthkit/sessions/\(sessionId)/scopes/\(scopeKey)/manifest",
-            baseURL: baseURL,
-            accessToken: accessToken,
-            body: HealthKitScopeManifestBody(
-                installationId: installationId,
-                personId: personId,
-                timezoneVersion: timezoneVersion,
-                eventCount: eventCount,
-                manifestHash: manifestHash
-            )
-        )
-    }
-
-    func completeHealthKitBackfillSession(
-        baseURL: String,
-        accessToken: String,
-        sessionId: String,
+        group: String,
         installationId: String,
         personId: String,
         timezoneVersion: Int
-    ) async throws -> HealthKitBackfillSessionCompleteResult {
+    ) async throws -> HealthKitGroupImportStartResult {
         try await post(
-            path: "healthkit/sessions/\(sessionId)/complete",
+            path: "healthkit/groups/\(group)/start-import",
             baseURL: baseURL,
             accessToken: accessToken,
-            body: HealthKitSessionActionBody(
+            body: HealthKitGroupActionRequest(
                 installationId: installationId,
                 personId: personId,
                 timezoneVersion: timezoneVersion
@@ -266,37 +205,23 @@ struct HealthAPIClient {
         )
     }
 
-    func abortHealthKitBackfillSession(
+    func markHealthKitGroupReady(
         baseURL: String,
         accessToken: String,
-        sessionId: String,
+        group: String,
         installationId: String,
         personId: String,
-        timezoneVersion: Int,
-        reason: String? = nil
-    ) async throws -> HealthKitBackfillSessionAbortResult {
+        timezoneVersion: Int
+    ) async throws -> HealthKitGroupReadyResult {
         try await post(
-            path: "healthkit/sessions/\(sessionId)/abort",
+            path: "healthkit/groups/\(group)/ready",
             baseURL: baseURL,
             accessToken: accessToken,
-            body: HealthKitSessionActionBody(
+            body: HealthKitGroupActionRequest(
                 installationId: installationId,
                 personId: personId,
-                timezoneVersion: timezoneVersion,
-                reason: reason
+                timezoneVersion: timezoneVersion
             )
-        )
-    }
-
-    func getHealthKitBackfillSession(
-        baseURL: String,
-        accessToken: String,
-        sessionId: String
-    ) async throws -> HealthKitBackfillSession {
-        try await get(
-            path: "healthkit/sessions/\(sessionId)",
-            baseURL: baseURL,
-            accessToken: accessToken
         )
     }
 
@@ -476,31 +401,4 @@ private struct HealthKitSettingsRequest: Encodable {
     }
 }
 
-private struct HealthKitEventsBatchBody: Encodable {
-    let installationId: String
-    let personId: String
-    let timezoneVersion: Int
-    let events: [HealthKitWireEvent]
-}
 
-private struct HealthKitSessionBody: Encodable {
-    let installationId: String
-    let personId: String
-    let group: HealthKitSyncMetric
-    let timezoneVersion: Int
-}
-
-private struct HealthKitScopeManifestBody: Encodable {
-    let installationId: String
-    let personId: String
-    let timezoneVersion: Int
-    let eventCount: Int
-    let manifestHash: String
-}
-
-private struct HealthKitSessionActionBody: Encodable {
-    let installationId: String
-    let personId: String
-    let timezoneVersion: Int
-    var reason: String? = nil
-}

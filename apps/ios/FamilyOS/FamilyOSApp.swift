@@ -4,6 +4,7 @@ import UserNotifications
 @main
 struct FamilyOSApp: App {
     @UIApplicationDelegateAdaptor(NotificationAppDelegate.self) private var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel = HealthBootstrapViewModel()
 
     var body: some Scene {
@@ -14,6 +15,11 @@ struct FamilyOSApp: App {
                         NotificationAppDelegate.pendingNotificationUserInfo = nil
                         viewModel.handleNotification(userInfo: pending)
                     }
+                    #if DEBUG
+                    if ProcessInfo.processInfo.arguments.contains("-FamilyOSLocalSmoke") {
+                        Task { await viewModel.runLocalSmokeIfRequested() }
+                    }
+                    #endif
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .didOpenReminderNotification)) { notification in
                     viewModel.handleNotification(userInfo: notification.userInfo ?? [:])
@@ -21,6 +27,14 @@ struct FamilyOSApp: App {
                 }
                 .onOpenURL { url in
                     _ = viewModel.handleInviteURL(url)
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active {
+                        HealthKitBackgroundSync.scheduleBackgroundSync()
+                        Task {
+                            await HealthKitBackgroundSync.drainIfConfigured()
+                        }
+                    }
                 }
         }
     }
@@ -35,11 +49,9 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, @preconcur
     ) -> Bool {
         CrashReporting.configure()
         UNUserNotificationCenter.current().delegate = self
-        HealthKitBackgroundSyncCoordinator.shared.registerBackgroundTasks()
-        // Observers are registered only after validated local consent/configuration is restored.
-        Task { @MainActor in
-            await HealthKitBackgroundSyncCoordinator.shared.restoreObserversFromLocalConfiguration()
-        }
+        // Nonisolated BG registration — never own handlers on a @MainActor coordinator.
+        HealthKitBackgroundSync.registerBackgroundTask()
+        HealthKitBackgroundSync.scheduleBackgroundSync()
         return true
     }
 

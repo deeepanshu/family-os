@@ -50,6 +50,41 @@ extension HealthBootstrapViewModel {
         }
     }
 
+    /// DEBUG-only path for headless simulator smoke (`-FamilyOSLocalSmoke` launch arg).
+    func runLocalSmokeIfRequested() async {
+        #if DEBUG
+        guard connection.environmentName == .local else {
+            statusMessage = "Local smoke requires FAMILY_OS_ENV=local."
+            isError = true
+            return
+        }
+        await useLocalDevToken()
+        // Ensure profile list is populated even if needsProfileSetup was already false.
+        if selfProfile == nil {
+            await createSelfProfile(displayName: "Simulator Smoke")
+        }
+        if selfProfile == nil {
+            await loadProfiles()
+            if let selfRow = profiles.profiles.first(where: { $0.relationshipLabel == "Self" }) {
+                profiles.selectedProfileId = selfRow.id
+                healthKit.linkedProfileId = selfRow.id
+            }
+        }
+        guard let personId = selfProfile?.id else {
+            statusMessage = "Local smoke could not resolve self profile (profiles=\(profiles.profiles.count))."
+            isError = true
+            reportActionFailure(statusMessage)
+            return
+        }
+        _ = personId
+        healthKit.consentGranted = true
+        healthKit.enabledMetrics = [.vitals]
+        // Claim this simulator install (E2E / prior runs may hold a different active id).
+        await saveHealthKitSettings(replaceInstallation: true, showsFeedback: true)
+        await syncHealthKitNow()
+        #endif
+    }
+
     private func signInWithApple(_ authorization: ASAuthorization) async {
         await request(showsFeedback: true) {
             guard let currentAppleNonce = auth.currentAppleNonce else {

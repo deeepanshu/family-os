@@ -515,7 +515,16 @@ export class HealthMcpReadService {
           activeEnergyKcal: workout.activeEnergyKcal,
           distanceMeters: workout.distanceMeters,
           averageHeartRateBpm: workout.averageHeartRateBpm,
-          maximumHeartRateBpm: workout.maximumHeartRateBpm
+          maximumHeartRateBpm: workout.maximumHeartRateBpm,
+          minimumHeartRateBpm: workout.minimumHeartRateBpm,
+          sourceName: workout.sourceName,
+          isIndoor: workout.isIndoor,
+          elevationAscendedMeters: workout.elevationAscendedMeters,
+          averageMETs: workout.averageMETs,
+          swimmingStrokeCount: workout.swimmingStrokeCount,
+          totalFlightsClimbed: workout.totalFlightsClimbed,
+          eventCount: workout.events?.length,
+          activitySegmentCount: workout.activities?.length
         };
       })
     };

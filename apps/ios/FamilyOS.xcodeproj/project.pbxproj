@@ -44,17 +44,23 @@
 		DE300000000000000000002F /* MetricTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE300000000000000000000F /* MetricTile.swift */; };
 		DE3000000000000000000030 /* StatusText.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE3000000000000000000010 /* StatusText.swift */; };
 		DE4000000000000000000001 /* HealthKitClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE4000000000000000000011 /* HealthKitClient.swift */; };
+		DE6000000000000000000005 /* HealthKit/HealthKitInstallationId.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE6000000000000000000015 /* HealthKit/HealthKitInstallationId.swift */; };
+		DE9000000000000000000001 /* HealthKitAuthExceptionCatcher.m in Sources */ = {isa = PBXBuildFile; fileRef = DE9000000000000000000011 /* HealthKitAuthExceptionCatcher.m */; };
+		DE8000000000000000000001 /* HealthKit/HealthKitSyncStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8000000000000000000011 /* HealthKit/HealthKitSyncStore.swift */; };
+		DE8000000000000000000002 /* HealthKit/HealthKitSyncWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8000000000000000000012 /* HealthKit/HealthKitSyncWorker.swift */; };
+		DE8000000000000000000003 /* HealthKit/HealthKitBloodPressureSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8000000000000000000013 /* HealthKit/HealthKitBloodPressureSync.swift */; };
+		DE8000000000000000000004 /* HealthKitOpsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8000000000000000000014 /* HealthKitOpsModels.swift */; };
+		DE8000000000000000000005 /* HealthKitSyncStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8000000000000000000015 /* HealthKitSyncStoreTests.swift */; };
+		DE8000000000000000000006 /* HealthKitLocalE2ETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8000000000000000000016 /* HealthKitLocalE2ETests.swift */; };
+		DE8000000000000000000007 /* HealthKit/HealthKitSleepDaySync.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8000000000000000000017 /* HealthKit/HealthKitSleepDaySync.swift */; };
+		DE8000000000000000000008 /* HealthKit/HealthKitSyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8000000000000000000018 /* HealthKit/HealthKitSyncCoordinator.swift */; };
+		DE8000000000000000000009 /* HealthKit/HealthKitBackgroundSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8000000000000000000019 /* HealthKit/HealthKitBackgroundSync.swift */; };
+		DE800000000000000000000A /* HealthKit/HealthKitWorkoutSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE800000000000000000001A /* HealthKit/HealthKitWorkoutSync.swift */; };
 		DE4000000000000000000002 /* HealthKitSyncStateViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE4000000000000000000012 /* HealthKitSyncStateViewModel.swift */; };
 		DE4000000000000000000003 /* HealthBootstrapHealthKitViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE4000000000000000000013 /* HealthBootstrapHealthKitViewModel.swift */; };
 		DE4000000000000000000004 /* HealthKitSyncView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE4000000000000000000014 /* HealthKitSyncView.swift */; };
 		DE5000000000000000000003 /* SoloFirstTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5000000000000000000001 /* SoloFirstTests.swift */; };
 		DE5000000000000000000006 /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DE5000000000000000000005 /* XCTest.framework */; };
-		DE6000000000000000000001 /* HealthKit/HealthKitSyncStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE6000000000000000000011 /* HealthKit/HealthKitSyncStateStore.swift */; };
-		DE6000000000000000000002 /* HealthKit/HealthKitSyncEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE6000000000000000000012 /* HealthKit/HealthKitSyncEngine.swift */; };
-		DE6000000000000000000021 /* HealthKit/HealthKitSyncWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE6000000000000000000031 /* HealthKit/HealthKitSyncWorker.swift */; };
-		DE6000000000000000000020 /* HealthKit/HealthKitOutboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE6000000000000000000030 /* HealthKit/HealthKitOutboxStore.swift */; };
-		DE6000000000000000000003 /* HealthKit/HealthKitBackgroundSyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE6000000000000000000013 /* HealthKit/HealthKitBackgroundSyncCoordinator.swift */; };
-		DE6000000000000000000004 /* HealthKit/HealthKitSessionProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE6000000000000000000014 /* HealthKit/HealthKitSessionProvider.swift */; };
 		DE7000000000000000000002 /* CrashReporting.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7000000000000000000001 /* CrashReporting.swift */; };
 		DE7000000000000000000013 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = DE7000000000000000000011 /* FirebaseCore */; };
 		DE7000000000000000000014 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = DE7000000000000000000012 /* FirebaseCrashlytics */; };
@@ -114,18 +120,26 @@
 		DE300000000000000000000F /* MetricTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricTile.swift; sourceTree = "<group>"; };
 		DE3000000000000000000010 /* StatusText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusText.swift; sourceTree = "<group>"; };
 		DE4000000000000000000011 /* HealthKitClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitClient.swift; sourceTree = "<group>"; };
+		DE6000000000000000000015 /* HealthKit/HealthKitInstallationId.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitInstallationId.swift; sourceTree = "<group>"; };
+		DE9000000000000000000010 /* HealthKit/HealthKitAuthExceptionCatcher.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = HealthKit/HealthKitAuthExceptionCatcher.h; sourceTree = "<group>"; };
+		DE9000000000000000000011 /* HealthKit/HealthKitAuthExceptionCatcher.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = HealthKit/HealthKitAuthExceptionCatcher.m; sourceTree = "<group>"; };
+		DE9000000000000000000012 /* FamilyOS-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "FamilyOS-Bridging-Header.h"; sourceTree = "<group>"; };
+		DE8000000000000000000011 /* HealthKit/HealthKitSyncStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitSyncStore.swift; sourceTree = "<group>"; };
+		DE8000000000000000000012 /* HealthKit/HealthKitSyncWorker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitSyncWorker.swift; sourceTree = "<group>"; };
+		DE8000000000000000000013 /* HealthKit/HealthKitBloodPressureSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitBloodPressureSync.swift; sourceTree = "<group>"; };
+		DE800000000000000000001A /* HealthKit/HealthKitWorkoutSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitWorkoutSync.swift; sourceTree = "<group>"; };
+		DE8000000000000000000014 /* HealthKitOpsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitOpsModels.swift; sourceTree = "<group>"; };
+		DE8000000000000000000015 /* HealthKitSyncStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitSyncStoreTests.swift; sourceTree = "<group>"; };
+		DE8000000000000000000016 /* HealthKitLocalE2ETests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitLocalE2ETests.swift; sourceTree = "<group>"; };
+		DE8000000000000000000017 /* HealthKit/HealthKitSleepDaySync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitSleepDaySync.swift; sourceTree = "<group>"; };
+		DE8000000000000000000018 /* HealthKit/HealthKitSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitSyncCoordinator.swift; sourceTree = "<group>"; };
+		DE8000000000000000000019 /* HealthKit/HealthKitBackgroundSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitBackgroundSync.swift; sourceTree = "<group>"; };
 		DE4000000000000000000012 /* HealthKitSyncStateViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitSyncStateViewModel.swift; sourceTree = "<group>"; };
 		DE4000000000000000000013 /* HealthBootstrapHealthKitViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthBootstrapHealthKitViewModel.swift; sourceTree = "<group>"; };
 		DE4000000000000000000014 /* HealthKitSyncView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitSyncView.swift; sourceTree = "<group>"; };
 		DE5000000000000000000001 /* SoloFirstTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoloFirstTests.swift; sourceTree = "<group>"; };
 		DE5000000000000000000005 /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = Platforms/iPhoneOS.platform/Developer/Library/Frameworks/XCTest.framework; sourceTree = DEVELOPER_DIR; };
 		DE5000000000000000000010 /* FamilyOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FamilyOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		DE6000000000000000000011 /* HealthKit/HealthKitSyncStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitSyncStateStore.swift; sourceTree = "<group>"; };
-		DE6000000000000000000012 /* HealthKit/HealthKitSyncEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitSyncEngine.swift; sourceTree = "<group>"; };
-		DE6000000000000000000031 /* HealthKit/HealthKitSyncWorker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitSyncWorker.swift; sourceTree = "<group>"; };
-		DE6000000000000000000030 /* HealthKit/HealthKitOutboxStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitOutboxStore.swift; sourceTree = "<group>"; };
-		DE6000000000000000000013 /* HealthKit/HealthKitBackgroundSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitBackgroundSyncCoordinator.swift; sourceTree = "<group>"; };
-		DE6000000000000000000014 /* HealthKit/HealthKitSessionProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKit/HealthKitSessionProvider.swift; sourceTree = "<group>"; };
 		DE7000000000000000000001 /* CrashReporting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrashReporting.swift; sourceTree = "<group>"; };
 		DE7000000000000000000020 /* GoogleService-Info.plist.example */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist.example"; sourceTree = "<group>"; };
 		DE7000000000000000000021 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
@@ -186,6 +200,7 @@
 				DE1000000000000000000038 /* ViewModels */,
 				DE1000000000000000000039 /* Models */,
 				DE1000000000000000000011 /* FamilyOSApp.swift */,
+				DE9000000000000000000012 /* FamilyOS-Bridging-Header.h */,
 			);
 			path = FamilyOS;
 			sourceTree = "<group>";
@@ -231,12 +246,16 @@
 			children = (
 				DE7000000000000000000001 /* CrashReporting.swift */,
 				DE1000000000000000000017 /* KeychainStore.swift */,
-				DE6000000000000000000011 /* HealthKit/HealthKitSyncStateStore.swift */,
-				DE6000000000000000000012 /* HealthKit/HealthKitSyncEngine.swift */,
-				DE6000000000000000000031 /* HealthKit/HealthKitSyncWorker.swift */,
-				DE6000000000000000000030 /* HealthKit/HealthKitOutboxStore.swift */,
-				DE6000000000000000000013 /* HealthKit/HealthKitBackgroundSyncCoordinator.swift */,
-				DE6000000000000000000014 /* HealthKit/HealthKitSessionProvider.swift */,
+				DE6000000000000000000015 /* HealthKit/HealthKitInstallationId.swift */,
+				DE9000000000000000000010 /* HealthKit/HealthKitAuthExceptionCatcher.h */,
+				DE9000000000000000000011 /* HealthKit/HealthKitAuthExceptionCatcher.m */,
+				DE8000000000000000000011 /* HealthKit/HealthKitSyncStore.swift */,
+				DE8000000000000000000012 /* HealthKit/HealthKitSyncWorker.swift */,
+				DE8000000000000000000013 /* HealthKit/HealthKitBloodPressureSync.swift */,
+				DE800000000000000000001A /* HealthKit/HealthKitWorkoutSync.swift */,
+				DE8000000000000000000017 /* HealthKit/HealthKitSleepDaySync.swift */,
+				DE8000000000000000000018 /* HealthKit/HealthKitSyncCoordinator.swift */,
+				DE8000000000000000000019 /* HealthKit/HealthKitBackgroundSync.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -285,6 +304,7 @@
 			isa = PBXGroup;
 			children = (
 				DE1000000000000000000025 /* HealthModels.swift */,
+				DE8000000000000000000014 /* HealthKitOpsModels.swift */,
 				DE1000000000000000000026 /* SupabaseModels.swift */,
 			);
 			path = Models;
@@ -317,6 +337,8 @@
 			isa = PBXGroup;
 			children = (
 				DE5000000000000000000001 /* SoloFirstTests.swift */,
+				DE8000000000000000000015 /* HealthKitSyncStoreTests.swift */,
+				DE8000000000000000000016 /* HealthKitLocalE2ETests.swift */,
 			);
 			path = FamilyOSTests;
 			sourceTree = "<group>";
@@ -485,15 +507,19 @@
 				DE300000000000000000002F /* MetricTile.swift in Sources */,
 				DE3000000000000000000030 /* StatusText.swift in Sources */,
 				DE4000000000000000000001 /* HealthKitClient.swift in Sources */,
+				DE6000000000000000000005 /* HealthKit/HealthKitInstallationId.swift in Sources */,
+				DE9000000000000000000001 /* HealthKitAuthExceptionCatcher.m in Sources */,
+				DE8000000000000000000001 /* HealthKit/HealthKitSyncStore.swift in Sources */,
+				DE8000000000000000000002 /* HealthKit/HealthKitSyncWorker.swift in Sources */,
+				DE8000000000000000000003 /* HealthKit/HealthKitBloodPressureSync.swift in Sources */,
+				DE800000000000000000000A /* HealthKit/HealthKitWorkoutSync.swift in Sources */,
+				DE8000000000000000000004 /* HealthKitOpsModels.swift in Sources */,
+				DE8000000000000000000007 /* HealthKit/HealthKitSleepDaySync.swift in Sources */,
+				DE8000000000000000000008 /* HealthKit/HealthKitSyncCoordinator.swift in Sources */,
+				DE8000000000000000000009 /* HealthKit/HealthKitBackgroundSync.swift in Sources */,
 				DE4000000000000000000002 /* HealthKitSyncStateViewModel.swift in Sources */,
 				DE4000000000000000000003 /* HealthBootstrapHealthKitViewModel.swift in Sources */,
 				DE4000000000000000000004 /* HealthKitSyncView.swift in Sources */,
-				DE6000000000000000000001 /* HealthKit/HealthKitSyncStateStore.swift in Sources */,
-				DE6000000000000000000002 /* HealthKit/HealthKitSyncEngine.swift in Sources */,
-				DE6000000000000000000021 /* HealthKit/HealthKitSyncWorker.swift in Sources */,
-				DE6000000000000000000020 /* HealthKit/HealthKitOutboxStore.swift in Sources */,
-				DE6000000000000000000003 /* HealthKit/HealthKitBackgroundSyncCoordinator.swift in Sources */,
-				DE6000000000000000000004 /* HealthKit/HealthKitSessionProvider.swift in Sources */,
 				DE7000000000000000000002 /* CrashReporting.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -503,6 +529,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				DE5000000000000000000003 /* SoloFirstTests.swift in Sources */,
+				DE8000000000000000000005 /* HealthKitSyncStoreTests.swift in Sources */,
+				DE8000000000000000000006 /* HealthKitLocalE2ETests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -655,6 +683,7 @@
 					"-ObjC",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.deepanshujain.familyos;
+				SWIFT_OBJC_BRIDGING_HEADER = FamilyOS/FamilyOS-Bridging-Header.h;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -689,6 +718,7 @@
 					"-ObjC",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.deepanshujain.familyos;
+				SWIFT_OBJC_BRIDGING_HEADER = FamilyOS/FamilyOS-Bridging-Header.h;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;

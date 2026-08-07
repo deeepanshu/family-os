@@ -40,6 +40,7 @@ final class HealthBootstrapViewModel: ObservableObject {
         healthKit = HealthKitSyncStateViewModel()
 
         clearInvalidCachedReleaseTokenIfNeeded()
+        clearStaleLocalSessionIfNeeded()
 
         republishChanges(from: connection)
         republishChanges(from: auth)
@@ -58,8 +59,14 @@ final class HealthBootstrapViewModel: ObservableObject {
     }
 
     var hasSupabaseConfiguration: Bool {
-        !connection.supabaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !connection.supabaseAnonKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let url = connection.supabaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = connection.supabaseAnonKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !url.isEmpty, !key.isEmpty else { return false }
+        // Treat Local.private.xcconfig.example placeholders as unconfigured.
+        if url.contains("your-project") || key.hasPrefix("your-") {
+            return false
+        }
+        return true
     }
 
     var usesLocalDevSignIn: Bool {
@@ -95,12 +102,6 @@ final class HealthBootstrapViewModel: ObservableObject {
     }
 
     func signOut() {
-        if let userId = auth.signedInUserId, let personId = healthKit.linkedProfileId ?? selfProfile?.id {
-            Task {
-                await HealthKitSyncStateStore().clearAll(userId: userId, personId: personId)
-            }
-        }
-        HealthKitBackgroundSyncCoordinator.shared.stopObservers()
         auth.clear(defaults: defaults, keychain: keychain)
         family.clear()
         profiles.clear()
@@ -126,8 +127,21 @@ final class HealthBootstrapViewModel: ObservableObject {
     }
 
     var selfProfile: HealthProfile? {
-        profiles.profiles.first {
-            $0.relationshipLabel == "Self" && ($0.linkedUserId == auth.signedInUserId || auth.signedInUserId == nil)
+        // Prefer the HealthKit-linked profile only when it is actually Self.
+        if let linked = healthKit.linkedProfileId,
+           let match = profiles.profiles.first(where: { $0.id == linked }),
+           match.relationshipLabel == "Self" {
+            return match
+        }
+        if let selected = profiles.selectedProfile,
+           selected.relationshipLabel == "Self" {
+            return selected
+        }
+        return profiles.profiles.first {
+            $0.relationshipLabel == "Self"
+                && (auth.signedInUserId == nil
+                    || $0.linkedUserId == nil
+                    || $0.linkedUserId == auth.signedInUserId)
         }
     }
 
@@ -181,9 +195,9 @@ final class HealthBootstrapViewModel: ObservableObject {
     }
 
     func applyBootstrap(_ response: BootstrapResponse) {
-        family.currentFamilyName = response.family.name
-        family.familyKind = response.family.kind
-        family.currentFamilyRole = response.membership.role
+        family.currentFamilyName = response.family?.name
+        family.familyKind = response.family?.kind
+        family.currentFamilyRole = response.membership?.role
         profiles.profiles = response.profiles
         if let selfProfile = response.selfProfile {
             profiles.selectedProfileId = selfProfile.id
@@ -206,6 +220,12 @@ final class HealthBootstrapViewModel: ObservableObject {
         } catch {
             isError = true
             statusMessage = error.localizedDescription
+            // Generic non-fatal for unexpected API failures outside HealthKit-specific paths.
+            if let api = error as? HealthAPIError, let code = api.errorCode {
+                CrashReporting.log("api_request_failed code=\(code)")
+            } else {
+                CrashReporting.record(error: error, userInfo: ["source": "bootstrap_request"])
+            }
             if showsFeedback {
                 reportActionFailure(statusMessage)
             }
@@ -285,6 +305,24 @@ final class HealthBootstrapViewModel: ObservableObject {
             statusMessage = "Please sign in."
             isError = false
         }
+    }
+
+    /// Drop production Apple sessions when running a local Debug build without real Supabase.
+    /// Otherwise the app stays "signed in" with a JWT aimed at prod and never hits the Mac API.
+    private func clearStaleLocalSessionIfNeeded() {
+        guard connection.environmentName == .local, hasAccessToken else {
+            return
+        }
+        guard !hasSupabaseConfiguration else {
+            return
+        }
+        let token = auth.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard token != "dev-token" else {
+            return
+        }
+        auth.clear(defaults: defaults, keychain: keychain)
+        statusMessage = "Local development sign in required."
+        isError = false
     }
 }
 

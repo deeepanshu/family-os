@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { HEALTH_API_PREFIX } from "@family-os/shared";
 import { createApp } from "../src/app";
 import { InMemoryFamilyRepository } from "../src/repositories/families";
-import { bloodPressureEvent, seedHealthKitReadyGroup } from "./healthKitTestHelpers";
+import { bloodPressureOp, seedHealthKitReadyGroup } from "./healthKitTestHelpers";
 
 const jwtSecret = "test-supabase-jwt-secret-with-enough-length";
 const supabaseUrl = "https://project.supabase.co";
@@ -60,7 +60,7 @@ async function setupHealthKitBp(api: ReturnType<typeof app>) {
     })
   });
   await seedHealthKitReadyGroup(api, token, profileId, installationId, "vitals", [
-    bloodPressureEvent({
+    bloodPressureOp({
       sourceObjectKey: "5e1ed621-4a6c-4e09-969e-31c6f0872c24",
       measuredAtUtc: "2026-07-25T01:10:00.000Z",
       systolic: 118,

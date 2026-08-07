@@ -75,7 +75,7 @@ export function mapInvite(row: Row): FamilyInvite {
 export function mapProfile(row: Row): HealthProfile {
   return {
     id: row.id,
-    familyId: row.family_id,
+    familyId: row.family_id ?? null,
     linkedUserId: row.linked_user_id ?? undefined,
     displayName: row.display_name,
     relationshipLabel: row.relationship_label ?? undefined,

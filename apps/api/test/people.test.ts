@@ -211,7 +211,10 @@ describe("health profiles", () => {
       }
     });
 
-    expect(response.status).toBe(403);
+    // Solo-first: strangers without a household get their own (empty) profile list, not family data.
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data).toEqual([]);
   });
 
   it("does not expose profile detail to non-members", async () => {

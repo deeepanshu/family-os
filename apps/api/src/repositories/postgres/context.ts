@@ -43,6 +43,49 @@ export class PostgresRepositoryContext {
     return current;
   }
 
+  /** Solo-first: Self person linked to this auth user (family optional). */
+  async requireSelfPerson(userId: string): Promise<{ personId: string; familyId: string | null }> {
+    const [row] = await this.sql`
+      select id, family_id
+      from people
+      where linked_user_id = ${userId}
+        and relationship_label = 'Self'
+        and status = 'active'
+      limit 1
+    `;
+    if (!row) {
+      throw new HttpError(400, "self_profile_required", "Create your profile before continuing.");
+    }
+    return { personId: row.id as string, familyId: (row.family_id as string | null) ?? null };
+  }
+
+  /**
+   * Caller may access person if they own the Self link, or share an active family membership
+   * with that person's family (when family_id is set).
+   */
+  async requirePersonAccess(userId: string, personId: string): Promise<{ personId: string; familyId: string | null }> {
+    const [row] = await this.sql`
+      select id, family_id, linked_user_id
+      from people
+      where id = ${personId}
+        and status = 'active'
+      limit 1
+    `;
+    if (!row) {
+      throw new HttpError(404, "profile_not_found", "Health profile was not found.");
+    }
+    if (row.linked_user_id === userId) {
+      return { personId: row.id as string, familyId: (row.family_id as string | null) ?? null };
+    }
+    if (row.family_id) {
+      const current = await this.getCurrentFamily(userId);
+      if (current && current.family.id === row.family_id) {
+        return { personId: row.id as string, familyId: row.family_id as string };
+      }
+    }
+    throw new HttpError(403, "profile_forbidden", "You do not have access to this health profile.");
+  }
+
   async requireManager(userId: string, message: string): Promise<NonNullable<CurrentFamilyResponse>> {
     const current = await this.requireActiveMember(userId);
     if (current.membership.role !== "manager") {
@@ -123,7 +166,7 @@ export class PostgresRepositoryContext {
     await tx`
       insert into audit_logs (family_id, actor_user_id, action, resource_type, resource_id, metadata)
       values (
-        ${input.familyId},
+        ${input.familyId ?? null},
         ${input.actorUserId ?? null},
         ${input.action},
         ${input.resourceType},

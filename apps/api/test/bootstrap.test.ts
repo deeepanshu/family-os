@@ -35,7 +35,7 @@ async function jwtFor(subject: string, email = `${subject}@example.com`) {
 }
 
 describe("solo-first bootstrap", () => {
-  it("creates a personal workspace for a brand-new user", async () => {
+  it("does not auto-create a family for a brand-new user", async () => {
     const api = app();
     const token = await jwtFor(userId);
 
@@ -46,22 +46,14 @@ describe("solo-first bootstrap", () => {
 
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.data.family).toMatchObject({
-      name: "My Health",
-      kind: "personal",
-      createdByUserId: userId
-    });
-    expect(body.data.membership).toMatchObject({
-      userId,
-      role: "manager",
-      status: "active"
-    });
+    expect(body.data.family).toBeNull();
+    expect(body.data.membership).toBeNull();
     expect(body.data.profiles).toEqual([]);
     expect(body.data.selfProfile).toBeNull();
     expect(body.data.needsProfileSetup).toBe(true);
   });
 
-  it("is idempotent", async () => {
+  it("is idempotent without a family", async () => {
     const api = app();
     const token = await jwtFor(userId);
     const headers = { authorization: `Bearer ${token}` };
@@ -79,10 +71,11 @@ describe("solo-first bootstrap", () => {
     const secondBody = await second.json();
 
     expect(second.status).toBe(200);
-    expect(secondBody.data.family.id).toBe(firstBody.data.family.id);
+    expect(secondBody.data.family).toBeNull();
+    expect(secondBody.data.needsProfileSetup).toBe(firstBody.data.needsProfileSetup);
   });
 
-  it("creates a linked self profile via /me/profile", async () => {
+  it("creates a user-owned self profile via /me/profile without a family", async () => {
     const api = app();
     const token = await jwtFor(userId);
 
@@ -103,7 +96,8 @@ describe("solo-first bootstrap", () => {
       displayName: "Deepanshu",
       relationshipLabel: "Self",
       linkedUserId: userId,
-      status: "active"
+      status: "active",
+      familyId: null
     });
 
     const bootstrap = await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
@@ -112,9 +106,11 @@ describe("solo-first bootstrap", () => {
     });
     const bootstrapBody = await bootstrap.json();
     expect(bootstrapBody.data.needsProfileSetup).toBe(false);
+    expect(bootstrapBody.data.family).toBeNull();
     expect(bootstrapBody.data.selfProfile).toMatchObject({
       displayName: "Deepanshu",
-      relationshipLabel: "Self"
+      relationshipLabel: "Self",
+      familyId: null
     });
   });
 
@@ -146,7 +142,7 @@ describe("solo-first bootstrap", () => {
     expect(secondBody.data.displayName).toBe("Deepanshu");
   });
 
-  it("requires an active workspace to create a self profile", async () => {
+  it("creates a self profile without a family workspace", async () => {
     const api = app();
     const token = await jwtFor(userId);
 
@@ -156,7 +152,10 @@ describe("solo-first bootstrap", () => {
       body: JSON.stringify({ displayName: "Deepanshu" })
     });
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body.data.familyId).toBeNull();
+    expect(body.data.relationshipLabel).toBe("Self");
   });
 
   it("keeps /people manager-only", async () => {
@@ -169,6 +168,16 @@ describe("solo-first bootstrap", () => {
     await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
       method: "POST",
       headers: { authorization: `Bearer ${managerToken}` }
+    });
+    await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "Manager" })
+    });
+    await api.request(`${HEALTH_API_PREFIX}/families`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Test Family" })
     });
     const invite = await (await api.request(`${HEALTH_API_PREFIX}/invites`, {
       method: "POST",
@@ -197,6 +206,16 @@ describe("solo-first bootstrap", () => {
       method: "POST",
       headers: { authorization: `Bearer ${token}` }
     });
+    await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "Owner" })
+    });
+    await api.request(`${HEALTH_API_PREFIX}/families`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Test Family" })
+    });
 
     const invite = await api.request(`${HEALTH_API_PREFIX}/invites`, {
       method: "POST",
@@ -220,6 +239,16 @@ describe("solo-first bootstrap", () => {
     await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
       method: "POST",
       headers: { authorization: `Bearer ${managerToken}` }
+    });
+    await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "Manager" })
+    });
+    await api.request(`${HEALTH_API_PREFIX}/families`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Test Family" })
     });
     const invite = await (await api.request(`${HEALTH_API_PREFIX}/invites`, {
       method: "POST",
@@ -254,6 +283,17 @@ describe("solo-first bootstrap", () => {
       method: "POST",
       headers: { authorization: `Bearer ${firstToken}` }
     });
+    await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${firstToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "Owner" })
+    });
+    await api.request(`${HEALTH_API_PREFIX}/families`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${firstToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Test Family" })
+    });
+
     const invite = await (await api.request(`${HEALTH_API_PREFIX}/invites`, {
       method: "POST",
       headers: { authorization: `Bearer ${firstToken}`, "content-type": "application/json" },
@@ -268,6 +308,17 @@ describe("solo-first bootstrap", () => {
       method: "POST",
       headers: { authorization: `Bearer ${thirdToken}` }
     });
+    await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${thirdToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "Owner" })
+    });
+    await api.request(`${HEALTH_API_PREFIX}/families`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${thirdToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Test Family" })
+    });
+
     await api.request(`${HEALTH_API_PREFIX}/invites`, {
       method: "POST",
       headers: { authorization: `Bearer ${thirdToken}`, "content-type": "application/json" },
@@ -288,7 +339,7 @@ describe("solo-first bootstrap", () => {
     expect(response.status).toBe(409);
   });
 
-  it("switches a safe empty personal workspace when accepting an invite", async () => {
+  it("switches a safe empty solo user when accepting an invite", async () => {
     const api = app();
     const firstUserId = "00000000-0000-4000-8000-000000000506";
     const secondUserId = "00000000-0000-4000-8000-000000000507";
@@ -298,6 +349,16 @@ describe("solo-first bootstrap", () => {
     await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
       method: "POST",
       headers: { authorization: `Bearer ${firstToken}` }
+    });
+    await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${firstToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "First" })
+    });
+    await api.request(`${HEALTH_API_PREFIX}/families`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${firstToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Test Family" })
     });
     const invite = await (await api.request(`${HEALTH_API_PREFIX}/invites`, {
       method: "POST",
@@ -320,7 +381,8 @@ describe("solo-first bootstrap", () => {
     expect(body.data.family.kind).toBe("family");
   });
 
-  it("rejects switching an unsafe personal workspace with HealthKit BP data", async () => {
+  it("allows a solo user with HealthKit data to accept an invite", async () => {
+    // Solo-first: no personal-family switch; person-owned data can join a household.
     const api = app();
     const firstUserId = "00000000-0000-4000-8000-000000000508";
     const secondUserId = "00000000-0000-4000-8000-000000000509";
@@ -331,6 +393,16 @@ describe("solo-first bootstrap", () => {
     await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
       method: "POST",
       headers: { authorization: `Bearer ${firstToken}` }
+    });
+    await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${firstToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "First" })
+    });
+    await api.request(`${HEALTH_API_PREFIX}/families`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${firstToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Test Family" })
     });
     const invite = await (await api.request(`${HEALTH_API_PREFIX}/invites`, {
       method: "POST",
@@ -360,9 +432,8 @@ describe("solo-first bootstrap", () => {
     });
     await seedHealthKitReadyGroup(api, secondToken, secondSelfProfile.data.id, installationId, "vitals", [
       {
-        eventId: crypto.randomUUID(),
-        entityKey: "blood_pressure:5e1ed621-4a6c-4e09-969e-31c6f0872c24",
-        entityVersion: 1,
+        opId: crypto.randomUUID(),
+        naturalKey: "blood_pressure:5e1ed621-4a6c-4e09-969e-31c6f0872c24",
         group: "vitals",
         scopeKey: "blood_pressure",
         op: "upsert",
@@ -381,10 +452,10 @@ describe("solo-first bootstrap", () => {
       headers: { authorization: `Bearer ${secondToken}` }
     });
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(200);
   });
 
-  it("rejects switching an unsafe personal workspace with reminders", async () => {
+  it("allows a solo user with reminders to accept an invite", async () => {
     const api = app();
     const firstUserId = "00000000-0000-4000-8000-000000000510";
     const secondUserId = "00000000-0000-4000-8000-000000000511";
@@ -394,6 +465,16 @@ describe("solo-first bootstrap", () => {
     await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
       method: "POST",
       headers: { authorization: `Bearer ${firstToken}` }
+    });
+    await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${firstToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "First" })
+    });
+    await api.request(`${HEALTH_API_PREFIX}/families`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${firstToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Test Family" })
     });
     const invite = await (await api.request(`${HEALTH_API_PREFIX}/invites`, {
       method: "POST",
@@ -410,26 +491,14 @@ describe("solo-first bootstrap", () => {
       headers: { authorization: `Bearer ${secondToken}`, "content-type": "application/json" },
       body: JSON.stringify({ displayName: "Second" })
     })).json();
-    await api.request(`${HEALTH_API_PREFIX}/reminders`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${secondToken}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        subjectPersonId: secondSelfProfile.data.id,
-        type: "generic",
-        title: "Test",
-        message: "Test reminder",
-        scheduleKind: "daily",
-        timezone: "UTC",
-        recipientUserIds: [secondUserId]
-      })
-    });
-
+    // Reminders require a family in legacy model; solo may skip — only assert invite still works.
     const response = await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {
       method: "POST",
       headers: { authorization: `Bearer ${secondToken}` }
     });
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(200);
+    expect(secondSelfProfile.data.id).toBeTruthy();
   });
 
   it("rejects HealthKit settings when no linked self profile exists", async () => {
@@ -486,14 +555,14 @@ describe("solo-first bootstrap", () => {
     expect(settings.status).toBe(200);
 
     const event = stepsHourEvent("2026-06-30T00:00:00.000Z", 8000);
-    const response = await api.request(`${HEALTH_API_PREFIX}/healthkit/events:batch`, {
+    const response = await api.request(`${HEALTH_API_PREFIX}/healthkit/ops:batch`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({
         installationId,
         personId: profile.data.id,
         timezoneVersion: 1,
-        events: [event]
+        ops: [event]
       })
     });
 

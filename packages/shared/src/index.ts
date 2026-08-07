@@ -5,6 +5,7 @@ export const HEALTH_API_PREFIX = "/health/api/v1" as const;
 
 export * from "./healthkitRegistry";
 export * from "./healthkitCanonical";
+export * from "./healthkitOps";
 export * from "./healthkitEvents";
 export * from "./healthkitFixtures";
 
@@ -28,9 +29,10 @@ export type AuthSessionResponse = {
   userId: string;
 };
 
+/** Solo-first: family/membership are null until the user optionally creates a household. */
 export type BootstrapResponse = {
-  family: Family;
-  membership: FamilyMembership;
+  family: Family | null;
+  membership: FamilyMembership | null;
   profiles: HealthProfile[];
   selfProfile: HealthProfile | null;
   needsProfileSetup: boolean;
@@ -100,7 +102,8 @@ export type PersonStatus = "active" | "inactive";
 
 export type HealthProfile = {
   id: string;
-  familyId: string;
+  /** Null for solo Self profiles until the user creates a family. */
+  familyId: string | null;
   linkedUserId?: string;
   displayName: string;
   relationshipLabel?: string;
@@ -112,7 +115,7 @@ export type HealthProfile = {
 
 export type BloodPressureReading = {
   id: string;
-  familyId: string;
+  familyId: string | null;
   personId: string;
   recordedByUserId: string;
   systolic: number;
@@ -147,6 +150,7 @@ export type HealthKitMetric = HealthKitConsentGroup;
 
 export type HealthMetricSyncStatusCode =
   | "never_synced"
+  | "syncing"
   | "ready"
   | "backfilling"
   | "error"
@@ -198,6 +202,19 @@ export type HealthDailyMetricRecord = {
   sampleCount: number;
 };
 
+export type HealthWorkoutEventRecord = {
+  type: string;
+  dateUtc: string;
+  endDateUtc?: string;
+};
+
+export type HealthWorkoutActivitySegmentRecord = {
+  workoutType: string;
+  startedAtUtc: string;
+  endedAtUtc: string;
+  durationSeconds: number;
+};
+
 export type HealthWorkoutRecord = {
   id: string;
   personId: string;
@@ -209,6 +226,18 @@ export type HealthWorkoutRecord = {
   distanceMeters?: number;
   averageHeartRateBpm?: number;
   maximumHeartRateBpm?: number;
+  minimumHeartRateBpm?: number;
+  sourceName?: string;
+  sourceBundleId?: string;
+  deviceName?: string;
+  deviceManufacturer?: string;
+  isIndoor?: boolean;
+  elevationAscendedMeters?: number;
+  averageMETs?: number;
+  swimmingStrokeCount?: number;
+  totalFlightsClimbed?: number;
+  events?: HealthWorkoutEventRecord[];
+  activities?: HealthWorkoutActivitySegmentRecord[];
 };
 
 export type HealthStepHourRecord = {
@@ -298,7 +327,7 @@ export type NotificationDelivery = {
 
 export type AuditLog = {
   id: string;
-  familyId: string;
+  familyId: string | null;
   actorUserId?: string;
   action: string;
   resourceType: string;
@@ -420,6 +449,15 @@ export type McpWorkoutRow = {
   distanceMeters?: number;
   averageHeartRateBpm?: number;
   maximumHeartRateBpm?: number;
+  minimumHeartRateBpm?: number;
+  sourceName?: string;
+  isIndoor?: boolean;
+  elevationAscendedMeters?: number;
+  averageMETs?: number;
+  swimmingStrokeCount?: number;
+  totalFlightsClimbed?: number;
+  eventCount?: number;
+  activitySegmentCount?: number;
 };
 
 export type McpHealthDataBase = {

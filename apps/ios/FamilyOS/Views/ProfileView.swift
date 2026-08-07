@@ -15,19 +15,17 @@ struct ProfileView: View {
                     }
                 }
 
-                Section("Account") {
-                    LabeledContent("Signed in", value: viewModel.signedInSummary)
+                HealthKitSyncView(viewModel: viewModel)
+
+                Section {
                     Button("Sign Out", role: .destructive) {
                         viewModel.signOut()
                     }
                 }
-
-                HealthKitSyncView(viewModel: viewModel)
             }
-            .navigationTitle("Profile")
+            .navigationTitle("HealthKit Sync")
             .task {
                 await viewModel.loadHealthKitStatus()
-                await HealthKitBackgroundSyncCoordinator.shared.resumePendingWorkIfSignedIn(using: viewModel)
             }
         }
     }

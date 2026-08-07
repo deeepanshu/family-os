@@ -9,10 +9,14 @@ final class HealthKitSyncStateViewModel: ObservableObject {
     @Published var linkedProfileId: String?
     @Published var consentGranted = false
     @Published var selectedTimezone = TimeZone.current.identifier
-    @Published var enabledMetrics: Set<HealthKitSyncMetric> = Set(HealthKitSyncMetric.allCases)
+    /// HealthKit groups we intend to support.
+    static let syncableMetrics: Set<HealthKitSyncMetric> = [.vitals, .sleep, .workouts]
+    /// Groups with a working foreground + background sync path today.
+    static let implementedSyncMetrics: Set<HealthKitSyncMetric> = [.vitals, .sleep, .workouts]
+
+    @Published var enabledMetrics: Set<HealthKitSyncMetric> = []
     @Published var confirmTimezoneChange = false
-    @Published var outboxDiagnostics = HealthKitOutboxStore.Diagnostics.empty
-    @Published var backgroundSyncAlertsEnabled = HealthKitBackgroundSyncAlerts.isEnabled()
+    @Published var backgroundSyncAlertsEnabled = false
 
     func clear() {
         status = nil
@@ -22,9 +26,9 @@ final class HealthKitSyncStateViewModel: ObservableObject {
         linkedProfileId = nil
         consentGranted = false
         selectedTimezone = TimeZone.current.identifier
-        enabledMetrics = Set(HealthKitSyncMetric.allCases)
+        enabledMetrics = []
         confirmTimezoneChange = false
-        outboxDiagnostics = .empty
+        backgroundSyncAlertsEnabled = false
     }
 
     func apply(status: HealthKitSyncStatus) {
@@ -32,7 +36,13 @@ final class HealthKitSyncStateViewModel: ObservableObject {
         linkedProfileId = status.personId
         consentGranted = status.consentActive
         selectedTimezone = status.healthTimezone
-        enabledMetrics = Set(status.enabledMetrics.isEmpty ? HealthKitSyncMetric.allCases : status.enabledMetrics)
+        // Never re-enable cosmetic groups from the API; only keep syncable ones.
+        let fromServer = Set(status.enabledMetrics).intersection(Self.syncableMetrics)
+        if status.consentActive {
+            enabledMetrics = fromServer.isEmpty ? Self.syncableMetrics : fromServer
+        } else {
+            enabledMetrics = []
+        }
     }
 
     var metricRows: [HealthKitMetricState] {
@@ -41,7 +51,7 @@ final class HealthKitSyncStateViewModel: ObservableObject {
 
     @discardableResult
     func setBackgroundSyncAlertsEnabled(_ enabled: Bool) async -> Bool {
-        backgroundSyncAlertsEnabled = await HealthKitBackgroundSyncAlerts.setEnabled(enabled)
-        return backgroundSyncAlertsEnabled
+        backgroundSyncAlertsEnabled = false
+        return false
     }
 }

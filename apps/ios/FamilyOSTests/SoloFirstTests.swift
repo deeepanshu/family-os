@@ -129,15 +129,19 @@ final class SoloFirstTests: XCTestCase {
         // Self profile exists, but linked HealthKit target is someone else.
         viewModel.healthKit.linkedProfileId = otherProfile.id
         viewModel.healthKit.isAvailable = true
+        viewModel.healthKit.consentGranted = true
+        viewModel.healthKit.enabledMetrics = [.vitals]
         await viewModel.syncHealthKitNow()
         XCTAssertTrue(viewModel.isError)
         XCTAssertEqual(viewModel.statusMessage, "HealthKit sync must target your own profile.")
     }
 
     func testHealthKitMetricDisplayNames() {
-        XCTAssertEqual(HealthKitSyncMetric.steps.displayName, "Steps")
+        XCTAssertEqual(HealthKitSyncMetric.activity.displayName, "Activity")
         XCTAssertEqual(HealthKitSyncMetric.sleep.displayName, "Sleep")
-        XCTAssertEqual(HealthKitSyncMetric.bloodPressure.displayName, "Blood pressure")
+        XCTAssertEqual(HealthKitSyncMetric.vitals.displayName, "Vitals")
+        // Legacy alias still points at vitals.
+        XCTAssertEqual(HealthKitSyncMetric.bloodPressure, HealthKitSyncMetric.vitals)
     }
 
     func testConnectionMigratesRetiredPublicAPIURL() {
@@ -170,6 +174,44 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertEqual(connection.baseURL, customURL)
     }
 
+    func testLocalEnvironmentIgnoresStickyBaseURLAndSupabase() {
+        let suiteName = "HealthConnectionLocalSticky-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("http://localhost:3001/health/api/v1", forKey: DefaultsKey.baseURL)
+        defaults.set("https://real-project.supabase.co", forKey: DefaultsKey.supabaseURL)
+        defaults.set("real-anon-key", forKey: DefaultsKey.supabaseAnonKey)
+
+        let environment = AppEnvironment(
+            name: .local,
+            apiBaseURL: "http://192.168.1.64:3001/health/api/v1",
+            supabaseURL: "https://your-project.supabase.co",
+            supabaseAnonKey: "your-supabase-anon-key"
+        )
+        let connection = HealthConnectionViewModel(defaults: defaults, environment: environment)
+
+        XCTAssertEqual(connection.baseURL, environment.apiBaseURL)
+        XCTAssertEqual(connection.supabaseURL, environment.supabaseURL)
+        XCTAssertEqual(connection.supabaseAnonKey, environment.supabaseAnonKey)
+        XCTAssertEqual(defaults.string(forKey: DefaultsKey.baseURL), environment.apiBaseURL)
+    }
+
+    func testConnectionMigratesLocalhostSavedURLOnRelease() {
+        let suiteName = "HealthConnectionLocalhostMigration-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("http://localhost:3001/health/api/v1", forKey: DefaultsKey.baseURL)
+
+        let environment = AppEnvironment(
+            name: .release,
+            apiBaseURL: "https://familyos.deepanshujain.me/health/api/v1",
+            supabaseURL: ""
+        )
+        let connection = HealthConnectionViewModel(defaults: defaults, environment: environment)
+
+        XCTAssertEqual(connection.baseURL, environment.apiBaseURL)
+    }
+
     func testAccessTokenExpiryRequiresRefreshForExpiredToken() {
         let expiredToken = "eyJhbGciOiJub25lIn0.eyJleHAiOjF9.signature"
         XCTAssertTrue(AccessTokenExpiry.requiresRefresh(expiredToken, now: Date(timeIntervalSince1970: 2)))
@@ -179,314 +221,96 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertFalse(AccessTokenExpiry.requiresRefresh("dev-token"))
     }
 
-    func testBackfillWindowExcludesDailyMetricBeforeFirstAllowedDay() {
-        let window = HealthKitBackfillWindow(
-            rangeStart: Date(timeIntervalSince1970: 1_777_000_000),
-            rangeEnd: Date(timeIntervalSince1970: 1_784_800_000),
-            rangeStartDay: "2026-04-30",
-            rangeEndDay: "2026-07-28"
-        )
-        let beforeWindow = HealthKitSyncOperation.dailyMetricUpsert(
-            healthMetric: .walkingSpeed,
-            localDay: "2026-04-29",
-            sumValue: nil,
-            averageValue: 1.0,
-            minimumValue: 0.8,
-            maximumValue: 1.2,
-            latestValue: 1.1,
-            sampleCount: 3
-        )
-        let firstAllowedDay = HealthKitSyncOperation.dailyMetricUpsert(
-            healthMetric: .walkingSpeed,
-            localDay: "2026-04-30",
-            sumValue: nil,
-            averageValue: 1.0,
-            minimumValue: 0.8,
-            maximumValue: 1.2,
-            latestValue: 1.1,
-            sampleCount: 3
-        )
+    func testHealthKitVitalsAuthTypesAreBPThenPulseNotCorrelation() {
+        let bp = HealthKitClient.bloodPressureReadTypes()
+        let pulse = HealthKitClient.pulseReadTypes()
+        let combined = HealthKitClient.readTypes(for: [.vitals])
 
-        XCTAssertFalse(window.includes(beforeWindow))
-        XCTAssertTrue(window.includes(firstAllowedDay))
-    }
+        let systolic = HKObjectType.quantityType(forIdentifier: .bloodPressureSystolic)
+        let diastolic = HKObjectType.quantityType(forIdentifier: .bloodPressureDiastolic)
+        let heartRate = HKObjectType.quantityType(forIdentifier: .heartRate)
+        let correlation = HKObjectType.correlationType(forIdentifier: .bloodPressure)
 
-    func testOutboxDiagnosticsReportsBackfillProgress() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FamilyOSOutboxTests-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let store = HealthKitOutboxStore(directoryURL: directory)
-        let sessionId = "session-1"
-
-        try store.saveConfiguration(
-            userId: "user-1",
-            personId: "person-1",
-            installationId: "installation-1",
-            healthTimezone: "Asia/Bangkok",
-            timezoneVersion: 1,
-            enabledGroups: ["sleep"]
-        )
-        XCTAssertEqual(try store.loadConfiguration()?.personId, "person-1")
-
-        try store.saveBackfillSession(
-            sessionId: sessionId,
-            groupKey: "sleep",
-            rangeStart: .now.addingTimeInterval(-3600),
-            rangeEnd: .now,
-            status: "open"
-        )
-        try store.enqueueEvent(
-            eventId: "event-1",
-            entityKey: "sleep:2026-07-27",
-            entityVersion: 1,
-            groupKey: "sleep",
-            scopeKey: "sleep",
-            op: "upsert",
-            sessionId: sessionId,
-            payloadJson: Data("{}".utf8)
-        )
-        try store.enqueueEvent(
-            eventId: "event-2",
-            entityKey: "sleep:2026-07-26",
-            entityVersion: 1,
-            groupKey: "sleep",
-            scopeKey: "sleep",
-            op: "upsert",
-            sessionId: sessionId,
-            payloadJson: Data("{}".utf8)
-        )
-        try store.saveScopeManifest(
-            sessionId: sessionId,
-            scopeKey: "sleep",
-            eventCount: 2,
-            manifestHash: "test",
-            eventIds: ["event-1", "event-2"]
-        )
-
-        XCTAssertEqual(try store.claimPendingEvents(limit: 1).map(\.eventId), ["event-1"])
-        var diagnostics = try store.diagnostics()
-        XCTAssertEqual(diagnostics.pendingEventCount, 1)
-        XCTAssertEqual(diagnostics.inFlightEventCount, 1)
-        XCTAssertEqual(diagnostics.backfills.first?.expectedEventCount, 2)
-        XCTAssertEqual(diagnostics.backfills.first?.acknowledgedEventCount, 0)
-
-        try store.deleteEvents(eventIds: ["event-1"])
-        diagnostics = try store.diagnostics()
-        XCTAssertEqual(diagnostics.backfills.first?.pendingEventCount, 1)
-        XCTAssertEqual(diagnostics.backfills.first?.inFlightEventCount, 0)
-        XCTAssertEqual(diagnostics.backfills.first?.acknowledgedEventCount, 1)
-    }
-
-    func testOutboxDiagnosticsCountsOnlyTheRootSessionFailure() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FamilyOSOutboxFailures-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let store = HealthKitOutboxStore(directoryURL: directory)
-        let sessionId = "session-1"
-
-        try store.saveBackfillSession(
-            sessionId: sessionId,
-            groupKey: "sleep",
-            rangeStart: .now.addingTimeInterval(-3600),
-            rangeEnd: .now,
-            status: "open"
-        )
-        for index in 1...3 {
-            try store.enqueueEvent(
-                eventId: "event-\(index)",
-                entityKey: "sleep:\(index)",
-                entityVersion: index,
-                groupKey: "sleep",
-                scopeKey: "sleep",
-                op: "upsert",
-                sessionId: sessionId,
-                payloadJson: Data("{}".utf8)
-            )
+        XCTAssertEqual(bp.count, 2)
+        XCTAssertEqual(pulse.count, 1)
+        XCTAssertEqual(combined, bp.union(pulse))
+        if let systolic { XCTAssertTrue(bp.contains(systolic)) }
+        if let diastolic { XCTAssertTrue(bp.contains(diastolic)) }
+        if let heartRate {
+            XCTAssertFalse(bp.contains(heartRate))
+            XCTAssertTrue(pulse.contains(heartRate))
+        }
+        if let correlation {
+            XCTAssertFalse(bp.contains(correlation))
+            XCTAssertFalse(combined.contains(correlation))
         }
 
-        try store.retireSessionEvents(sessionId: sessionId, keepEventId: "event-1", errorCode: "payload_invalid")
-
-        XCTAssertEqual(try store.diagnostics().failedEventCount, 1)
+        let bpIds = HealthKitClient.typeIds(bp)
+        XCTAssertTrue(bpIds.contains("BloodPressureSystolic"))
+        XCTAssertTrue(bpIds.contains("BloodPressureDiastolic"))
+        XCTAssertFalse(bpIds.contains("HeartRate"))
     }
 
-    func testOutboxDiagnosticsIgnoresFailuresFromAbortedSessions() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FamilyOSOutboxAbortedFailures-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let store = HealthKitOutboxStore(directoryURL: directory)
-        let sessionId = "session-1"
+    func testHealthKitSleepAuthTypesIncludeSleepAnalysis() {
+        let sleep = HealthKitClient.sleepReadTypes()
+        let combined = HealthKitClient.readTypes(for: [.sleep])
+        let both = HealthKitClient.readTypes(for: [.vitals, .sleep])
 
-        try store.saveBackfillSession(
-            sessionId: sessionId,
-            groupKey: "sleep",
-            rangeStart: .now.addingTimeInterval(-3600),
-            rangeEnd: .now,
-            status: "open"
-        )
-        try store.enqueueEvent(
-            eventId: "event-1",
-            entityKey: "sleep:1",
-            entityVersion: 1,
-            groupKey: "sleep",
-            scopeKey: "sleep",
-            op: "upsert",
-            sessionId: sessionId,
-            payloadJson: Data("{}".utf8)
-        )
-        try store.updateBackfillSessionStatus(sessionId: sessionId, status: "aborted")
-        try store.retireSessionEvents(sessionId: sessionId, keepEventId: "event-1", errorCode: "payload_invalid")
-
-        XCTAssertEqual(try store.diagnostics().failedEventCount, 0)
-    }
-
-    func testOutboxDiagnosticsKeepsTheNewestThirtySyncTraceEntries() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FamilyOSOutboxTrace-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let store = HealthKitOutboxStore(directoryURL: directory)
-        let start = Date(timeIntervalSince1970: 1_000)
-
-        for index in 0..<31 {
-            try store.recordSyncTrace(
-                origin: .healthKitObserver,
-                phase: .apiAcknowledged,
-                eventCount: index,
-                timestamp: start.addingTimeInterval(TimeInterval(index))
-            )
+        let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis)
+        XCTAssertEqual(sleep.count, 1)
+        XCTAssertEqual(combined, sleep)
+        if let sleepType {
+            XCTAssertTrue(sleep.contains(sleepType))
+            XCTAssertTrue(both.contains(sleepType))
         }
-
-        let trace = try store.diagnostics().recentTraceEntries
-        XCTAssertEqual(trace.count, 30)
-        XCTAssertEqual(trace.first?.eventCount, 30)
-        XCTAssertEqual(trace.last?.eventCount, 1)
-        XCTAssertEqual(trace.first?.origin, .healthKitObserver)
-        XCTAssertEqual(trace.first?.phase, .apiAcknowledged)
+        // Sleep set must not require BP correlation for auth.
+        let correlation = HKObjectType.correlationType(forIdentifier: .bloodPressure)
+        if let correlation {
+            XCTAssertFalse(sleep.contains(correlation))
+        }
+        let ids = HealthKitClient.typeIds(sleep)
+        XCTAssertTrue(ids.contains("SleepAnalysis"))
     }
 
-    func testSleepTotalsSplitSamplesAcrossLocalDayBoundaries() {
-        let formatter = ISO8601DateFormatter()
-        let start = formatter.date(from: "2026-07-01T23:00:00Z")!
-        let end = formatter.date(from: "2026-07-02T01:00:00Z")!
-        let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!
-        let sample = HKCategorySample(
-            type: sleepType,
-            value: HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue,
-            start: start,
-            end: end
+    func testHealthKitImplementedSyncMetricsIncludeVitalsAndSleep() {
+        XCTAssertEqual(
+            HealthKitSyncStateViewModel.implementedSyncMetrics,
+            [.vitals, .sleep]
         )
-
-        let totals = HealthKitClient().sleepDayTotals(samples: [sample], timeZoneIdentifier: "UTC")
-
-        XCTAssertEqual(totals["2026-07-01"]?.totalMinutes, 60)
-        XCTAssertEqual(totals["2026-07-01"]?.unspecifiedAsleepMinutes, 60)
-        XCTAssertEqual(totals["2026-07-02"]?.totalMinutes, 60)
-        XCTAssertEqual(totals["2026-07-02"]?.unspecifiedAsleepMinutes, 60)
+        XCTAssertTrue(HealthKitSyncStateViewModel.syncableMetrics.contains(.workouts))
+        XCTAssertFalse(HealthKitSyncStateViewModel.implementedSyncMetrics.contains(.workouts))
     }
 
-    func testBackgroundSyncAlertThrottleAllowsOnlyOneAlertPerInterval() {
-        let suite = "FamilyOSBackgroundAlertThrottle-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let start = Date(timeIntervalSince1970: 1_000)
-
-        XCTAssertTrue(HealthKitBackgroundSyncAlertThrottle.consumeIfAllowed(defaults: defaults, now: start))
-        XCTAssertFalse(
-            HealthKitBackgroundSyncAlertThrottle.consumeIfAllowed(
-                defaults: defaults,
-                now: start.addingTimeInterval(HealthKitBackgroundSyncAlertThrottle.interval - 1)
-            )
-        )
-        XCTAssertTrue(
-            HealthKitBackgroundSyncAlertThrottle.consumeIfAllowed(
-                defaults: defaults,
-                now: start.addingTimeInterval(HealthKitBackgroundSyncAlertThrottle.interval)
-            )
-        )
+    func testHealthKitSyncNowRequiresConsentAndImplementedMetric() async {
+        let viewModel = HealthBootstrapViewModel()
+        viewModel.auth.signedInUserId = "user-1"
+        let selfProfile = makeProfile(id: "p1", linkedUserId: "user-1", displayName: "Me", relationshipLabel: "Self")
+        viewModel.profiles.profiles = [selfProfile]
+        viewModel.healthKit.linkedProfileId = selfProfile.id
+        viewModel.healthKit.isAvailable = true
+        viewModel.healthKit.consentGranted = false
+        await viewModel.syncHealthKitNow()
+        XCTAssertTrue(viewModel.isError)
+        XCTAssertTrue(viewModel.statusMessage.lowercased().contains("consent"))
     }
 
-    func testBackfillSessionTransitionsToAbortedOnlyOnce() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FamilyOSOutboxAbort-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let store = HealthKitOutboxStore(directoryURL: directory)
-
-        try store.saveBackfillSession(
-            sessionId: "session-1",
-            groupKey: "sleep",
-            rangeStart: .now.addingTimeInterval(-3600),
-            rangeEnd: .now,
-            status: "open"
+    func testHealthKitSyncNowAllowsSleepOnly() async {
+        // Guard path: sleep-only enabled should not fail for "vitals consent" specifically.
+        let viewModel = HealthBootstrapViewModel()
+        viewModel.auth.signedInUserId = "user-1"
+        let selfProfile = makeProfile(id: "p1", linkedUserId: "user-1", displayName: "Me", relationshipLabel: "Self")
+        viewModel.profiles.profiles = [selfProfile]
+        viewModel.healthKit.linkedProfileId = selfProfile.id
+        viewModel.healthKit.isAvailable = true
+        viewModel.healthKit.consentGranted = true
+        viewModel.healthKit.enabledMetrics = [.sleep]
+        // Will fail later on network/settings, but must pass the consent/metric gate.
+        await viewModel.syncHealthKitNow()
+        XCTAssertFalse(viewModel.statusMessage.lowercased().contains("vitals consent"))
+        XCTAssertNotEqual(
+            viewModel.statusMessage,
+            "Enable HealthKit consent and at least one supported metric before syncing."
         )
-
-        XCTAssertTrue(try store.abortBackfillSessionIfOpen(sessionId: "session-1"))
-        XCTAssertFalse(try store.abortBackfillSessionIfOpen(sessionId: "session-1"))
-    }
-
-    func testReplacingBackfillDiscardsOldSessionEvents() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FamilyOSOutboxReplacement-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let store = HealthKitOutboxStore(directoryURL: directory)
-
-        try store.saveBackfillSession(
-            sessionId: "session-1",
-            groupKey: "sleep",
-            rangeStart: .now.addingTimeInterval(-3600),
-            rangeEnd: .now,
-            status: "open"
-        )
-        try store.enqueueEvent(
-            eventId: "event-1",
-            entityKey: "sleep:2026-07-27",
-            entityVersion: 1,
-            groupKey: "sleep",
-            scopeKey: "sleep",
-            op: "upsert",
-            sessionId: "session-1",
-            payloadJson: Data("{}".utf8)
-        )
-        try store.saveScopeManifest(
-            sessionId: "session-1",
-            scopeKey: "sleep",
-            eventCount: 1,
-            manifestHash: "test",
-            eventIds: ["event-1"]
-        )
-
-        try store.discardOpenBackfillSessions(groupKey: "sleep")
-
-        XCTAssertNil(try store.openBackfillSession(groupKey: "sleep"))
-        XCTAssertTrue(try store.claimPendingEvents().isEmpty)
-        XCTAssertTrue(try store.pendingScopeManifests(sessionId: "session-1").isEmpty)
-    }
-
-    func testWorkerStartupDropsRowsForClosedSessions() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FamilyOSOutboxClosedSession-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let store = HealthKitOutboxStore(directoryURL: directory)
-
-        try store.saveBackfillSession(
-            sessionId: "session-1",
-            groupKey: "sleep",
-            rangeStart: .now.addingTimeInterval(-3600),
-            rangeEnd: .now,
-            status: "aborted"
-        )
-        try store.enqueueEvent(
-            eventId: "event-1",
-            entityKey: "sleep:2026-07-27",
-            entityVersion: 1,
-            groupKey: "sleep",
-            scopeKey: "sleep",
-            op: "upsert",
-            sessionId: "session-1",
-            payloadJson: Data("{}".utf8)
-        )
-
-        try store.resetInFlightToPending()
-
-        XCTAssertTrue(try store.claimPendingEvents().isEmpty)
     }
 
     func testStartupRefreshesExpiredSessionBeforeBootstrap() async {

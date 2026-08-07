@@ -9,12 +9,24 @@ struct HealthKitSyncView: View {
             Toggle(isOn: $viewModel.healthKit.consentGranted) {
                 Text("Upload HealthKit data")
             }
-                .disabled(viewModel.selfProfile == nil)
+            .disabled(viewModel.selfProfile == nil)
+            .onChange(of: viewModel.healthKit.consentGranted) { _, granted in
+                if granted {
+                    // Default to BP (implemented). Sleep/workouts toggles are separate.
+                    if viewModel.healthKit.enabledMetrics.isEmpty {
+                        viewModel.healthKit.enabledMetrics = [.vitals]
+                    }
+                } else {
+                    viewModel.healthKit.enabledMetrics = []
+                }
+            }
 
             if viewModel.healthKit.consentGranted {
-                ForEach(HealthKitSyncMetric.allCases) { metric in
+                ForEach(
+                    Array(HealthKitSyncStateViewModel.syncableMetrics).sorted { $0.rawValue < $1.rawValue }
+                ) { metric in
                     Toggle(isOn: binding(for: metric)) {
-                        metricToggleLabel(metric)
+                        metricLabel(metric)
                     }
                 }
 
@@ -26,7 +38,7 @@ struct HealthKitSyncView: View {
 
                 if let current = viewModel.healthKit.status?.healthTimezone,
                    current != viewModel.healthKit.selectedTimezone {
-                    Toggle("I understand this repairs the latest 90 days", isOn: $viewModel.healthKit.confirmTimezoneChange)
+                    Toggle("I understand this will require a re-import later", isOn: $viewModel.healthKit.confirmTimezoneChange)
                 }
             }
 
@@ -34,6 +46,15 @@ struct HealthKitSyncView: View {
                 Task {
                     isSavingSettings = true
                     defer { isSavingSettings = false }
+                    // Only persist groups we support (BP / sleep / workouts).
+                    viewModel.healthKit.enabledMetrics = viewModel.healthKit.enabledMetrics
+                        .intersection(HealthKitSyncStateViewModel.syncableMetrics)
+                    if viewModel.healthKit.consentGranted && viewModel.healthKit.enabledMetrics.isEmpty {
+                        viewModel.healthKit.enabledMetrics = [.vitals]
+                    }
+                    if !viewModel.healthKit.consentGranted {
+                        viewModel.healthKit.enabledMetrics = []
+                    }
                     if let current = viewModel.healthKit.status?.healthTimezone,
                        current != viewModel.healthKit.selectedTimezone {
                         await viewModel.changeHealthTimezone()
@@ -42,129 +63,45 @@ struct HealthKitSyncView: View {
                     }
                 }
             }
-            .disabled(viewModel.selfProfile == nil || isSavingSettings || viewModel.healthKit.isSyncing)
+            .disabled(viewModel.selfProfile == nil || isSavingSettings)
 
             Button(viewModel.healthKit.isSyncing ? "Syncing..." : "Sync now") {
-                Task {
-                    await viewModel.syncHealthKitNow()
-                }
+                Task { await viewModel.syncHealthKitNow() }
             }
-            .disabled(syncDisabled)
-
-            if viewModel.healthKit.isAutomaticallySyncing {
-                HStack {
-                    ProgressView()
-                    Text("Resuming sync")
-                }
-            }
+            .disabled(
+                viewModel.selfProfile == nil
+                    || viewModel.healthKit.isSyncing
+                    || !viewModel.healthKit.consentGranted
+                    || viewModel.healthKit.enabledMetrics
+                        .intersection(HealthKitSyncStateViewModel.implementedSyncMetrics)
+                        .isEmpty
+            )
         }
-
-        Section("Sync diagnostics") {
-            LabeledContent("Queued locally", value: "\(viewModel.healthKit.outboxDiagnostics.pendingEventCount)")
-            LabeledContent("Uploading", value: "\(viewModel.healthKit.outboxDiagnostics.inFlightEventCount)")
-            LabeledContent("Local failures", value: "\(viewModel.healthKit.outboxDiagnostics.failedEventCount)")
-            Toggle("Background sync alerts", isOn: backgroundSyncAlertsBinding)
-
-            ForEach(viewModel.healthKit.outboxDiagnostics.recentTraceEntries.prefix(8)) { entry in
-                HStack {
-                    Text(entry.origin.displayName)
-                    Spacer()
-                    Text(entry.phase.displayName)
-                        .foregroundStyle(.secondary)
-                    if entry.eventCount > 0 {
-                        Text("\(entry.eventCount)")
-                            .foregroundStyle(.secondary)
-                    }
-                    Text(entry.timestamp, style: .time)
-                        .foregroundStyle(.secondary)
-                }
-                .font(.caption)
-            }
-
-            ForEach(viewModel.healthKit.outboxDiagnostics.backfills) { backfill in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("\(displayName(for: backfill.groupKey)) backfill")
-                    LabeledContent("Expected", value: "\(backfill.expectedEventCount)")
-                    LabeledContent("Acknowledged", value: "\(backfill.acknowledgedEventCount)")
-                    LabeledContent("Queued", value: "\(backfill.pendingEventCount)")
-                    if backfill.inFlightEventCount > 0 {
-                        LabeledContent("Uploading", value: "\(backfill.inFlightEventCount)")
-                    }
-                    if backfill.failedEventCount > 0 {
-                        LabeledContent("Failed", value: "\(backfill.failedEventCount)")
-                    }
-                }
-            }
-        }
-        .task {
-            while !Task.isCancelled {
-                viewModel.refreshHealthKitOutboxDiagnostics()
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-            }
-        }
-    }
-
-    private var syncDisabled: Bool {
-        !viewModel.healthKit.isAvailable
-            || viewModel.selfProfile == nil
-            || isSavingSettings
-            || viewModel.healthKit.isSyncing
-            || viewModel.healthKit.isAutomaticallySyncing
-    }
-
-    private var backgroundSyncAlertsBinding: Binding<Bool> {
-        Binding(
-            get: { viewModel.healthKit.backgroundSyncAlertsEnabled },
-            set: { enabled in
-                Task {
-                    let isEnabled = await viewModel.healthKit.setBackgroundSyncAlertsEnabled(enabled)
-                    if enabled && !isEnabled {
-                        viewModel.reportActionFailure("Allow notifications in Settings to receive background sync alerts.")
-                    } else if isEnabled {
-                        viewModel.reportActionResult("Background sync alerts enabled.")
-                    } else {
-                        viewModel.reportActionResult("Background sync alerts disabled.")
-                    }
-                }
-            }
-        )
     }
 
     @ViewBuilder
-    private func metricToggleLabel(_ metric: HealthKitSyncMetric) -> some View {
+    private func metricLabel(_ metric: HealthKitSyncMetric) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(metric.displayName)
+            Text(title(for: metric))
             if let state = metricState(for: metric) {
-                Text(metricStatusText(state))
+                Text(state.status.displayName)
                     .font(.caption2)
-                    .foregroundStyle(metricStatusColor(state))
+                    .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private func title(for metric: HealthKitSyncMetric) -> String {
+        switch metric {
+        case .vitals: return "Blood pressure"
+        case .sleep: return "Sleep"
+        case .workouts: return "Workouts"
+        default: return metric.displayName
         }
     }
 
     private func metricState(for metric: HealthKitSyncMetric) -> HealthKitMetricState? {
         viewModel.healthKit.metricRows.first { $0.metric == metric }
-    }
-
-    private func metricStatusText(_ metric: HealthKitMetricState) -> String {
-        if let code = metric.lastErrorCode {
-            return "\(metric.status.displayName): \(code)"
-        }
-        if let last = metric.lastSuccessfulAt {
-            return "\(metric.status.displayName) · Last synced \(last)"
-        }
-        return metric.status.displayName
-    }
-
-    private func metricStatusColor(_ metric: HealthKitMetricState) -> Color {
-        switch metric.status {
-        case .ready:
-            return .secondary
-        case .backfilling, .neverSynced, .disabled:
-            return .orange
-        case .error:
-            return .red
-        }
     }
 
     private func binding(for metric: HealthKitSyncMetric) -> Binding<Bool> {
@@ -173,15 +110,15 @@ struct HealthKitSyncView: View {
             set: { enabled in
                 if enabled {
                     viewModel.healthKit.enabledMetrics.insert(metric)
+                    viewModel.healthKit.consentGranted = true
                 } else {
                     viewModel.healthKit.enabledMetrics.remove(metric)
+                    if viewModel.healthKit.enabledMetrics.isEmpty {
+                        viewModel.healthKit.consentGranted = false
+                    }
                 }
             }
         )
-    }
-
-    private func displayName(for groupKey: String) -> String {
-        HealthKitSyncMetric(rawValue: groupKey)?.displayName ?? groupKey.capitalized
     }
 
     private var commonTimezones: [String] {
@@ -196,7 +133,6 @@ struct HealthKitSyncView: View {
             "Asia/Tokyo",
             "Australia/Sydney"
         ]
-        zones = Array(Set(zones)).sorted()
-        return zones
+        return Array(Set(zones)).sorted()
     }
 }

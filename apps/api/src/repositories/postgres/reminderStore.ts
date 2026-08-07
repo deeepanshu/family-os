@@ -276,7 +276,7 @@ export class PostgresReminderStore {
   }
 
   async recordAudit(input: {
-    familyId: string;
+    familyId: string | null;
     actorUserId?: string;
     action: string;
     resourceType: string;
