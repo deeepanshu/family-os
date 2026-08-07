@@ -29,9 +29,10 @@ export type AuthSessionResponse = {
   userId: string;
 };
 
+/** Solo-first: family/membership are null until the user optionally creates a household. */
 export type BootstrapResponse = {
-  family: Family;
-  membership: FamilyMembership;
+  family: Family | null;
+  membership: FamilyMembership | null;
   profiles: HealthProfile[];
   selfProfile: HealthProfile | null;
   needsProfileSetup: boolean;
@@ -101,7 +102,8 @@ export type PersonStatus = "active" | "inactive";
 
 export type HealthProfile = {
   id: string;
-  familyId: string;
+  /** Null for solo Self profiles until the user creates a family. */
+  familyId: string | null;
   linkedUserId?: string;
   displayName: string;
   relationshipLabel?: string;
@@ -113,7 +115,7 @@ export type HealthProfile = {
 
 export type BloodPressureReading = {
   id: string;
-  familyId: string;
+  familyId: string | null;
   personId: string;
   recordedByUserId: string;
   systolic: number;
@@ -300,7 +302,7 @@ export type NotificationDelivery = {
 
 export type AuditLog = {
   id: string;
-  familyId: string;
+  familyId: string | null;
   actorUserId?: string;
   action: string;
   resourceType: string;

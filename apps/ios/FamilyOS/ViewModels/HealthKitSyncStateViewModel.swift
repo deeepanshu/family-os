@@ -9,8 +9,10 @@ final class HealthKitSyncStateViewModel: ObservableObject {
     @Published var linkedProfileId: String?
     @Published var consentGranted = false
     @Published var selectedTimezone = TimeZone.current.identifier
-    /// Only groups the app can actually request + sync (milestone 1: BP under vitals).
-    static let syncableMetrics: Set<HealthKitSyncMetric> = [.vitals]
+    /// HealthKit groups we intend to support: BP (live), sleep + workouts (next).
+    static let syncableMetrics: Set<HealthKitSyncMetric> = [.vitals, .sleep, .workouts]
+    /// Groups with a working foreground sync path today.
+    static let implementedSyncMetrics: Set<HealthKitSyncMetric> = [.vitals]
 
     @Published var enabledMetrics: Set<HealthKitSyncMetric> = []
     @Published var confirmTimezoneChange = false

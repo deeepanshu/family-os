@@ -194,9 +194,9 @@ final class HealthBootstrapViewModel: ObservableObject {
     }
 
     func applyBootstrap(_ response: BootstrapResponse) {
-        family.currentFamilyName = response.family.name
-        family.familyKind = response.family.kind
-        family.currentFamilyRole = response.membership.role
+        family.currentFamilyName = response.family?.name
+        family.familyKind = response.family?.kind
+        family.currentFamilyRole = response.membership?.role
         profiles.profiles = response.profiles
         if let selfProfile = response.selfProfile {
             profiles.selectedProfileId = selfProfile.id

@@ -43,7 +43,7 @@ import type {
 } from "./families";
 
 export type RecordAuditInput = {
-  familyId: string;
+  familyId: string | null;
   actorUserId?: string;
   action: string;
   resourceType: string;

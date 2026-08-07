@@ -15,8 +15,9 @@ struct SessionResponse: Decodable {
 }
 
 struct BootstrapResponse: Decodable {
-    let family: Family
-    let membership: FamilyMembership
+    /// Null until the user optionally creates a household.
+    let family: Family?
+    let membership: FamilyMembership?
     let profiles: [HealthProfile]
     let selfProfile: HealthProfile?
     let needsProfileSetup: Bool

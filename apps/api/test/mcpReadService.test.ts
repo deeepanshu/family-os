@@ -59,6 +59,13 @@ async function seedUserWithSteps(repo: InMemoryFamilyRepository, subject: string
   const profile = await profileResponse.json();
   const profileId = profile.data.id as string;
 
+  // MCP connection currently requires a household membership.
+  await api.request(`${HEALTH_API_PREFIX}/families`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ name: "Test Family" })
+  });
+
   const installationId = "53064303-35cf-4db0-a5d3-8af7d8f747e1";
   await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
     method: "PUT",
@@ -423,6 +430,11 @@ describe("HealthMcpReadService", () => {
       })
     ).json();
     const profileId = profile.data.id as string;
+    await api.request(`${HEALTH_API_PREFIX}/families`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Test Family" })
+    });
     const installationId = "53064303-35cf-4db0-a5d3-8af7d8f747e1";
     await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
       method: "PUT",
@@ -496,6 +508,11 @@ describe("HealthMcpReadService", () => {
       })
     ).json();
     const profileId = profile.data.id as string;
+    await api.request(`${HEALTH_API_PREFIX}/families`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Test Family" })
+    });
     const installationId = "53064303-35cf-4db0-a5d3-8af7d8f747e1";
     await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
       method: "PUT",

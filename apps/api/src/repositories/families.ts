@@ -109,7 +109,7 @@ export type RegisterDeviceInput = {
 };
 
 export type AuditInput = {
-  familyId: string;
+  familyId: string | null;
   actorUserId?: string;
   action: string;
   resourceType: string;
@@ -181,6 +181,19 @@ export class InMemoryFamilyRepository implements FamilyRepository {
 
     this.families.set(family.id, family);
     this.memberships.set(membership.id, membership);
+
+    // Attach solo Self person to the new household when present.
+    for (const [id, profile] of this.profiles) {
+      if (
+        profile.linkedUserId === input.userId &&
+        profile.relationshipLabel === "Self" &&
+        profile.status === "active" &&
+        profile.familyId == null
+      ) {
+        this.profiles.set(id, { ...profile, familyId: family.id, updatedAt: now });
+      }
+    }
+
     this.audit({
       familyId: family.id,
       actorUserId: input.userId,
@@ -228,21 +241,18 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   }
 
   async bootstrap(userId: string): Promise<BootstrapResponse> {
-    let current = await this.getCurrentFamily(userId);
-    if (!current) {
-      const created = await this.createFamily({ name: "My Health", userId, kind: "personal" });
-      if (!created) {
-        throw new HttpError(500, "bootstrap_failed", "Failed to create personal workspace.");
-      }
-      current = created;
-    }
-
-    const profiles = await this.listProfiles(userId);
-    const selfProfile = profiles.find((profile) => profile.linkedUserId === userId && profile.relationshipLabel === "Self") ?? null;
+    // Solo-first: no auto-created personal family.
+    const current = await this.getCurrentFamily(userId);
+    const selfProfile = await this.getSelfProfile(userId);
+    const profiles = selfProfile
+      ? current
+        ? await this.listProfiles(userId)
+        : [selfProfile]
+      : [];
 
     return {
-      family: current.family,
-      membership: current.membership,
+      family: current?.family ?? null,
+      membership: current?.membership ?? null,
       profiles,
       selfProfile,
       needsProfileSetup: selfProfile === null
@@ -250,7 +260,6 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   }
 
   async createSelfProfile(actorUserId: string, displayName: string): Promise<HealthProfile> {
-    const current = this.requireActiveMember(actorUserId);
     const existing = await this.getSelfProfile(actorUserId);
     if (existing) {
       return existing;
@@ -259,7 +268,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     const now = new Date().toISOString();
     const profile: HealthProfile = {
       id: crypto.randomUUID(),
-      familyId: current.family.id,
+      familyId: null,
       linkedUserId: actorUserId,
       displayName,
       relationshipLabel: "Self",
@@ -269,7 +278,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     };
     this.profiles.set(profile.id, profile);
     this.audit({
-      familyId: current.family.id,
+      familyId: null,
       actorUserId,
       action: "profile.created",
       resourceType: "profile",
@@ -279,14 +288,9 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   }
 
   async getSelfProfile(actorUserId: string): Promise<HealthProfile | null> {
-    const current = await this.getCurrentFamily(actorUserId);
-    if (!current) {
-      return null;
-    }
     return (
       [...this.profiles.values()].find(
         (profile) =>
-          profile.familyId === current.family.id &&
           profile.linkedUserId === actorUserId &&
           profile.relationshipLabel === "Self" &&
           profile.status === "active"
@@ -439,10 +443,14 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   }
 
   async listProfiles(actorUserId: string): Promise<HealthProfile[]> {
-    const current = this.requireActiveMember(actorUserId);
-    return [...this.profiles.values()].filter(
-      (profile) => profile.familyId === current.family.id && profile.status === "active"
-    );
+    const current = await this.getCurrentFamily(actorUserId);
+    if (current) {
+      return [...this.profiles.values()].filter(
+        (profile) => profile.familyId === current.family.id && profile.status === "active"
+      );
+    }
+    const self = await this.getSelfProfile(actorUserId);
+    return self ? [self] : [];
   }
 
   async getProfile(actorUserId: string, profileId: string): Promise<HealthProfile> {
@@ -522,19 +530,30 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   }
 
   async listBloodPressure(actorUserId: string, personId?: string, limit = 50): Promise<BloodPressureReading[]> {
-    const current = this.requireActiveMember(actorUserId);
+    const self = await this.getSelfProfile(actorUserId);
+    if (!self) {
+      throw new HttpError(400, "self_profile_required", "Create your profile before continuing.");
+    }
+    const target = personId ?? self.id;
+    if (target !== self.id) {
+      // Solo-first: only own Self unless later family access is wired.
+      throw new HttpError(403, "profile_forbidden", "You do not have access to this health profile.");
+    }
     return [...this.bloodPressureReadings.values()]
-      .filter((reading) => reading.familyId === current.family.id && !reading.deletedAt && reading.source === "healthkit")
-      .filter((reading) => !personId || reading.personId === personId)
+      .filter((reading) => !reading.deletedAt && reading.source === "healthkit")
+      .filter((reading) => reading.personId === target)
       .sort((a, b) => Date.parse(b.measuredAt) - Date.parse(a.measuredAt))
       .slice(0, limit)
       .map(stripDeleted);
   }
 
   async getBloodPressure(actorUserId: string, readingId: string): Promise<BloodPressureReading> {
-    const current = this.requireActiveMember(actorUserId);
+    const self = await this.getSelfProfile(actorUserId);
+    if (!self) {
+      throw new HttpError(400, "self_profile_required", "Create your profile before continuing.");
+    }
     const reading = this.bloodPressureReadings.get(readingId);
-    if (!reading || reading.familyId !== current.family.id || reading.deletedAt || reading.source !== "healthkit") {
+    if (!reading || reading.personId !== self.id || reading.deletedAt || reading.source !== "healthkit") {
       throw new HttpError(404, "bp_reading_not_found", "Blood pressure reading was not found.");
     }
     return stripDeleted(reading);

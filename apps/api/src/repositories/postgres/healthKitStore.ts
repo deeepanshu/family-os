@@ -41,17 +41,17 @@ export class PostgresHealthKitStore {
   constructor(private readonly context: PostgresRepositoryContext) {}
 
   async getHealthKitSettings(actorUserId: string, personId?: string): Promise<HealthKitSettings> {
-    const current = await this.context.requireActiveMember(actorUserId);
-    const selfId = await this.requireLinkedSelfProfileId(actorUserId, current.family.id);
-    const targetPersonId = personId ?? selfId;
-    assertSelfProfileMatch({ selfProfileId: selfId, requestedPersonId: targetPersonId });
-    return this.loadSettings(actorUserId, current.family.id, targetPersonId);
+    const self = await this.context.requireSelfPerson(actorUserId);
+    const targetPersonId = personId ?? self.personId;
+    const access = await this.context.requirePersonAccess(actorUserId, targetPersonId);
+    assertSelfProfileMatch({ selfProfileId: self.personId, requestedPersonId: targetPersonId });
+    return this.loadSettings(actorUserId, access.familyId, targetPersonId);
   }
 
   async putHealthKitSettings(actorUserId: string, input: PutHealthKitSettingsInput): Promise<HealthKitSettings> {
-    const current = await this.context.requireActiveMember(actorUserId);
-    const selfId = await this.requireLinkedSelfProfileId(actorUserId, current.family.id);
-    assertSelfProfileMatch({ selfProfileId: selfId, requestedPersonId: input.personId });
+    const self = await this.context.requireSelfPerson(actorUserId);
+    const access = await this.context.requirePersonAccess(actorUserId, input.personId);
+    assertSelfProfileMatch({ selfProfileId: self.personId, requestedPersonId: input.personId });
 
     const uniqueGroups = [...new Set(input.enabledGroups)].filter((m): m is HealthKitMetric =>
       (HEALTHKIT_METRICS as readonly string[]).includes(m)
@@ -82,7 +82,7 @@ export class PostgresHealthKitStore {
           health_timezone, health_timezone_version, updated_at
         ) values (
           ${input.personId},
-          ${current.family.id},
+          ${access.familyId},
           ${actorUserId},
           ${consentActive ? input.consentVersion ?? null : existing?.consent_version ?? null},
           ${consentActive ? existing?.consented_at ?? nowIso : null},
@@ -125,7 +125,7 @@ export class PostgresHealthKitStore {
         }
         await tx`
           insert into healthkit_sync_installations (person_id, family_id, installation_id, activated_at)
-          values (${input.personId}, ${current.family.id}, ${input.installationId}, ${nowIso})
+          values (${input.personId}, ${access.familyId}, ${input.installationId}, ${nowIso})
           on conflict (person_id, installation_id) do update set
             revoked_at = null,
             activated_at = ${nowIso}
@@ -136,7 +136,7 @@ export class PostgresHealthKitStore {
         const enabled = uniqueGroups.includes(metric);
         await tx`
           insert into healthkit_sync_groups (person_id, family_id, group_key, enabled, updated_at)
-          values (${input.personId}, ${current.family.id}, ${metric}, ${enabled}, ${nowIso})
+          values (${input.personId}, ${access.familyId}, ${metric}, ${enabled}, ${nowIso})
           on conflict (person_id, group_key) do update set enabled = excluded.enabled, updated_at = excluded.updated_at
         `;
 
@@ -154,7 +154,7 @@ export class PostgresHealthKitStore {
             person_id, family_id, group_key, status, last_successful_at, last_attempt_at,
             last_error_code, coverage_start_at, coverage_end_at, updated_at
           ) values (
-            ${input.personId}, ${current.family.id}, ${metric}, ${status},
+            ${input.personId}, ${access.familyId}, ${metric}, ${status},
             ${clearCoverage ? null : state?.last_successful_at ?? null},
             ${state?.last_attempt_at ?? null},
             ${clearCoverage ? null : state?.last_error_code ?? null},
@@ -174,7 +174,7 @@ export class PostgresHealthKitStore {
     });
 
     await this.context.audit({
-      familyId: current.family.id,
+      familyId: access.familyId,
       actorUserId,
       action: "healthkit.settings_updated",
       resourceType: "health_profile",
@@ -186,7 +186,7 @@ export class PostgresHealthKitStore {
       }
     });
 
-    return this.loadSettings(actorUserId, current.family.id, input.personId);
+    return this.loadSettings(actorUserId, access.familyId, input.personId);
   }
 
   async applyHealthKitOps(actorUserId: string, input: HealthKitOpsBatchInput): Promise<HealthKitOpsBatchResult> {
@@ -194,15 +194,15 @@ export class PostgresHealthKitStore {
       throw new HttpError(400, "payload_invalid", "ops batch must not be empty.");
     }
 
-    const current = await this.context.requireActiveMember(actorUserId);
-    const selfId = await this.requireLinkedSelfProfileId(actorUserId, current.family.id);
-    assertSelfProfileMatch({ selfProfileId: selfId, requestedPersonId: input.personId });
+    const self = await this.context.requireSelfPerson(actorUserId);
+    const access = await this.context.requirePersonAccess(actorUserId, input.personId);
+    assertSelfProfileMatch({ selfProfileId: self.personId, requestedPersonId: input.personId });
 
     const nowIso = toUtcIso(new Date());
     const results: HealthKitOpApplyResult[] = [];
 
     await this.context.sql.begin(async (tx: any) => {
-      const authority = await this.loadWriteAuthority(tx, actorUserId, current.family.id, input.personId);
+      const authority = await this.loadWriteAuthority(tx, actorUserId, access.familyId, input.personId);
       if (!authority.settings?.consented_at) {
         throw new HttpError(403, "consent_withdrawn", "HealthKit upload consent is required.");
       }
@@ -224,7 +224,7 @@ export class PostgresHealthKitStore {
           }
 
           const result = await this.applyOneOp(tx, {
-            familyId: current.family.id,
+            familyId: access.familyId,
             personId: input.personId,
             timezoneVersion: input.timezoneVersion,
             op,
@@ -263,7 +263,7 @@ export class PostgresHealthKitStore {
     });
 
     await this.context.audit({
-      familyId: current.family.id,
+      familyId: access.familyId,
       actorUserId,
       action: "healthkit.ops_batch",
       resourceType: "healthkit_sync",
@@ -284,9 +284,9 @@ export class PostgresHealthKitStore {
     group: HealthKitConsentGroup,
     input: StartHealthKitImportInput
   ): Promise<HealthKitGroupImportStartResult> {
-    const current = await this.context.requireActiveMember(actorUserId);
-    const selfId = await this.requireLinkedSelfProfileId(actorUserId, current.family.id);
-    assertSelfProfileMatch({ selfProfileId: selfId, requestedPersonId: input.personId });
+    const self = await this.context.requireSelfPerson(actorUserId);
+    const access = await this.context.requirePersonAccess(actorUserId, input.personId);
+    assertSelfProfileMatch({ selfProfileId: self.personId, requestedPersonId: input.personId });
 
     const now = new Date();
     const nowIso = toUtcIso(now);
@@ -294,7 +294,7 @@ export class PostgresHealthKitStore {
     const coverageEndAt = nowIso;
 
     await this.context.sql.begin(async (tx: any) => {
-      const authority = await this.loadWriteAuthority(tx, actorUserId, current.family.id, input.personId);
+      const authority = await this.loadWriteAuthority(tx, actorUserId, access.familyId, input.personId);
       if (!authority.settings?.consented_at) {
         throw new HttpError(403, "consent_withdrawn", "HealthKit upload consent is required.");
       }
@@ -309,7 +309,7 @@ export class PostgresHealthKitStore {
       }
 
       await this.touchGroupState(tx, {
-        familyId: current.family.id,
+        familyId: access.familyId,
         personId: input.personId,
         group,
         nowIso,
@@ -327,9 +327,9 @@ export class PostgresHealthKitStore {
     group: HealthKitConsentGroup,
     input: MarkHealthKitGroupReadyInput
   ): Promise<HealthKitGroupReadyResult> {
-    const current = await this.context.requireActiveMember(actorUserId);
-    const selfId = await this.requireLinkedSelfProfileId(actorUserId, current.family.id);
-    assertSelfProfileMatch({ selfProfileId: selfId, requestedPersonId: input.personId });
+    const self = await this.context.requireSelfPerson(actorUserId);
+    const access = await this.context.requirePersonAccess(actorUserId, input.personId);
+    assertSelfProfileMatch({ selfProfileId: self.personId, requestedPersonId: input.personId });
 
     const now = new Date();
     const nowIso = toUtcIso(now);
@@ -337,7 +337,7 @@ export class PostgresHealthKitStore {
     let coverageEndAt = input.coverageEndAt;
 
     await this.context.sql.begin(async (tx: any) => {
-      const authority = await this.loadWriteAuthority(tx, actorUserId, current.family.id, input.personId);
+      const authority = await this.loadWriteAuthority(tx, actorUserId, access.familyId, input.personId);
       if (!authority.settings?.consented_at) {
         throw new HttpError(403, "consent_withdrawn", "HealthKit upload consent is required.");
       }
@@ -364,7 +364,7 @@ export class PostgresHealthKitStore {
         coverageEndAt ?? (existing?.coverage_end_at ? toIso(existing.coverage_end_at) : nowIso);
 
       await this.touchGroupState(tx, {
-        familyId: current.family.id,
+        familyId: access.familyId,
         personId: input.personId,
         group,
         nowIso,
@@ -388,10 +388,10 @@ export class PostgresHealthKitStore {
     group: HealthKitConsentGroup,
     personId?: string
   ): Promise<HealthKitGroupStatus> {
-    const current = await this.context.requireActiveMember(actorUserId);
-    const selfId = await this.requireLinkedSelfProfileId(actorUserId, current.family.id);
-    const target = personId ?? selfId;
-    assertSelfProfileMatch({ selfProfileId: selfId, requestedPersonId: target });
+    const self = await this.context.requireSelfPerson(actorUserId);
+    const target = personId ?? self.personId;
+    const access = await this.context.requirePersonAccess(actorUserId, target);
+    assertSelfProfileMatch({ selfProfileId: self.personId, requestedPersonId: target });
 
     const [state] = await this.context.sql`
       select * from healthkit_sync_state where person_id = ${target} and group_key = ${group}
@@ -417,9 +417,8 @@ export class PostgresHealthKitStore {
     personId: string,
     healthMetric: HealthKitMetricKey
   ): Promise<HealthMetricFreshness> {
-    const current = await this.context.requireActiveMember(actorUserId);
+    await this.context.requirePersonAccess(actorUserId, personId);
     const group = HEALTHKIT_METRIC_REGISTRY[healthMetric].group;
-    await this.context.requireProfileInFamily(personId, current.family.id);
     const [settings] = await this.context.sql`
       select * from healthkit_sync_profile_settings where person_id = ${personId}
     `;
@@ -444,13 +443,11 @@ export class PostgresHealthKitStore {
     rangeStartUtc: string,
     rangeEndUtc: string
   ): Promise<HealthStepHourRecord[]> {
-    const current = await this.context.requireActiveMember(actorUserId);
-    await this.context.requireProfileInFamily(personId, current.family.id);
+    const access = await this.context.requirePersonAccess(actorUserId, personId);
     const rows = await this.context.sql`
       select person_id, hour_start_utc, count
       from health_step_hours
-      where family_id = ${current.family.id}
-        and person_id = ${personId}
+      where person_id = ${personId}
         and hour_start_utc >= ${rangeStartUtc}::timestamptz
         and hour_start_utc < ${rangeEndUtc}::timestamptz
       order by hour_start_utc asc
@@ -468,8 +465,7 @@ export class PostgresHealthKitStore {
     rangeStartDay: string,
     rangeEndDay: string
   ): Promise<HealthSleepDayRecord[]> {
-    const current = await this.context.requireActiveMember(actorUserId);
-    await this.context.requireProfileInFamily(personId, current.family.id);
+    const access = await this.context.requirePersonAccess(actorUserId, personId);
     const [settings] = await this.context.sql`
       select health_timezone_version from healthkit_sync_profile_settings where person_id = ${personId}
     `;
@@ -480,8 +476,7 @@ export class PostgresHealthKitStore {
         deep_minutes, rem_minutes, unspecified_asleep_minutes, awake_minutes,
         in_bed_minutes, wrist_temperature_celsius, breathing_disturbance_count
       from health_sleep_days
-      where family_id = ${current.family.id}
-        and person_id = ${personId}
+      where person_id = ${personId}
         and sleep_day >= ${rangeStartDay}::date
         and sleep_day <= ${rangeEndDay}::date
       order by sleep_day asc, timezone_version desc
@@ -509,14 +504,12 @@ export class PostgresHealthKitStore {
     rangeEndUtc: string,
     limit: number
   ): Promise<BloodPressureReading[]> {
-    const current = await this.context.requireActiveMember(actorUserId);
-    await this.context.requireProfileInFamily(personId, current.family.id);
+    const access = await this.context.requirePersonAccess(actorUserId, personId);
     const rows = await this.context.sql`
       select r.*, s.user_id as recorded_by_user_id, 'healthkit'::text as source
       from health_blood_pressure_readings r
       join healthkit_sync_profile_settings s on s.person_id = r.person_id
-      where r.family_id = ${current.family.id}
-        and r.person_id = ${personId}
+      where r.person_id = ${personId}
         and r.measured_at >= ${rangeStartUtc}::timestamptz
         and r.measured_at <= ${rangeEndUtc}::timestamptz
       order by r.measured_at asc
@@ -536,20 +529,17 @@ export class PostgresHealthKitStore {
     if (definition.storage !== "daily_numeric") {
       throw new HttpError(400, "payload_invalid", "The requested metric is not stored as a daily aggregate.");
     }
-    const current = await this.context.requireActiveMember(actorUserId);
-    await this.context.requireProfileInFamily(personId, current.family.id);
+    const access = await this.context.requirePersonAccess(actorUserId, personId);
     const [settings] = await this.context.sql`
       select health_timezone_version
       from healthkit_sync_profile_settings
       where person_id = ${personId}
-        and family_id = ${current.family.id}
     `;
     const timezoneVersion = Number(settings?.health_timezone_version ?? 1);
     const rows = await this.context.sql`
       select *
       from health_daily_metrics
-      where family_id = ${current.family.id}
-        and person_id = ${personId}
+      where person_id = ${personId}
         and metric_key = ${healthMetric}
         and timezone_version = ${timezoneVersion}
         and local_day >= ${rangeStartDay}::date
@@ -578,14 +568,12 @@ export class PostgresHealthKitStore {
     rangeEndUtc: string,
     limit: number
   ): Promise<BloodGlucoseReading[]> {
-    const current = await this.context.requireActiveMember(actorUserId);
-    await this.context.requireProfileInFamily(personId, current.family.id);
+    const access = await this.context.requirePersonAccess(actorUserId, personId);
     const rows = await this.context.sql`
       select r.*, s.user_id as recorded_by_user_id, 'healthkit'::text as source
       from health_blood_glucose_readings r
       join healthkit_sync_profile_settings s on s.person_id = r.person_id
-      where r.family_id = ${current.family.id}
-        and r.person_id = ${personId}
+      where r.person_id = ${personId}
         and r.measured_at >= ${rangeStartUtc}::timestamptz
         and r.measured_at <= ${rangeEndUtc}::timestamptz
       order by r.measured_at asc
@@ -601,13 +589,11 @@ export class PostgresHealthKitStore {
     rangeEndUtc: string,
     limit: number
   ): Promise<HealthWorkoutRecord[]> {
-    const current = await this.context.requireActiveMember(actorUserId);
-    await this.context.requireProfileInFamily(personId, current.family.id);
+    const access = await this.context.requirePersonAccess(actorUserId, personId);
     const rows = await this.context.sql`
       select *
       from health_workouts
-      where family_id = ${current.family.id}
-        and person_id = ${personId}
+      where person_id = ${personId}
         and started_at >= ${rangeStartUtc}::timestamptz
         and started_at <= ${rangeEndUtc}::timestamptz
       order by started_at asc
@@ -630,7 +616,7 @@ export class PostgresHealthKitStore {
   private async applyOneOp(
     tx: any,
     input: {
-      familyId: string;
+      familyId: string | null;
       personId: string;
       timezoneVersion: number;
       op: HealthKitSyncOp;
@@ -669,7 +655,7 @@ export class PostgresHealthKitStore {
   private async applyCanonical(
     tx: any,
     input: {
-      familyId: string;
+      familyId: string | null;
       personId: string;
       timezoneVersion: number;
       payload: HealthKitOpPayload;
@@ -811,7 +797,7 @@ export class PostgresHealthKitStore {
     throw new HttpError(400, "payload_invalid", "Unknown natural key for delete.");
   }
 
-  private async loadSettings(actorUserId: string, familyId: string, personId: string): Promise<HealthKitSettings> {
+  private async loadSettings(actorUserId: string, familyId: string | null, personId: string): Promise<HealthKitSettings> {
     const [settings] = await this.context.sql`
       select * from healthkit_sync_profile_settings where person_id = ${personId}
     `;
@@ -854,10 +840,10 @@ export class PostgresHealthKitStore {
     };
   }
 
-  private async loadWriteAuthority(tx: any, actorUserId: string, familyId: string, personId: string) {
+  private async loadWriteAuthority(tx: any, actorUserId: string, familyId: string | null, personId: string) {
     const [settings] = await tx`
       select * from healthkit_sync_profile_settings
-      where person_id = ${personId} and family_id = ${familyId} and user_id = ${actorUserId}
+      where person_id = ${personId} and user_id = ${actorUserId}
     `;
     const metricRows = await tx`
       select group_key from healthkit_sync_groups
@@ -878,7 +864,7 @@ export class PostgresHealthKitStore {
   private async touchGroupState(
     tx: any,
     input: {
-      familyId: string;
+      familyId: string | null;
       personId: string;
       group: HealthKitMetric;
       nowIso: string;
@@ -942,19 +928,5 @@ export class PostgresHealthKitStore {
     `;
   }
 
-  private async requireLinkedSelfProfileId(actorUserId: string, familyId: string): Promise<string> {
-    const [profile] = await this.context.sql`
-      select id
-      from people
-      where family_id = ${familyId}
-        and linked_user_id = ${actorUserId}
-        and relationship_label = 'Self'
-        and status = 'active'
-      limit 1
-    `;
-    if (!profile) {
-      throw new HttpError(409, "healthkit_self_profile_required", "Create your self profile before using HealthKit sync.");
-    }
-    return profile.id;
-  }
 }
+

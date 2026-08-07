@@ -41,10 +41,11 @@ type FamilyCtx = {
 };
 
 export type MemoryHealthKitHost = {
+  /** Optional; family features only. HealthKit uses Self person. */
   requireActiveMember(userId: string): FamilyCtx;
-  getSelfProfile(userId: string): Promise<{ id: string } | null>;
+  getSelfProfile(userId: string): Promise<{ id: string; familyId: string | null } | null>;
   audit(input: {
-    familyId: string;
+    familyId: string | null;
     actorUserId?: string;
     action: string;
     resourceType: string;
@@ -62,7 +63,7 @@ export class MemoryHealthKitEngine {
     string,
     {
       personId: string;
-      familyId: string;
+      familyId: string | null;
       userId: string;
       consentVersion?: string;
       consentedAt?: string;
@@ -75,7 +76,7 @@ export class MemoryHealthKitEngine {
     string,
     {
       personId: string;
-      familyId: string;
+      familyId: string | null;
       group: HealthKitConsentGroup;
       lastSuccessfulAt?: string;
       lastAttemptAt?: string;
@@ -89,7 +90,7 @@ export class MemoryHealthKitEngine {
     string,
     {
       personId: string;
-      familyId: string;
+      familyId: string | null;
       installationId: string;
       activatedAt: string;
       revokedAt?: string;
@@ -98,15 +99,15 @@ export class MemoryHealthKitEngine {
   /** Short-TTL op_id receipts (person-scoped). */
   private readonly opReceipts = new Set<string>();
 
-  readonly stepHours = new Map<string, HealthStepHourRecord & { familyId: string }>();
+  readonly stepHours = new Map<string, HealthStepHourRecord & { familyId: string | null }>();
   readonly sleepDays = new Map<
     string,
-    HealthSleepDayRecord & { familyId: string; timezoneVersion: number }
+    HealthSleepDayRecord & { familyId: string | null; timezoneVersion: number }
   >();
   readonly dailyMetrics = new Map<
     string,
     HealthDailyMetricRecord & {
-      familyId: string;
+      familyId: string | null;
       sumValue?: number;
       averageValue?: number;
       minimumValue?: number;
@@ -142,21 +143,28 @@ export class MemoryHealthKitEngine {
 
   constructor(private readonly host: MemoryHealthKitHost) {}
 
-  async getHealthKitSettings(actorUserId: string, personId?: string): Promise<HealthKitSettings> {
-    const current = this.host.requireActiveMember(actorUserId);
-    const selfProfile = await this.host.getSelfProfile(actorUserId);
-    const target = personId ?? selfProfile?.id;
-    if (!target) {
-      throw new HttpError(409, "healthkit_self_profile_required", "Create your self profile before using HealthKit sync.");
+  private async requireSelf(actorUserId: string): Promise<{ id: string; familyId: string | null }> {
+    const self = await this.host.getSelfProfile(actorUserId);
+    if (!self) {
+      throw new HttpError(
+        409,
+        "healthkit_self_profile_required",
+        "Create your self profile before using HealthKit sync."
+      );
     }
-    assertSelfProfileMatch({ selfProfileId: selfProfile?.id, requestedPersonId: target });
-    return this.buildSettings(current.family.id, target);
+    return self;
+  }
+
+  async getHealthKitSettings(actorUserId: string, personId?: string): Promise<HealthKitSettings> {
+    const self = await this.requireSelf(actorUserId);
+    const target = personId ?? self.id;
+    assertSelfProfileMatch({ selfProfileId: self.id, requestedPersonId: target });
+    return this.buildSettings(self.familyId, target);
   }
 
   async putHealthKitSettings(actorUserId: string, input: PutHealthKitSettingsInput): Promise<HealthKitSettings> {
-    const current = this.host.requireActiveMember(actorUserId);
-    const selfProfile = await this.host.getSelfProfile(actorUserId);
-    assertSelfProfileMatch({ selfProfileId: selfProfile?.id, requestedPersonId: input.personId });
+    const self = await this.requireSelf(actorUserId);
+    assertSelfProfileMatch({ selfProfileId: self.id, requestedPersonId: input.personId });
 
     const uniqueGroups = [...new Set(input.enabledGroups)].filter((m): m is HealthKitMetric =>
       (HEALTHKIT_METRICS as readonly string[]).includes(m)
@@ -176,7 +184,7 @@ export class MemoryHealthKitEngine {
 
     this.profileSettings.set(input.personId, {
       personId: input.personId,
-      familyId: current.family.id,
+      familyId: self.familyId,
       userId: actorUserId,
       consentVersion: consentActive ? input.consentVersion : existing?.consentVersion,
       consentedAt: consentActive ? existing?.consentedAt ?? nowIso : undefined,
@@ -202,7 +210,7 @@ export class MemoryHealthKitEngine {
     }
     this.installations.set(`${input.personId}:${input.installationId}`, {
       personId: input.personId,
-      familyId: current.family.id,
+      familyId: self.familyId,
       installationId: input.installationId,
       activatedAt: nowIso,
       revokedAt: undefined
@@ -219,7 +227,7 @@ export class MemoryHealthKitEngine {
       else if (prev?.status === "disabled") status = "never_synced";
       this.syncState.set(stateKey, {
         personId: input.personId,
-        familyId: current.family.id,
+        familyId: self.familyId,
         group: metric,
         lastSuccessfulAt: timezoneChanged || installationReplaced ? undefined : prev?.lastSuccessfulAt,
         lastAttemptAt: prev?.lastAttemptAt,
@@ -231,7 +239,7 @@ export class MemoryHealthKitEngine {
     }
 
     this.host.audit({
-      familyId: current.family.id,
+      familyId: self.familyId,
       actorUserId,
       action: "healthkit.settings_updated",
       resourceType: "health_profile",
@@ -242,16 +250,15 @@ export class MemoryHealthKitEngine {
         installationReplaced
       }
     });
-    return this.buildSettings(current.family.id, input.personId);
+    return this.buildSettings(self.familyId, input.personId);
   }
 
   async applyHealthKitOps(actorUserId: string, input: HealthKitOpsBatchInput): Promise<HealthKitOpsBatchResult> {
     if (input.ops.length === 0) {
       throw new HttpError(400, "payload_invalid", "ops batch must not be empty.");
     }
-    const current = this.host.requireActiveMember(actorUserId);
-    const selfProfile = await this.host.getSelfProfile(actorUserId);
-    assertSelfProfileMatch({ selfProfileId: selfProfile?.id, requestedPersonId: input.personId });
+    const self = await this.requireSelf(actorUserId);
+    assertSelfProfileMatch({ selfProfileId: self.id, requestedPersonId: input.personId });
 
     const settings = this.profileSettings.get(input.personId);
     if (!settings?.consentedAt) {
@@ -276,7 +283,7 @@ export class MemoryHealthKitEngine {
         }
         results.push(
           this.applyOne(op, {
-            familyId: current.family.id,
+            familyId: self.familyId,
             personId: input.personId,
             timezoneVersion: input.timezoneVersion,
             actorUserId,
@@ -298,7 +305,7 @@ export class MemoryHealthKitEngine {
     }
 
     this.host.audit({
-      familyId: current.family.id,
+      familyId: self.familyId,
       actorUserId,
       action: "healthkit.ops_batch",
       resourceType: "healthkit_sync",
@@ -319,9 +326,8 @@ export class MemoryHealthKitEngine {
     group: HealthKitConsentGroup,
     input: StartHealthKitImportInput
   ): Promise<HealthKitGroupImportStartResult> {
-    const current = this.host.requireActiveMember(actorUserId);
-    const selfProfile = await this.host.getSelfProfile(actorUserId);
-    assertSelfProfileMatch({ selfProfileId: selfProfile?.id, requestedPersonId: input.personId });
+    const self = await this.requireSelf(actorUserId);
+    assertSelfProfileMatch({ selfProfileId: self.id, requestedPersonId: input.personId });
     this.assertWriteFence(input);
 
     if (!this.groupEnabled.get(`${input.personId}:${group}`)) {
@@ -334,7 +340,7 @@ export class MemoryHealthKitEngine {
     const coverageEndAt = nowIso;
 
     this.touchState({
-      familyId: current.family.id,
+      familyId: self.familyId,
       personId: input.personId,
       group,
       nowIso,
@@ -351,9 +357,8 @@ export class MemoryHealthKitEngine {
     group: HealthKitConsentGroup,
     input: MarkHealthKitGroupReadyInput
   ): Promise<HealthKitGroupReadyResult> {
-    const current = this.host.requireActiveMember(actorUserId);
-    const selfProfile = await this.host.getSelfProfile(actorUserId);
-    assertSelfProfileMatch({ selfProfileId: selfProfile?.id, requestedPersonId: input.personId });
+    const self = await this.requireSelf(actorUserId);
+    assertSelfProfileMatch({ selfProfileId: self.id, requestedPersonId: input.personId });
     this.assertWriteFence(input);
 
     if (!this.groupEnabled.get(`${input.personId}:${group}`)) {
@@ -368,7 +373,7 @@ export class MemoryHealthKitEngine {
     const coverageEndAt = input.coverageEndAt ?? prev?.coverageEndAt ?? nowIso;
 
     this.touchState({
-      familyId: current.family.id,
+      familyId: self.familyId,
       personId: input.personId,
       group,
       nowIso,
@@ -387,7 +392,7 @@ export class MemoryHealthKitEngine {
     personId?: string
   ): Promise<HealthKitGroupStatus> {
     const selfProfile = await this.host.getSelfProfile(actorUserId);
-    this.host.requireActiveMember(actorUserId);
+    await this.requireSelf(actorUserId);
     const target = personId ?? selfProfile?.id;
     if (!target) {
       throw new HttpError(409, "healthkit_self_profile_required", "Create your self profile before using HealthKit sync.");
@@ -412,7 +417,7 @@ export class MemoryHealthKitEngine {
     personId: string,
     healthMetric: HealthKitMetricKey
   ): Promise<HealthMetricFreshness> {
-    this.host.requireActiveMember(actorUserId);
+    await this.requireSelf(actorUserId);
     const group = HEALTHKIT_METRIC_REGISTRY[healthMetric].group;
     const settings = this.profileSettings.get(personId);
     const state = this.syncState.get(`${personId}:${group}`);
@@ -562,7 +567,7 @@ export class MemoryHealthKitEngine {
   private applyOne(
     op: HealthKitSyncOp,
     ctx: {
-      familyId: string;
+      familyId: string | null;
       personId: string;
       timezoneVersion: number;
       actorUserId: string;
@@ -585,7 +590,7 @@ export class MemoryHealthKitEngine {
 
   private applyUpsert(
     payload: NonNullable<HealthKitSyncOp["payload"]>,
-    ctx: { familyId: string; personId: string; timezoneVersion: number; actorUserId: string; nowIso: string }
+    ctx: { familyId: string | null; personId: string; timezoneVersion: number; actorUserId: string; nowIso: string }
   ) {
     switch (payload.kind) {
       case "steps_hour": {
@@ -746,7 +751,7 @@ export class MemoryHealthKitEngine {
   }
 
   private touchState(input: {
-    familyId: string;
+    familyId: string | null;
     personId: string;
     group: HealthKitConsentGroup;
     nowIso: string;
@@ -771,7 +776,7 @@ export class MemoryHealthKitEngine {
     });
   }
 
-  private buildSettings(familyId: string, personId: string): HealthKitSettings {
+  private buildSettings(familyId: string | null, personId: string): HealthKitSettings {
     const settings = this.profileSettings.get(personId);
     const active = this.activeInstallation(personId);
     const groups = HEALTHKIT_METRICS.map((group) => {
