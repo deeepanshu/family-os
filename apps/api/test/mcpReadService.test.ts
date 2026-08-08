@@ -575,7 +575,7 @@ describe("HealthMcpReadService", () => {
     if (workouts.healthMetric === "workout") expect(workouts.workouts[0]).toMatchObject({ workoutType: "running", durationMinutes: 30 });
   });
 
-  it("withholds sleep points after timezone change until backfill completes", async () => {
+  it("marks sleep incomplete after timezone change until backfill completes", async () => {
     const repo = new InMemoryFamilyRepository();
     const api = createApp({
       config: {
@@ -641,19 +641,20 @@ describe("HealthMcpReadService", () => {
       consentVersion: "2026-07-18"
     });
     const service = new HealthMcpReadService({ ...repositories, now: fixedNow });
-    const withheld = await service.getHealthData(
+    const afterTz = await service.getHealthData(
       { userId, oauthClientId },
       { personId: profileId, healthMetric: "sleep", rangeDays: 30, timezone: "UTC" }
     );
-    expect(withheld.metricSyncStatus).toBe("never_synced");
-    expect(withheld.healthTimezone).toBe("Asia/Bangkok");
-    expect(withheld.coverage.complete).toBe(false);
-    if (withheld.viewType === "daily_duration_series") {
-      expect(withheld.points).toEqual([]);
+    expect(afterTz.metricSyncStatus).toBe("never_synced");
+    expect(afterTz.healthTimezone).toBe("Asia/Bangkok");
+    expect(afterTz.coverage.complete).toBe(false);
+    // Prior timezone version rows are not read; no current-version data yet.
+    if (afterTz.viewType === "daily_duration_series") {
+      expect(afterTz.points).toEqual([]);
     }
   });
 
-  it("withholds step points while a metric repair is incomplete", async () => {
+  it("exposes step points while a metric repair is incomplete (data-first)", async () => {
     const repo = new InMemoryFamilyRepository();
     const api = createApp({
       config: {
@@ -731,8 +732,9 @@ describe("HealthMcpReadService", () => {
     );
     expect(partial.metricSyncStatus).toBe("syncing");
     expect(partial.coverage.complete).toBe(false);
+    // Mid-import still returns stored rows; completeness is separate from presence.
     if (partial.viewType === "daily_series") {
-      expect(partial.points).toEqual([]);
+      expect(partial.points.find((p) => p.bucket === "2026-07-15")?.value).toBe(9999);
     }
 
     const readyRes = await api.request(`${HEALTH_API_PREFIX}/healthkit/groups/activity/ready`, {

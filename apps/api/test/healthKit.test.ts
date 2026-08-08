@@ -280,7 +280,7 @@ describe("HealthKit ops:batch (BP milestone)", () => {
     expect(results[1].result).toBe("rejected");
   });
 
-  it("start-import sets syncing; ready gates status", async () => {
+  it("start-import sets syncing; ready marks complete", async () => {
     const api = app();
     const { token, profileId } = await setup(api);
     await putSettings(api, token, profileId);

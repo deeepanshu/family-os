@@ -125,18 +125,12 @@ export function scopesForGroup(group: HealthKitConsentGroup): string[] {
 }
 
 /**
- * Incomplete first import and post-timezone-change windows must not expose records
- * via MCP/history until the group is ready under the current timezone version.
+ * @deprecated Prefer data-first reads. MCP and history return stored rows regardless
+ * of import status; consent is enforced at the route/service layer.
+ * Always returns false (kept so older call sites compile during cleanup).
  */
-export function shouldWithholdMetricRecords(status: HealthMetricSyncStatusCode): boolean {
-  return (
-    status === "syncing" ||
-    status === "backfilling" ||
-    status === "never_synced" ||
-    status === "error" ||
-    // Disabled consent must not expose historical rows via MCP/history.
-    status === "disabled"
-  );
+export function shouldWithholdMetricRecords(_status: HealthMetricSyncStatusCode): boolean {
+  return false;
 }
 
 const DATE_SANITY_PAST_MS = 10 * 365 * 24 * 60 * 60 * 1000;

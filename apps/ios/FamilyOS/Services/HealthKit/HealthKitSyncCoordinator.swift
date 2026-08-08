@@ -2,12 +2,16 @@ import Foundation
 import HealthKit
 
 /// Shared multi-group foreground (and BG reimport) pipeline:
-/// start-import → auth → fetch+enqueue → drain → ready (when pending==0).
+/// start-import → fetch+enqueue → drain → ready (when pending==0).
 ///
 /// Not MainActor — safe for ViewModel Tasks and background handlers.
 enum HealthKitSyncCoordinator {
     /// Stable processing order: vitals first, then sleep.
     static let groupOrder: [HealthKitSyncMetric] = [.vitals, .sleep, .workouts]
+
+    /// Soft timeouts so Sync cannot hang forever on HK query or upload.
+    static let fetchTimeoutSeconds: TimeInterval = 90
+    static let drainTimeoutSeconds: TimeInterval = 180
 
     struct GroupSyncSummary: Sendable {
         let group: HealthKitSyncMetric
@@ -28,6 +32,36 @@ enum HealthKitSyncCoordinator {
         var succeededGroups: [HealthKitSyncMetric] { groups.map(\.group) }
     }
 
+    /// User-visible pipeline stages (toasts / status line).
+    enum ProgressStage: Sendable {
+        case authenticating
+        case startingImport(HealthKitSyncMetric)
+        case fetching(HealthKitSyncMetric)
+        case uploading(HealthKitSyncMetric, sampleCount: Int)
+        case markingReady(HealthKitSyncMetric)
+        case groupReady(HealthKitSyncMetric, sampleCount: Int, applied: Int)
+        case groupFailed(HealthKitSyncMetric, message: String)
+
+        var toastMessage: String {
+            switch self {
+            case .authenticating:
+                return "Requesting Health access…"
+            case .startingImport(let group):
+                return "\(group.displayName): starting import…"
+            case .fetching(let group):
+                return "\(group.displayName): reading Apple Health…"
+            case .uploading(let group, let sampleCount):
+                return "\(group.displayName): uploading \(sampleCount) sample(s)…"
+            case .markingReady(let group):
+                return "\(group.displayName): finishing…"
+            case .groupReady(let group, let sampleCount, let applied):
+                return "\(group.displayName): ready (\(sampleCount) samples, \(applied) ops)"
+            case .groupFailed(let group, let message):
+                return "\(group.displayName) failed: \(message)"
+            }
+        }
+    }
+
     /// API hooks injected by the caller (FG ViewModel or BG helper).
     struct Dependencies: Sendable {
         let startImport: @Sendable (_ group: String) async throws -> Void
@@ -37,6 +71,7 @@ enum HealthKitSyncCoordinator {
         let healthTimezone: String
         /// When true, BP empty still errors; sleep empty is always OK.
         let allowEmptySleep: Bool
+        let onProgress: (@Sendable (ProgressStage) async -> Void)?
 
         init(
             startImport: @escaping @Sendable (_ group: String) async throws -> Void,
@@ -44,7 +79,8 @@ enum HealthKitSyncCoordinator {
             postBatch: @escaping @Sendable (HealthKitOpsBatchRequest) async throws -> HealthKitOpsBatchResult,
             ensureAuth: @escaping @Sendable (Set<HealthKitSyncMetric>) async throws -> Void,
             healthTimezone: String,
-            allowEmptySleep: Bool = true
+            allowEmptySleep: Bool = true,
+            onProgress: (@Sendable (ProgressStage) async -> Void)? = nil
         ) {
             self.startImport = startImport
             self.markReady = markReady
@@ -52,6 +88,7 @@ enum HealthKitSyncCoordinator {
             self.ensureAuth = ensureAuth
             self.healthTimezone = healthTimezone
             self.allowEmptySleep = allowEmptySleep
+            self.onProgress = onProgress
         }
     }
 
@@ -72,6 +109,7 @@ enum HealthKitSyncCoordinator {
     ) async throws -> SyncOutcome {
         // Auth once for all groups before any start-import.
         do {
+            await report(deps, .authenticating)
             try await deps.ensureAuth(Set(groups))
             CrashReporting.healthKit(
                 .authRequested,
@@ -97,6 +135,7 @@ enum HealthKitSyncCoordinator {
             } catch {
                 let api = mapAuthError(error)
                 failures.append(GroupSyncFailure(group: group, error: api))
+                await report(deps, .groupFailed(group, message: api.localizedDescription))
                 CrashReporting.healthKitNonFatal(
                     .syncFailed,
                     stage: .syncFailed,
@@ -124,12 +163,16 @@ enum HealthKitSyncCoordinator {
         CrashReporting.healthKit(.importStarted, group: groupKey, metric: scopeMetric(for: group))
 
         // Auth already completed for the batch. start-import only after that.
+        await report(deps, .startingImport(group))
         try await deps.startImport(groupKey)
         try syncStore.setGroupStatus(groupKey, status: "syncing")
 
+        await report(deps, .fetching(group))
         let sampleCount: Int
         do {
-            sampleCount = try await fetchAndEnqueue(group: group, syncStore: syncStore, healthTimezone: deps.healthTimezone)
+            sampleCount = try await withTimeout(seconds: fetchTimeoutSeconds, label: "\(groupKey)_fetch") {
+                try await fetchAndEnqueue(group: group, syncStore: syncStore, healthTimezone: deps.healthTimezone)
+            }
         } catch let error as HealthAPIError {
             throw error
         } catch {
@@ -174,12 +217,15 @@ enum HealthKitSyncCoordinator {
             count: sampleCount
         )
 
+        await report(deps, .uploading(group, sampleCount: sampleCount))
         let worker = HealthKitSyncWorker(store: syncStore, postBatch: deps.postBatch)
         CrashReporting.healthKit(.drainStarted, group: groupKey, count: try syncStore.pendingCount(group: groupKey))
 
         let applied: Int
         do {
-            applied = try await worker.drain()
+            applied = try await withTimeout(seconds: drainTimeoutSeconds, label: "\(groupKey)_drain") {
+                try await worker.drain()
+            }
         } catch {
             CrashReporting.healthKitNonFatal(
                 .batchFailed,
@@ -214,9 +260,11 @@ enum HealthKitSyncCoordinator {
             )
         }
 
+        await report(deps, .markingReady(group))
         try await deps.markReady(groupKey)
         try syncStore.setGroupStatus(groupKey, status: "ready")
         CrashReporting.healthKit(.groupReady, group: groupKey, metric: scopeMetric(for: group))
+        await report(deps, .groupReady(group, sampleCount: sampleCount, applied: applied))
 
         return GroupSyncSummary(group: group, sampleCount: sampleCount, applied: applied)
     }
@@ -254,35 +302,47 @@ enum HealthKitSyncCoordinator {
         }
     }
 
-    /// Maps HealthKit auth/query failures to user-facing API errors (metric-agnostic).
-    static func mapAuthError(_ error: Error) -> HealthAPIError {
+    private static func report(_ deps: Dependencies, _ stage: ProgressStage) async {
+        if let onProgress = deps.onProgress {
+            await onProgress(stage)
+        }
+    }
+
+    private static func withTimeout<T: Sendable>(
+        seconds: TimeInterval,
+        label: String,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await operation()
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw HealthAPIError.badStatus(
+                    408,
+                    "HealthKit step timed out after \(Int(seconds))s (\(label)). Try Sync again.",
+                    code: "sync_timeout"
+                )
+            }
+            guard let result = try await group.next() else {
+                throw HealthAPIError.badStatus(500, "HealthKit step ended without a result (\(label)).", code: "sync_timeout")
+            }
+            group.cancelAll()
+            return result
+        }
+    }
+
+    private static func mapAuthError(_ error: Error) -> HealthAPIError {
         if let api = error as? HealthAPIError {
             return api
         }
-        let ns = error as NSError
-        let isHealthKit = ns.domain == HKError.errorDomain || ns.domain == "com.apple.healthkit"
-        let notDetermined =
-            isHealthKit && ns.code == HKError.Code.errorAuthorizationNotDetermined.rawValue
-        let denied = isHealthKit && ns.code == HKError.Code.errorAuthorizationDenied.rawValue
-
-        if notDetermined {
-            return .badStatus(
-                403,
-                "Health permission is not set yet. When the Health sheet appears, turn ON the types Kinstead requests. If no sheet appears: Settings → Health → Data Access & Devices → Kinstead → enable the types you want to sync, then Sync again.",
-                code: "healthkit_auth_not_determined"
-            )
-        }
-        if denied {
-            return .badStatus(
-                403,
-                "Health access was denied. Open Settings → Health → Data Access & Devices → Kinstead and enable the metrics you want to sync, then Sync again.",
-                code: "healthkit_auth_denied"
-            )
-        }
-        return .badStatus(
-            403,
-            "Health access failed: \(ns.localizedDescription). Open Settings → Health → Data Access & Devices → Kinstead, enable the needed types, then Sync again.",
-            code: "healthkit_auth_failed"
+        return HealthAPIError.badStatus(
+            500,
+            error.localizedDescription,
+            code: (error as NSError).domain == CrashReporting.healthKitErrorDomain
+                ? "healthkit_error"
+                : "sync_failed"
         )
     }
 }

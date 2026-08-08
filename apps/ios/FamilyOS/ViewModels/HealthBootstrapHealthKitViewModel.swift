@@ -186,7 +186,9 @@ extension HealthBootstrapViewModel {
             extra: ["groups": groupsToSync.map(\.rawValue).joined(separator: ",")]
         )
 
-        await request(showsFeedback: true) {
+        // Progress toasts are driven by the coordinator; final success/partial toast is set here.
+        // Failure alert is applied after `request` so we can still refresh metric rows first.
+        await request(showsFeedback: false) {
             do {
                 let installationId = try HealthKitInstallationId.current(using: keychain)
                 var status = try await client.healthKitSettings(
@@ -280,14 +282,34 @@ extension HealthBootstrapViewModel {
                     ensureAuth: { metrics in
                         try await hkClient.ensureReadAuthorization(for: metrics)
                     },
-                    healthTimezone: healthTimezone
+                    healthTimezone: healthTimezone,
+                    onProgress: { [weak self] stage in
+                        await MainActor.run {
+                            guard let self else { return }
+                            self.statusMessage = stage.toastMessage
+                            self.reportActionResult(stage.toastMessage)
+                        }
+                    }
                 )
 
-                let outcome = try await HealthKitSyncCoordinator.run(
-                    groups: groupsToSync,
-                    syncStore: syncStore,
-                    deps: deps
-                )
+                let outcome: HealthKitSyncCoordinator.SyncOutcome
+                do {
+                    outcome = try await HealthKitSyncCoordinator.run(
+                        groups: groupsToSync,
+                        syncStore: syncStore,
+                        deps: deps
+                    )
+                } catch {
+                    // Refresh metric rows so UI matches server after a total failure.
+                    if let refreshed = try? await client.healthKitSettings(
+                        baseURL: connection.baseURL,
+                        accessToken: auth.accessToken,
+                        personId: personId
+                    ) {
+                        healthKit.apply(status: refreshed)
+                    }
+                    throw error
+                }
 
                 let refreshed = try await client.healthKitSettings(
                     baseURL: connection.baseURL,
@@ -316,12 +338,22 @@ extension HealthBootstrapViewModel {
                     "\(summary.group.displayName): \(summary.sampleCount) sample(s), \(summary.applied) op(s)"
                 }
                 if outcome.failures.isEmpty {
-                    return "Synced \(successParts.joined(separator: "; "))."
+                    let message = "Synced \(successParts.joined(separator: "; "))."
+                    reportActionResult(message)
+                    return message
                 }
                 let failParts = outcome.failures.map { failure in
-                    "\(failure.group.displayName) failed"
+                    "\(failure.group.displayName) failed (\(failure.error.errorCode ?? "error"))"
                 }
-                return "Synced \(successParts.joined(separator: "; ")). \(failParts.joined(separator: "; "))."
+                let message: String
+                if successParts.isEmpty {
+                    message = failParts.joined(separator: "; ") + "."
+                } else {
+                    message = "Synced \(successParts.joined(separator: "; ")). \(failParts.joined(separator: "; "))."
+                }
+                // Partial failure: alert so the user notices failed groups + UI status is Error.
+                reportActionFailure(message)
+                return message
             } catch {
                 CrashReporting.healthKitNonFatal(
                     .syncFailed,
@@ -331,6 +363,9 @@ extension HealthBootstrapViewModel {
                 )
                 throw error
             }
+        }
+        if isError {
+            reportActionFailure(statusMessage)
         }
     }
 

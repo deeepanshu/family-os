@@ -249,3 +249,5 @@ struct HealthKitGroupReadyResult: Decodable, Sendable {
     let coverageStartAt: String?
     let coverageEndAt: String?
 }
+
+

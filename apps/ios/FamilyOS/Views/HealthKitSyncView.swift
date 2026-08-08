@@ -84,10 +84,35 @@ struct HealthKitSyncView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title(for: metric))
             if let state = metricState(for: metric) {
-                Text(state.status.displayName)
+                Text(statusCaption(for: state))
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(statusColor(for: state.status))
             }
+        }
+    }
+
+    private func statusCaption(for state: HealthKitMetricState) -> String {
+        switch state.status {
+        case .error:
+            if let code = state.lastErrorCode, !code.isEmpty {
+                return "Failed (\(code))"
+            }
+            return "Failed"
+        default:
+            return state.status.displayName
+        }
+    }
+
+    private func statusColor(for status: HealthKitMetricSyncStatus) -> Color {
+        switch status {
+        case .ready:
+            return .secondary
+        case .syncing, .backfilling:
+            return .orange
+        case .error:
+            return .red
+        case .neverSynced, .disabled:
+            return .secondary
         }
     }
 

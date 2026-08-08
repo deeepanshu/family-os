@@ -464,16 +464,17 @@ export class MemoryHealthKitEngine {
     rangeStartDay: string,
     rangeEndDay: string
   ): Promise<HealthSleepDayRecord[]> {
-    const byDay = new Map<string, HealthSleepDayRecord>();
-    for (const row of this.sleepDays.values()) {
-      if (row.personId !== personId) continue;
-      if (row.sleepDay < rangeStartDay || row.sleepDay > rangeEndDay) continue;
-      const prev = byDay.get(row.sleepDay);
-      if (!prev || row.timezoneVersion >= prev.timezoneVersion) {
-        byDay.set(row.sleepDay, row);
-      }
-    }
-    return [...byDay.values()].sort((a, b) => a.sleepDay.localeCompare(b.sleepDay));
+    const settings = this.profileSettings.get(personId);
+    const timezoneVersion = settings?.healthTimezoneVersion ?? 1;
+    return [...this.sleepDays.values()]
+      .filter(
+        (row) =>
+          row.personId === personId &&
+          row.timezoneVersion === timezoneVersion &&
+          row.sleepDay >= rangeStartDay &&
+          row.sleepDay <= rangeEndDay
+      )
+      .sort((a, b) => a.sleepDay.localeCompare(b.sleepDay));
   }
 
   async listHealthKitBloodPressure(

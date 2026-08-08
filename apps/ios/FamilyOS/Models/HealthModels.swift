@@ -319,7 +319,7 @@ enum HealthKitMetricSyncStatus: String, Codable {
         case .ready:
             return "Ready"
         case .error:
-            return "Error"
+            return "Failed"
         case .disabled:
             return "Disabled"
         }
