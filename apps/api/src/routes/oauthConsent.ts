@@ -30,7 +30,8 @@ export type OAuthConsentRouteDeps = {
  * - POST /consent/decision        Create Family OS grant (approve) then approve/deny in Supabase
  *
  * The OAuth client ID is always taken from Supabase authorization details, never from the browser body.
- * Only clients on MCP_ALLOWED_OAUTH_CLIENT_IDS may receive a Family OS health grant (required in production).
+ * Optional MCP_ALLOWED_OAUTH_CLIENT_IDS may further restrict which clients can receive a grant;
+ * when empty, any client the user consents to is allowed (DCR-friendly).
  */
 export function createOAuthConsentRoutes(deps: OAuthConsentRouteDeps) {
   const routes = new Hono<{ Variables: AppVariables }>();

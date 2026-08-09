@@ -38,9 +38,10 @@ const envSchema = z.object({
    */
   MCP_PUBLIC_BASE_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
   /**
-   * Comma-separated Supabase OAuth client IDs allowed to receive Family OS MCP
-   * health grants. Required in production. When empty outside production, any
-   * registered OAuth client may consent (local/dev only).
+   * Optional comma-separated Supabase OAuth client IDs allowed to receive Family
+   * OS MCP health grants. When empty (default), any OAuth client the user
+   * consents to may receive a grant — required for Dynamic Client Registration
+   * (Grok, ChatGPT, etc. mint a new client id per connect).
    */
   MCP_ALLOWED_OAUTH_CLIENT_IDS: z.preprocess(emptyToUndefined, z.string().optional()),
   MCP_RESOURCE_NAME: z.preprocess(emptyToUndefined, z.string().default("Family OS Health MCP")),
@@ -70,7 +71,7 @@ export type AppConfig = Omit<
   HEALTH_API_SYNC_LOCAL_AUTH_USERS: boolean;
   MCP_PUBLIC_ORIGIN?: string;
   MCP_PUBLIC_PATH: string;
-  /** Parsed allowlist; empty means unrestricted (non-production only). */
+  /** Parsed allowlist; empty means unrestricted (any consented OAuth client). */
   MCP_ALLOWED_OAUTH_CLIENT_IDS: string[];
 };
 
@@ -152,6 +153,7 @@ function parseOAuthClientAllowlist(raw: string | undefined): string[] {
 
 /** True when the OAuth client may receive / use MCP health grants. */
 export function isMcpOAuthClientAllowed(config: AppConfig, oauthClientId: string): boolean {
+  // Empty allowlist = open (DCR clients change every connect).
   if (config.MCP_ALLOWED_OAUTH_CLIENT_IDS.length === 0) {
     return true;
   }
@@ -184,11 +186,6 @@ export function loadConfig(env: Record<string, unknown> = process.env): AppConfi
   }
   if (config.NODE_ENV === "production" && !config.SUPABASE_ANON_KEY) {
     throw new Error("SUPABASE_ANON_KEY must be configured in production for the OAuth consent page.");
-  }
-  if (config.NODE_ENV === "production" && allowedOAuthClientIds.length === 0) {
-    throw new Error(
-      "MCP_ALLOWED_OAUTH_CLIENT_IDS must be configured in production (comma-separated Supabase OAuth client IDs eligible for MCP health access)."
-    );
   }
   const repository = config.HEALTH_API_REPOSITORY ?? (config.NODE_ENV === "test" ? "memory" : "postgres");
   if (config.NODE_ENV === "production" && repository === "memory") {

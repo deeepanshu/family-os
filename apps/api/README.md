@@ -222,7 +222,8 @@ Environment:
 ```text
 MCP_PUBLIC_ORIGIN=https://familyos.deepanshujain.me
 MCP_PUBLIC_PATH=/health/api/mcp
-MCP_ALLOWED_OAUTH_CLIENT_IDS=<supabase-oauth-client-id-for-chatgpt>
+# Optional. Empty = any OAuth client the user consents to (DCR-friendly).
+# MCP_ALLOWED_OAUTH_CLIENT_IDS=chatgpt-client-uuid,other-uuid
 SUPABASE_URL=https://<project>.supabase.co
 SUPABASE_ANON_KEY=...
 ```
@@ -231,10 +232,10 @@ SUPABASE_ANON_KEY=...
   fragments are rejected so they are not silently combined into
   `.../health/api/mcp`. Production requires `https:`. Non-production may use
   `http:` only on loopback (`localhost`, `127.0.0.1`, `::1`).
-- `MCP_ALLOWED_OAUTH_CLIENT_IDS` is required in production: comma-separated
-  Supabase OAuth client IDs eligible for MCP health grants. Outside production,
-  an empty list allows any registered client (local/dev only). Prefer keeping
-  Dynamic Client Registration off in production.
+- `MCP_ALLOWED_OAUTH_CLIENT_IDS` is **optional**. When empty (recommended with
+  Dynamic Client Registration — Grok/ChatGPT mint a new client id each connect),
+  any OAuth client may receive a Family OS health grant after user consent.
+  When set, only those Supabase OAuth client IDs may grant.
 
 Supabase Auth OAuth Server settings:
 
@@ -242,10 +243,10 @@ Supabase Auth OAuth Server settings:
 - Site URL must be the same public origin that hosts the API
 
 Consent flow creates the Family OS `mcp_connection_grants` row using the OAuth
-`client_id` from Supabase `getAuthorizationDetails`, never from a browser body,
-only if that client is allowlisted. If Supabase approval then fails, the grant
-is revoked immediately. `POST /health/api/v1/mcp/connections` is not used for grant
-creation.
+`client_id` from Supabase `getAuthorizationDetails`, never from a browser body.
+Optional client-id allowlist may restrict grants; empty allowlist accepts any
+client after user consent. If Supabase approval then fails, the grant is revoked
+immediately. `POST /health/api/v1/mcp/connections` is not used for grant creation.
 
 ### JWT audience for MCP tokens
 

@@ -55,7 +55,7 @@ describe("configuration", () => {
     ).toThrow("HEALTH_API_REPOSITORY=memory is not allowed in production.");
   });
 
-  it("requires MCP public origin, Supabase URL, anon key, and OAuth client allowlist in production", () => {
+  it("requires MCP public origin, Supabase URL, and anon key in production", () => {
     expect(() =>
       loadConfig({
         NODE_ENV: "production",
@@ -72,8 +72,7 @@ describe("configuration", () => {
         HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
         DATABASE_URL: "postgres://family_os:family_os@localhost:5432/family_os",
         MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
-        SUPABASE_ANON_KEY: "anon-key",
-        MCP_ALLOWED_OAUTH_CLIENT_IDS: "chatgpt-prod"
+        SUPABASE_ANON_KEY: "anon-key"
       })
     ).toThrow("SUPABASE_URL must be configured in production.");
 
@@ -83,21 +82,21 @@ describe("configuration", () => {
         HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
         DATABASE_URL: "postgres://family_os:family_os@localhost:5432/family_os",
         MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
-        SUPABASE_URL: "https://project.supabase.co",
-        MCP_ALLOWED_OAUTH_CLIENT_IDS: "chatgpt-prod"
+        SUPABASE_URL: "https://project.supabase.co"
       })
     ).toThrow("SUPABASE_ANON_KEY must be configured in production");
 
-    expect(() =>
-      loadConfig({
-        NODE_ENV: "production",
-        HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
-        DATABASE_URL: "postgres://family_os:family_os@localhost:5432/family_os",
-        MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
-        SUPABASE_URL: "https://project.supabase.co",
-        SUPABASE_ANON_KEY: "anon-key"
-      })
-    ).toThrow("MCP_ALLOWED_OAUTH_CLIENT_IDS must be configured in production");
+    // Empty OAuth client allowlist is allowed (DCR clients mint a new id each connect).
+    const open = loadConfig({
+      NODE_ENV: "production",
+      HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
+      DATABASE_URL: "postgres://family_os:family_os@localhost:5432/family_os",
+      HEALTH_API_REPOSITORY: "postgres",
+      MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
+      SUPABASE_URL: "https://project.supabase.co",
+      SUPABASE_ANON_KEY: "anon-key"
+    });
+    expect(open.MCP_ALLOWED_OAUTH_CLIENT_IDS).toEqual([]);
   });
 
   it("normalizes MCP public path and accepts legacy MCP_PUBLIC_BASE_URL as origin", () => {
