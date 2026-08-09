@@ -823,16 +823,48 @@ Exit criteria:
 
 ### Phase 7: Deployment and release
 
-1. Deploy additive database migration and API changes first.
-2. Deploy the MCP restriction and response cleanup with the API.
-3. Verify remote OAuth discovery, connection grant, profile listing, and all
-   three metric calls in staging/production as appropriate.
-4. Release the iOS UI and run behavior after API compatibility is confirmed.
-5. Validate on a physical iPhone; Simulator is not proof of HealthKit background
-   delivery.
-6. Push a new `release/` tag only after the intended commit is on `main`.
-7. Observe Crashlytics and privacy-safe sync telemetry before removing any
-   temporary compatibility route.
+There is **no staging environment**. API and MCP go **straight to production**.
+iOS follows only after prod API/MCP smoke is green.
+
+#### Automated prod deploy (API + MCP)
+
+Pushing the intended commit to `main` (paths that touch API, shared packages,
+`db/`, Docker, or the deploy workflow) triggers GitHub Actions
+(`.github/workflows/deploy-rpi.yml`): build/push the arm64 image to GHCR, then
+call **rpi-manager** (`POST /hooks/deploy/family-os`).
+
+On the Pi, rpi-manager already runs this **ordered** sequence (see
+`infra/docker/README.md`):
+
+1. `docker compose pull` for `IMAGE_TAG` (git SHA or `main`)
+2. **One-shot migrate** (`compose.prod.yml` `--profile migrate`) — applies
+   pending Drizzle migrations (including additive `0013` history markers); no-op
+   if nothing pending
+3. `docker compose up -d` for **Health API and MCP** (same image/commit)
+
+Humans do **not** re-order migrate vs app when using the hook. Manual Pi
+`pull`/`up` alone does **not** migrate; only use the documented manual migrate
+command if recovering outside the hook.
+
+#### Human gates after the hook succeeds
+
+1. Confirm Deploy RPi workflow and rpi-manager deploy status are **success**.
+2. **Prod smoke** (no mid environment — hit production carefully with a
+   controlled account):
+   - Healthcheck up.
+   - Settings returns `needsInitialImport` per group.
+   - `runs/begin` + `runs/complete` for `initial_import` and `sync`.
+   - Sync complete **preserves** long `coverageStartAt` (union, does not shrink
+     to the ~24h overlap window).
+   - Legacy `start-import` / ready still present for older iOS clients.
+   - MCP: enum exactly `blood_pressure`, `sleep`, `workout`; no `disclaimer` or
+     `metricSyncStatus`; data-first while a group is `syncing` if easy to check.
+3. **Only then** ship iOS: physical iPhone validation (Simulator is not proof of
+   HealthKit background delivery), then push a new `release/*` tag after the
+   intended commit is on `origin/main` (Xcode Cloud → TestFlight). Use a new tag
+   for every retry.
+4. Observe Crashlytics and privacy-safe sync telemetry before removing any
+   temporary compatibility route (`start-import` / ready).
 
 ## 11. Test plan
 
@@ -983,6 +1015,9 @@ This plan is complete only when all of the following are true:
 - MCP responses omit disclaimer and metric status while keeping coverage and
   `lastSyncedAt`.
 - Automated tests pass.
-- A physical-device Release build proves foreground/background behavior.
-- The API/MCP deployment and tagged iOS release are verified in the intended
-  environment.
+- Production API/MCP deploy succeeded via the ordered rpi-manager path
+  (pull → migrate → API + MCP) and prod smoke above is green.
+- A physical-device Release/TestFlight build proves foreground/background
+  behavior against that production API.
+- The tagged iOS release (`release/*`) is verified on a real device; there is
+  no separate staging environment.
