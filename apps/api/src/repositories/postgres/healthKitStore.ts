@@ -38,7 +38,8 @@ import {
   deriveNeedsInitialImport,
   deriveRunRange,
   HEALTHKIT_METRICS,
-  toUtcIso
+  toUtcIso,
+  unionCompletedCoverage
 } from "../healthKitDomain";
 import { PostgresRepositoryContext } from "./context";
 import { toDateString, toIso } from "./dateUtils";
@@ -517,6 +518,10 @@ export class PostgresHealthKitStore {
     });
 
     let deletedCount = 0;
+    let completedCoverage = {
+      coverageStartAt: input.rangeStartAt,
+      coverageEndAt: input.rangeEndAt
+    };
 
     await this.context.sql.begin(async (tx: any) => {
       const authority = await this.loadWriteAuthority(tx, actorUserId, access.familyId, input.personId);
@@ -560,6 +565,13 @@ export class PostgresHealthKitStore {
         });
       }
 
+      completedCoverage = unionCompletedCoverage({
+        existingCoverageStartAt: state?.coverage_start_at ? toIso(state.coverage_start_at) : undefined,
+        existingCoverageEndAt: state?.coverage_end_at ? toIso(state.coverage_end_at) : undefined,
+        completedRangeStartAt: input.rangeStartAt,
+        completedRangeEndAt: input.rangeEndAt
+      });
+
       await this.touchGroupState(tx, {
         familyId: access.familyId,
         personId: input.personId,
@@ -567,8 +579,8 @@ export class PostgresHealthKitStore {
         nowIso,
         status: "ready",
         success: true,
-        coverageStartAt: input.rangeStartAt,
-        coverageEndAt: input.rangeEndAt,
+        coverageStartAt: completedCoverage.coverageStartAt,
+        coverageEndAt: completedCoverage.coverageEndAt,
         historyMarker:
           input.kind === "sync"
             ? undefined
@@ -595,8 +607,8 @@ export class PostgresHealthKitStore {
       status: "ready",
       deletedCount,
       lastSuccessfulAt: nowIso,
-      coverageStartAt: input.rangeStartAt,
-      coverageEndAt: input.rangeEndAt,
+      coverageStartAt: completedCoverage.coverageStartAt,
+      coverageEndAt: completedCoverage.coverageEndAt,
       needsInitialImport: false
     };
   }
@@ -1241,4 +1253,3 @@ export class PostgresHealthKitStore {
   }
 
 }
-

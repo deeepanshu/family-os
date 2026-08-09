@@ -41,7 +41,8 @@ import {
   deriveNeedsInitialImport,
   deriveRunRange,
   HEALTHKIT_METRICS,
-  toUtcIso
+  toUtcIso,
+  unionCompletedCoverage
 } from "./healthKitDomain";
 
 type FamilyCtx = {
@@ -257,6 +258,12 @@ export class MemoryHealthKitEngine {
         lastErrorCode: timezoneChanged || installationReplaced ? undefined : prev?.lastErrorCode,
         coverageStartAt: timezoneChanged || installationReplaced ? undefined : prev?.coverageStartAt,
         coverageEndAt: timezoneChanged || installationReplaced ? undefined : prev?.coverageEndAt,
+        // Keep the marker exactly as Postgres does. Installation/timezone
+        // mismatches invalidate it through deriveNeedsInitialImport; settings
+        // saves must not erase history completion by themselves.
+        historyImportCompletedAt: prev?.historyImportCompletedAt,
+        historyImportInstallationId: prev?.historyImportInstallationId,
+        historyImportTimezoneVersion: prev?.historyImportTimezoneVersion,
         status
       });
     }
@@ -509,6 +516,12 @@ export class MemoryHealthKitEngine {
     }
 
     let deletedCount = 0;
+    const completedCoverage = unionCompletedCoverage({
+      existingCoverageStartAt: this.syncState.get(`${input.personId}:${group}`)?.coverageStartAt,
+      existingCoverageEndAt: this.syncState.get(`${input.personId}:${group}`)?.coverageEndAt,
+      completedRangeStartAt: input.rangeStartAt,
+      completedRangeEndAt: input.rangeEndAt
+    });
     if (input.kind === "repair_import") {
       assertRunKindAllowed("repair_import", group, needsInitialImport);
       deletedCount = this.reconcileRepairWindow({
@@ -528,8 +541,8 @@ export class MemoryHealthKitEngine {
       nowIso,
       status: "ready",
       success: true,
-      coverageStartAt: input.rangeStartAt,
-      coverageEndAt: input.rangeEndAt,
+      coverageStartAt: completedCoverage.coverageStartAt,
+      coverageEndAt: completedCoverage.coverageEndAt,
       historyMarker:
         input.kind === "sync"
           ? undefined
@@ -555,8 +568,8 @@ export class MemoryHealthKitEngine {
       status: "ready",
       deletedCount,
       lastSuccessfulAt: nowIso,
-      coverageStartAt: input.rangeStartAt,
-      coverageEndAt: input.rangeEndAt,
+      coverageStartAt: completedCoverage.coverageStartAt,
+      coverageEndAt: completedCoverage.coverageEndAt,
       needsInitialImport: false
     };
   }

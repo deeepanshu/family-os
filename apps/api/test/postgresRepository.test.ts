@@ -4,7 +4,8 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { HEALTH_API_PREFIX } from "@family-os/shared";
 import { createApp } from "../src/app";
 import { PostgresFamilyRepository } from "../src/repositories/postgres";
-import { seedHealthKitReadyGroup } from "./healthKitTestHelpers";
+import { beginRun, completeRun, seedHealthKitReadyGroup } from "./healthKitTestHelpers";
+import { setupSoloUser } from "./soloSetup";
 
 const databaseUrl = process.env.DATABASE_URL ?? "postgres://family_os:family_os@localhost:5432/family_os";
 const jwtSecret = "test-supabase-jwt-secret-with-enough-length";
@@ -235,6 +236,46 @@ describe("Postgres repository wiring", () => {
       10
     );
     expect(readings).toMatchObject([{ value: 104, personId: profile.data.id, source: "healthkit" }]);
+  });
+
+  it("preserves completed coverage when a routine sync completes", async () => {
+    const api = app();
+    const token = await jwtFor(managerId, "manager@example.com");
+    const { profileId } = await setupSoloUser(api, token);
+    const installationId = "00000000-0000-4000-8000-000000009010";
+
+    const settings = await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        personId: profileId,
+        enabledGroups: ["vitals"],
+        healthTimezone: "UTC",
+        installationId,
+        consentVersion: "healthkit-v1"
+      })
+    });
+    expect(settings.status).toBe(200);
+    await seedHealthKitReadyGroup(api, token, profileId, installationId, "vitals", []);
+
+    const beforeSettings = await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const before = (await beforeSettings.json()).data.groups.find((group: { group: string }) => group.group === "vitals");
+
+    const begin = await beginRun(api, token, profileId, installationId, "vitals", "sync");
+    expect(begin.status).toBe(200);
+    const descriptor = (await begin.json()).data;
+    const complete = await completeRun(api, token, profileId, installationId, "vitals", {
+      kind: "sync",
+      rangeStartAt: descriptor.rangeStartAt,
+      rangeEndAt: descriptor.rangeEndAt
+    });
+    expect(complete.status).toBe(200);
+    const done = (await complete.json()).data;
+
+    expect(done.coverageStartAt).toBe(before.coverageStartAt);
+    expect(Date.parse(done.coverageEndAt)).toBeGreaterThanOrEqual(Date.parse(before.coverageEndAt));
   });
 
   it("treats concurrent retries of the same event as a duplicate", async () => {

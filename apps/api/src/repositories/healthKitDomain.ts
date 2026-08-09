@@ -60,6 +60,29 @@ export function coverageComplete(input: {
 }
 
 /**
+ * A successful run adds proven data coverage; it must never make a previously
+ * complete warehouse window look smaller. This is particularly important for
+ * routine sync, whose overlap range is intentionally much narrower than the
+ * initial history-import range.
+ */
+export function unionCompletedCoverage(input: {
+  existingCoverageStartAt?: string | null;
+  existingCoverageEndAt?: string | null;
+  completedRangeStartAt: string;
+  completedRangeEndAt: string;
+}): { coverageStartAt: string; coverageEndAt: string } {
+  const coverageStartAt =
+    input.existingCoverageStartAt && Date.parse(input.existingCoverageStartAt) < Date.parse(input.completedRangeStartAt)
+      ? input.existingCoverageStartAt
+      : input.completedRangeStartAt;
+  const coverageEndAt =
+    input.existingCoverageEndAt && Date.parse(input.existingCoverageEndAt) > Date.parse(input.completedRangeEndAt)
+      ? input.existingCoverageEndAt
+      : input.completedRangeEndAt;
+  return { coverageStartAt, coverageEndAt };
+}
+
+/**
  * needsInitialImport is true when no completed history marker matches the
  * active installation and current timezone version (plan §7.1). Never derived
  * from the attempt status label.

@@ -181,6 +181,49 @@ describe("HealthKit run lifecycle", () => {
     expect((await listBpReadingIds(api, token, profileId)).length).toBe(1);
   });
 
+  it("sync completion preserves completed coverage and returns the unioned window", async () => {
+    const { api } = app();
+    const { token, profileId } = await setup(api);
+    await putSettings(api, token, profileId);
+    await seedHealthKitReadyGroup(api, token, profileId, installationId, "vitals", []);
+
+    const before = (await getSettings(api, token)).groups.find((g: { group: string }) => g.group === "vitals");
+    const begin = await beginRun(api, token, profileId, installationId, "vitals", "sync");
+    expect(begin.status).toBe(200);
+    const descriptor = (await begin.json()).data;
+
+    const complete = await completeRun(api, token, profileId, installationId, "vitals", {
+      kind: "sync",
+      rangeStartAt: descriptor.rangeStartAt,
+      rangeEndAt: descriptor.rangeEndAt
+    });
+    expect(complete.status).toBe(200);
+    const done = (await complete.json()).data;
+
+    expect(done.coverageStartAt).toBe(before.coverageStartAt);
+    expect(Date.parse(done.coverageEndAt)).toBeGreaterThanOrEqual(Date.parse(before.coverageEndAt));
+
+    const after = (await getSettings(api, token)).groups.find((g: { group: string }) => g.group === "vitals");
+    expect(after.coverageStartAt).toBe(before.coverageStartAt);
+    expect(after.coverageEndAt).toBe(done.coverageEndAt);
+  });
+
+  it("unchanged settings saves preserve history markers in the memory store", async () => {
+    const { api } = app();
+    const { token, profileId } = await setup(api);
+    await putSettings(api, token, profileId);
+    await seedHealthKitReadyGroup(api, token, profileId, installationId, "sleep", []);
+
+    const savedAgain = await putSettings(api, token, profileId);
+    expect(savedAgain.status).toBe(200);
+    const sleep = (await savedAgain.json()).data.groups.find((g: { group: string }) => g.group === "sleep");
+    expect(sleep.needsInitialImport).toBe(false);
+    expect(sleep.historyImportCompletedAt).toBeTruthy();
+
+    const sync = await beginRun(api, token, profileId, installationId, "sleep", "sync");
+    expect(sync.status).toBe(200);
+  });
+
   it("begin records the attempt without moving completed coverage or last success", async () => {
     const { api } = app();
     const { token, profileId } = await setup(api);
