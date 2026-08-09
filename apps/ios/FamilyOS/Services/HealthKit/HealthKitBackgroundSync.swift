@@ -182,12 +182,13 @@ enum HealthKitBackgroundSync {
                     return
                 }
                 CrashReporting.log("healthkit_observer_fired type=\(type.identifier)")
+                // Acknowledge delivery promptly. Do NOT start a full multi-metric
+                // runBoundedSync here: that holds the process-wide run gate and
+                // races user Import/Sync (SQLITE + "run already in progress",
+                // and leaves server status stuck on `syncing` / Interrupted).
+                // Background work is scheduled for a later BG processing wake.
                 completionHandler()
                 scheduleBackgroundSync()
-                // Best-effort incremental sync while the app may be briefly awake.
-                Task {
-                    await runBoundedSync(reason: "observer")
-                }
             }
             healthStore.execute(query)
             built.append(query)
@@ -364,7 +365,8 @@ enum HealthKitBackgroundSync {
             let engine = HealthKitRunEngine(syncStore: store, deps: deps)
 
             do {
-                try await HealthKitRunGate.shared.withExclusiveRun {
+                // Never wait: if the user holds the gate, skip quietly.
+                try await HealthKitRunGate.shared.withExclusiveRun(waitSeconds: 0) {
                     for metric in eligible {
                         do {
                             _ = try await engine.run(HealthKitRunRequest(metric: metric, kind: .sync))

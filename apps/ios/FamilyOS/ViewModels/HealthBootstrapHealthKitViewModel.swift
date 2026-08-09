@@ -194,7 +194,8 @@ extension HealthBootstrapViewModel {
                 extra: ["mode": "foreground_all", "groups": enabledSnapshot.map(\.rawValue).sorted().joined(separator: ",")]
             )
 
-            let outcome = try await HealthKitRunGate.shared.withExclusiveRun {
+            // Wait briefly if background work still holds the gate.
+            let outcome = try await HealthKitRunGate.shared.withExclusiveRun(waitSeconds: 45) {
                 await HealthKitSyncAllRunner.runAll(
                     enabledSnapshot: enabledSnapshot,
                     engine: engine,
@@ -262,7 +263,9 @@ extension HealthBootstrapViewModel {
             healthKit.beginRun(metric: metric, kind: kind)
             let result: HealthKitRunResult
             do {
-                result = try await HealthKitRunGate.shared.withExclusiveRun {
+                // Foreground waits for a short-lived background holder so rapid
+                // per-metric Import/Sync is not rejected as "already in progress".
+                result = try await HealthKitRunGate.shared.withExclusiveRun(waitSeconds: 45) {
                     try await engine.run(HealthKitRunRequest(metric: metric, kind: kind))
                 }
             } catch {

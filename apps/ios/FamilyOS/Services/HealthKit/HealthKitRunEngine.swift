@@ -70,7 +70,7 @@ enum HealthKitRunError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .runInProgress:
-            return "Another HealthKit run is already in progress."
+            return "Another HealthKit sync is still finishing. Wait a moment and try again."
         case .metricNotImplemented(let metric):
             return "\(metric.displayName) is not supported by this app version."
         case .metricDisabled(let metric):
@@ -95,13 +95,23 @@ actor HealthKitRunGate {
 
     var runInProgress: Bool { isRunning }
 
-    /// Attempts an exclusive run. Throws `HealthKitRunError.runInProgress`
-    /// immediately when another run holds the gate (background callers treat
-    /// that as a soft skip; the UI disables conflicting controls instead).
+    /// Attempts an exclusive run.
+    /// - Parameter waitSeconds: How long to wait for another holder to finish.
+    ///   Foreground uses a short wait so observer/BG work can drain; background
+    ///   uses `0` and soft-skips when busy.
+    /// - Throws: `HealthKitRunError.runInProgress` if still busy after waiting.
     func withExclusiveRun<T: Sendable>(
+        waitSeconds: TimeInterval = 0,
         _ work: @Sendable () async throws -> T
     ) async throws -> T {
-        guard !isRunning else { throw HealthKitRunError.runInProgress }
+        let deadline = Date().addingTimeInterval(max(0, waitSeconds))
+        while isRunning {
+            if Date() >= deadline {
+                throw HealthKitRunError.runInProgress
+            }
+            // Suspend so the holder can leave this actor and release the flag.
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
         isRunning = true
         defer { isRunning = false }
         return try await work()
