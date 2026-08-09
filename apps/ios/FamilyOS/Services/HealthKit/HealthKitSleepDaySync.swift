@@ -114,6 +114,8 @@ enum HealthKitSleepDaySync {
 
     static func enqueueSamples(_ samples: [SleepDaySample], into syncStore: HealthKitSyncStore) throws {
         let encoder = JSONEncoder()
+        var ops: [PendingOpRecord] = []
+        ops.reserveCapacity(samples.count)
         for sample in samples {
             let payload = HealthKitOpPayloadWire.sleepDay(
                 sleepDay: sample.sleepDay,
@@ -127,8 +129,8 @@ enum HealthKitSleepDaySync {
             )
             let data = try encoder.encode(payload)
             let json = String(data: data, encoding: .utf8)
-            try syncStore.enqueue(
-                op: PendingOpRecord(
+            ops.append(
+                PendingOpRecord(
                     opId: UUID().uuidString.lowercased(),
                     naturalKey: "sleep_day:\(sample.sleepDay)",
                     groupKey: "sleep",
@@ -138,6 +140,7 @@ enum HealthKitSleepDaySync {
                 )
             )
         }
+        try syncStore.enqueue(ops: ops)
     }
 
     // MARK: - Private

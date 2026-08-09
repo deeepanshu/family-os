@@ -69,6 +69,8 @@ enum HealthKitBloodPressureSync {
     static func enqueueSamples(_ samples: [BPSample], into syncStore: HealthKitSyncStore) throws {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
+        var ops: [PendingOpRecord] = []
+        ops.reserveCapacity(samples.count)
         for sample in samples {
             let payload = HealthKitOpPayloadWire.bloodPressure(
                 sourceObjectKey: sample.sourceObjectKey,
@@ -79,8 +81,8 @@ enum HealthKitBloodPressureSync {
             )
             let data = try encoder.encode(payload)
             let json = String(data: data, encoding: .utf8)
-            try syncStore.enqueue(
-                op: PendingOpRecord(
+            ops.append(
+                PendingOpRecord(
                     opId: UUID().uuidString.lowercased(),
                     naturalKey: "blood_pressure:\(sample.sourceObjectKey)",
                     groupKey: "vitals",
@@ -90,6 +92,7 @@ enum HealthKitBloodPressureSync {
                 )
             )
         }
+        try syncStore.enqueue(ops: ops)
     }
 
     // MARK: - Private

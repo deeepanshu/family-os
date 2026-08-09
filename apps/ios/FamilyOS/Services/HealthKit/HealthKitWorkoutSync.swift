@@ -143,6 +143,8 @@ enum HealthKitWorkoutSync {
 
     static func enqueueSamples(_ samples: [WorkoutSample], into syncStore: HealthKitSyncStore) throws {
         let encoder = JSONEncoder()
+        var ops: [PendingOpRecord] = []
+        ops.reserveCapacity(samples.count)
         for sample in samples {
             let payload = HealthKitOpPayloadWire.workout(
                 sourceSampleKey: sample.sourceSampleKey,
@@ -178,8 +180,8 @@ enum HealthKitWorkoutSync {
             )
             let data = try encoder.encode(payload)
             let json = String(data: data, encoding: .utf8)
-            try syncStore.enqueue(
-                op: PendingOpRecord(
+            ops.append(
+                PendingOpRecord(
                     opId: UUID().uuidString.lowercased(),
                     naturalKey: "workout:\(sample.sourceSampleKey)",
                     groupKey: "workouts",
@@ -189,6 +191,7 @@ enum HealthKitWorkoutSync {
                 )
             )
         }
+        try syncStore.enqueue(ops: ops)
     }
 
     // MARK: - Mapping

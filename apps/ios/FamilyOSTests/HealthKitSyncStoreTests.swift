@@ -2,6 +2,41 @@ import XCTest
 @testable import FamilyOS
 
 final class HealthKitSyncStoreTests: XCTestCase {
+    func testBatchEnqueueCoalescesInSingleTransaction() throws {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("healthkit-sync-batch-\(UUID().uuidString).sqlite")
+            .path
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let store = try HealthKitSyncStore(path: path)
+        let ops = (0..<5).map { i in
+            PendingOpRecord(
+                opId: UUID().uuidString.lowercased(),
+                naturalKey: "sleep_day:2026-07-0\(i + 1)",
+                groupKey: "sleep",
+                scopeKey: "sleep",
+                op: "upsert",
+                payloadJSON: #"{"kind":"sleep_day","sleepDay":"2026-07-0\#(i + 1)","totalMinutes":1,"coreMinutes":0,"deepMinutes":0,"remMinutes":0,"unspecifiedAsleepMinutes":0,"awakeMinutes":0,"inBedMinutes":0}"#
+            )
+        }
+        try store.enqueue(ops: ops)
+        XCTAssertEqual(try store.pendingCount(group: "sleep"), 5)
+
+        // Re-enqueue overlapping natural keys coalesces within the batch transaction.
+        let again = [
+            PendingOpRecord(
+                opId: UUID().uuidString.lowercased(),
+                naturalKey: "sleep_day:2026-07-01",
+                groupKey: "sleep",
+                scopeKey: "sleep",
+                op: "upsert",
+                payloadJSON: ops[0].payloadJSON
+            )
+        ]
+        try store.enqueue(ops: again)
+        XCTAssertEqual(try store.pendingCount(group: "sleep"), 5)
+    }
+
     func testEnqueueClaimAppliedIdempotentPath() throws {
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("healthkit-sync-test-\(UUID().uuidString).sqlite")

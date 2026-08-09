@@ -367,7 +367,7 @@ extension HealthBootstrapViewModel {
 
         let syncStore: HealthKitSyncStore
         do {
-            syncStore = try HealthKitSyncStore()
+            syncStore = try HealthKitSyncStore.shared
         } catch {
             CrashReporting.healthKitNonFatal(
                 .storeOpenFailed,
@@ -454,7 +454,7 @@ extension HealthBootstrapViewModel {
     /// Persist the canonical settings to the local sync store so background
     /// execution uses the same enabled set, installation, and import gates.
     private func persistHealthKitConfiguration(_ status: HealthKitSyncStatus) throws {
-        let syncStore = try HealthKitSyncStore()
+        let syncStore = try HealthKitSyncStore.shared
         try syncStore.saveConfiguration(
             userId: auth.signedInUserId ?? "",
             personId: status.personId,
@@ -467,7 +467,7 @@ extension HealthBootstrapViewModel {
     }
 
     private func persistServerGroupStates(_ status: HealthKitSyncStatus) {
-        guard let store = try? HealthKitSyncStore() else { return }
+        guard let store = try? HealthKitSyncStore.shared else { return }
         try? persistServerGroupStates(status, into: store)
     }
 

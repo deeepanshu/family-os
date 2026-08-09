@@ -133,7 +133,7 @@ enum HealthKitBackgroundSync {
     /// observers/delivery for metrics disabled while the app was not running.
     static func reconcileFromLocalStore() async {
         do {
-            let store = try HealthKitSyncStore()
+            let store = try HealthKitSyncStore.shared
             guard let config = try store.configuration() else { return }
             let enabled = decodeEnabledGroups(config.enabledGroupsJSON)
             await reconcileDeliveryAndObservers(for: enabled)
@@ -233,7 +233,7 @@ enum HealthKitBackgroundSync {
     /// Lightweight path for app become-active: drain pending ops if config exists (no import).
     static func drainIfConfigured() async {
         do {
-            let store = try HealthKitSyncStore()
+            let store = try HealthKitSyncStore.shared
             guard try store.configuration() != nil else {
                 CrashReporting.log("healthkit_fg_drain_skip_no_config")
                 return
@@ -272,7 +272,7 @@ enum HealthKitBackgroundSync {
     static func runBoundedSync(reason: String) async {
         CrashReporting.healthKit(.syncStarted, extra: ["reason": reason, "mode": "background"])
         do {
-            let store = try HealthKitSyncStore()
+            let store = try HealthKitSyncStore.shared
             guard let config = try store.configuration() else {
                 CrashReporting.log("healthkit_bg_sync_skip_no_config")
                 return

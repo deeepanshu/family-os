@@ -3,39 +3,66 @@ import GRDB
 
 /// Single SQLite control plane for HealthKit sync (plan §5.4).
 /// Not MainActor — safe for foreground worker / future BG drain.
+///
+/// Production code must use ``shared`` so foreground import, background drain,
+/// and config persistence share one `DatabaseQueue`. Opening multiple queues on
+/// the same file races commits and surfaces SQLite error 5 (database is locked).
 final class HealthKitSyncStore: @unchecked Sendable {
     private let dbQueue: DatabaseQueue
 
-    init(path: String? = nil) throws {
-        let fileURL: URL
-        if let path {
-            fileURL = URL(fileURLWithPath: path)
-        } else {
-            let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            let dir = base.appendingPathComponent("HealthKitSync", isDirectory: true)
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            fileURL = dir.appendingPathComponent("sync.sqlite")
-            try? FileManager.default.setAttributes(
-                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
-                ofItemAtPath: fileURL.path
-            )
-            var values = URLResourceValues()
-            values.isExcludedFromBackup = true
-            var mutable = fileURL
-            try? mutable.setResourceValues(values)
-        }
+    private static let sharedLock = NSLock()
+    /// Guarded by ``sharedLock``.
+    nonisolated(unsafe) private static var sharedInstance: HealthKitSyncStore?
 
+    /// Process-wide store for Application Support `HealthKitSync/sync.sqlite`.
+    static var shared: HealthKitSyncStore {
+        get throws {
+            sharedLock.lock()
+            defer { sharedLock.unlock() }
+            if let sharedInstance {
+                return sharedInstance
+            }
+            let created = try HealthKitSyncStore(fileURL: defaultStoreURL())
+            sharedInstance = created
+            return created
+        }
+    }
+
+    /// Test / explicit-path opener. Never registers as ``shared``.
+    convenience init(path: String) throws {
+        try self.init(fileURL: URL(fileURLWithPath: path))
+    }
+
+    private static func defaultStoreURL() throws -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = base.appendingPathComponent("HealthKitSync", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fileURL = dir.appendingPathComponent("sync.sqlite")
+        try? FileManager.default.setAttributes(
+            [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+            ofItemAtPath: fileURL.path
+        )
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        var mutable = fileURL
+        try? mutable.setResourceValues(values)
+        return fileURL
+    }
+
+    private init(fileURL: URL) throws {
         var config = Configuration()
+        // Wait out short writer races instead of failing with SQLITE_BUSY.
+        config.busyMode = .timeout(5)
         config.prepareDatabase { db in
             try db.execute(sql: "PRAGMA foreign_keys = ON")
+            // Concurrent readers while a writer holds a transaction (import + drain).
+            try db.execute(sql: "PRAGMA journal_mode = WAL")
         }
         do {
             dbQueue = try DatabaseQueue(path: fileURL.path, configuration: config)
             try migrator.migrate(dbQueue)
             try resetInFlightToPending()
-            CrashReporting.log(
-                "healthkit_store_opened path_kind=\(path == nil ? "app_support" : "explicit")"
-            )
+            CrashReporting.log("healthkit_store_opened path=\(fileURL.lastPathComponent)")
         } catch {
             CrashReporting.healthKitNonFatal(
                 .storeOpenFailed,
@@ -230,24 +257,32 @@ final class HealthKitSyncStore: @unchecked Sendable {
 
     /// Enqueue upsert/delete. Coalesces pending ops for the same natural key.
     func enqueue(op: PendingOpRecord) throws {
+        try enqueue(ops: [op])
+    }
+
+    /// Batch enqueue in one write transaction (sleep/workout 90-day imports).
+    func enqueue(ops: [PendingOpRecord]) throws {
+        guard !ops.isEmpty else { return }
         let now = Date().timeIntervalSince1970
         try dbQueue.write { db in
-            try db.execute(
-                sql: "DELETE FROM pending_ops WHERE natural_key = ? AND status = 'pending'",
-                arguments: [op.naturalKey]
-            )
-            try db.execute(
-                sql: """
-                    INSERT INTO pending_ops (
-                      op_id, natural_key, group_key, scope_key, op, payload_json,
-                      status, attempt_count, next_attempt_at, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, 0, ?, ?)
-                    """,
-                arguments: [
-                    op.opId, op.naturalKey, op.groupKey, op.scopeKey, op.op,
-                    op.payloadJSON.map { Data($0.utf8) }, now, now
-                ]
-            )
+            for op in ops {
+                try db.execute(
+                    sql: "DELETE FROM pending_ops WHERE natural_key = ? AND status = 'pending'",
+                    arguments: [op.naturalKey]
+                )
+                try db.execute(
+                    sql: """
+                        INSERT INTO pending_ops (
+                          op_id, natural_key, group_key, scope_key, op, payload_json,
+                          status, attempt_count, next_attempt_at, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, 0, ?, ?)
+                        """,
+                    arguments: [
+                        op.opId, op.naturalKey, op.groupKey, op.scopeKey, op.op,
+                        op.payloadJSON.map { Data($0.utf8) }, now, now
+                    ]
+                )
+            }
         }
     }
 
