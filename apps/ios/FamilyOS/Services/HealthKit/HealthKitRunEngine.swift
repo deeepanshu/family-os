@@ -261,9 +261,10 @@ struct HealthKitRunEngine: HealthKitRunning {
             extra: ["run_kind": kind.rawValue]
         )
 
-        // BP keeps its actionable empty/permission guidance for full-window reads;
-        // an empty repair read must never reach completion (deletion safety barrier).
-        if metric == .vitals, kind != .sync, fetchResult.fetchedCount == 0 {
+        // An empty BP initial import is a valid non-deleting warehouse state.
+        // Repair is different: an empty manifest would delete stored BP rows, so
+        // keep it fail-closed because HealthKit makes denied reads look empty.
+        if metric == .vitals, kind == .repairImport, fetchResult.fetchedCount == 0 {
             CrashReporting.healthKitNonFatal(
                 .fetchFailed,
                 stage: .samplesFetched,
@@ -277,7 +278,8 @@ struct HealthKitRunEngine: HealthKitRunning {
                 code: "bp_samples_empty"
             )
         }
-        // Sleep and workouts: an empty successful read is allowed.
+        // Sync and initial import may complete with zero records. Sleep and
+        // workouts also allow empty successful reads for every run kind.
 
         // 4. Drain the pending queue; readiness requires an empty queue.
         await report(metric, .uploading)

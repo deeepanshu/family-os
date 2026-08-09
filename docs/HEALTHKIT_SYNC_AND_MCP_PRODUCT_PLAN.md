@@ -123,9 +123,11 @@ The action:
 8. Persists initial-import completion for that metric, installation, and timezone
    version.
 
-An empty successful read is allowed for sleep and workouts. Blood pressure may
-retain its existing actionable empty/permission guidance, but an empty result
-must not cause deletion during an initial import.
+An empty successful read is allowed for sleep, workouts, and initial blood
+pressure imports. This has no deletion risk, but HealthKit makes denied BP reads
+look empty: if Apple Health access was disabled, re-enable it in Health → Data
+Access, then use Import history again to backfill older readings. Empty BP
+repair remains fail-closed so an untrusted empty result cannot delete stored BP.
 
 ### 4.2 Routine sync
 

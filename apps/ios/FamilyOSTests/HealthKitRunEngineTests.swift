@@ -48,6 +48,59 @@ final class HealthKitRunEngineTests: XCTestCase {
         XCTAssertEqual(recorder.fetchedRange?.1, result.rangeEnd)
     }
 
+    func testEmptyBloodPressureInitialImportCompletesWithoutDeletes() async throws {
+        let recorder = RunRecorder()
+        let engine = try makeEngine(
+            enabled: [.vitals],
+            needsImport: [.vitals],
+            descriptor: descriptor(metric: .vitals, kind: .initialImport),
+            recorder: recorder
+        )
+
+        let result = try await engine.run(.init(metric: .vitals, kind: .initialImport))
+
+        XCTAssertEqual(result.fetchedCount, 0)
+        XCTAssertEqual(result.appliedCount, 0)
+        XCTAssertEqual(recorder.completeCalls.count, 1)
+        XCTAssertEqual(recorder.completeCalls[0].kind, .initialImport)
+        XCTAssertNil(recorder.completeCalls[0].manifest)
+    }
+
+    func testEmptyBloodPressureRepairFailsBeforeCompletion() async throws {
+        let recorder = RunRecorder()
+        let engine = try makeEngine(
+            enabled: [.vitals],
+            needsImport: [],
+            descriptor: descriptor(metric: .vitals, kind: .repairImport, allowDeletes: true),
+            recorder: recorder
+        )
+
+        do {
+            _ = try await engine.run(.init(metric: .vitals, kind: .repairImport))
+            XCTFail("Expected empty blood-pressure repair to fail closed")
+        } catch let error as HealthAPIError {
+            XCTAssertEqual(error.errorCode, "bp_samples_empty")
+        }
+        XCTAssertEqual(recorder.completeCalls.count, 0)
+    }
+
+    func testEmptyBloodPressureSyncCompletes() async throws {
+        let recorder = RunRecorder()
+        let engine = try makeEngine(
+            enabled: [.vitals],
+            needsImport: [],
+            descriptor: descriptor(metric: .vitals, kind: .sync),
+            recorder: recorder
+        )
+
+        let result = try await engine.run(.init(metric: .vitals, kind: .sync))
+
+        XCTAssertEqual(result.fetchedCount, 0)
+        XCTAssertEqual(recorder.completeCalls.count, 1)
+        XCTAssertEqual(recorder.completeCalls[0].kind, .sync)
+        XCTAssertNil(recorder.completeCalls[0].manifest)
+    }
+
     func testUnexpectedDeleteAuthorityForSyncStopsBeforeFetch() async throws {
         let recorder = RunRecorder()
         let engine = try makeEngine(
