@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { HEALTH_API_PREFIX } from "@family-os/shared";
 import { createApp } from "../src/app";
 import { InMemoryFamilyRepository } from "../src/repositories/families";
-import { seedHealthKitReadyGroup, stepsHourEvent } from "./healthKitTestHelpers";
+import { bloodPressureOp, seedHealthKitReadyGroup } from "./healthKitTestHelpers";
 
 const jwtSecret = "test-supabase-jwt-secret-with-enough-length";
 const supabaseUrl = "https://project.supabase.co";
@@ -54,7 +54,7 @@ async function healthJwt(subject: string) {
   return jwtFor(subject, { audience: "authenticated" });
 }
 
-async function seedWithSteps(repo: InMemoryFamilyRepository, subject: string) {
+async function seedWithBloodPressure(repo: InMemoryFamilyRepository, subject: string) {
   const { api } = app(repo);
   const token = await healthJwt(subject);
   await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
@@ -66,7 +66,7 @@ async function seedWithSteps(repo: InMemoryFamilyRepository, subject: string) {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ displayName: "Deepanshu" })
-    })
+  })
   ).json();
   const profileId = profile.data.id as string;
 
@@ -84,13 +84,18 @@ async function seedWithSteps(repo: InMemoryFamilyRepository, subject: string) {
     body: JSON.stringify({
       personId: profileId,
       consentVersion: "2026-07-18",
-      enabledGroups: ["activity", "sleep", "vitals"],
+      enabledGroups: ["sleep", "vitals"],
       healthTimezone: "UTC",
       installationId
     })
   });
-  await seedHealthKitReadyGroup(api, token, profileId, installationId, "activity", [
-    stepsHourEvent("2026-07-15T08:00:00.000Z", 2500)
+  await seedHealthKitReadyGroup(api, token, profileId, installationId, "vitals", [
+    bloodPressureOp({
+      sourceObjectKey: "5e1ed621-4a6c-4e09-969e-31c6f0872c24",
+      measuredAtUtc: "2026-07-15T08:00:00.000Z",
+      systolic: 122,
+      diastolic: 79
+    })
   ]);
 
   return { token, profileId };
@@ -175,7 +180,7 @@ describe("MCP endpoint", () => {
 
   it("rejects Supabase session tokens that are not audience-bound to the MCP resource", async () => {
     const repo = new InMemoryFamilyRepository();
-    await seedWithSteps(repo, userId);
+    await seedWithBloodPressure(repo, userId);
     await grantConnection(repo, userId);
     const { api } = app(repo);
 
@@ -195,7 +200,7 @@ describe("MCP endpoint", () => {
 
   it("creates connection grants through the repository and discovers tools", async () => {
     const repo = new InMemoryFamilyRepository();
-    await seedWithSteps(repo, userId);
+    await seedWithBloodPressure(repo, userId);
     await grantConnection(repo, userId);
     const { api } = app(repo);
     const mcpToken = await jwtFor(userId);
@@ -208,13 +213,19 @@ describe("MCP endpoint", () => {
     });
     expect(listed.status).toBe(200);
     const body = await parseJsonRpc(listed);
-    const names = (body.result?.tools ?? []).map((tool: { name: string }) => tool.name).sort();
+    const tools = body.result?.tools ?? [];
+    const names = tools.map((tool: { name: string }) => tool.name).sort();
     expect(names).toEqual(["family_os.get_health_data", "family_os.list_authorized_profiles"]);
+
+    // Discovery exposes exactly the three product metrics and nothing else.
+    const getHealthData = tools.find((tool: { name: string }) => tool.name === "family_os.get_health_data");
+    const enumValues = getHealthData?.inputSchema?.properties?.healthMetric?.enum ?? [];
+    expect([...enumValues].sort()).toEqual(["blood_pressure", "sleep", "workout"]);
   });
 
   it("calls get_health_data for an authorized profile through the MCP endpoint", async () => {
     const repo = new InMemoryFamilyRepository();
-    const { profileId } = await seedWithSteps(repo, userId);
+    const { profileId } = await seedWithBloodPressure(repo, userId);
     await grantConnection(repo, userId);
     const { api } = app(repo);
     const mcpToken = await jwtFor(userId);
@@ -227,9 +238,8 @@ describe("MCP endpoint", () => {
         name: "family_os.get_health_data",
         arguments: {
           personId: profileId,
-          healthMetric: "steps",
+          healthMetric: "blood_pressure",
           rangeDays: 30,
-          granularity: "daily",
           timezone: "UTC"
         }
       }
@@ -240,16 +250,19 @@ describe("MCP endpoint", () => {
     const text = body.result?.content?.[0]?.text;
     expect(typeof text).toBe("string");
     const payload = JSON.parse(text);
-    expect(payload.viewType).toBe("daily_series");
-    expect(payload.healthMetric).toBe("steps");
-    expect(payload.points.find((p: { bucket: string; value: number }) => p.bucket === "2026-07-15")?.value).toBe(2500);
+    expect(payload.viewType).toBe("daily_reading_table");
+    expect(payload.healthMetric).toBe("blood_pressure");
+    expect(payload.readings[0]?.systolic).toBe(122);
     expect(payload.lastSyncedAt).toBeTruthy();
+    expect(payload.coverage).toBeTruthy();
+    expect(payload.disclaimer).toBeUndefined();
+    expect(payload.metricSyncStatus).toBeUndefined();
   });
 
   it("returns a safe tool error for another family's profile", async () => {
     const repo = new InMemoryFamilyRepository();
-    await seedWithSteps(repo, userId);
-    const { profileId: otherProfileId } = await seedWithSteps(repo, otherUserId);
+    await seedWithBloodPressure(repo, userId);
+    const { profileId: otherProfileId } = await seedWithBloodPressure(repo, otherUserId);
     await grantConnection(repo, userId);
     const { api } = app(repo);
     const mcpToken = await jwtFor(userId);
@@ -262,7 +275,7 @@ describe("MCP endpoint", () => {
         name: "family_os.get_health_data",
         arguments: {
           personId: otherProfileId,
-          healthMetric: "steps",
+          healthMetric: "blood_pressure",
           rangeDays: 30
         }
       }
@@ -277,7 +290,7 @@ describe("MCP endpoint", () => {
 
   it("rejects invalid tool parameters before returning data", async () => {
     const repo = new InMemoryFamilyRepository();
-    const { profileId } = await seedWithSteps(repo, userId);
+    const { profileId } = await seedWithBloodPressure(repo, userId);
     await grantConnection(repo, userId);
     const { api } = app(repo);
     const mcpToken = await jwtFor(userId);
@@ -302,7 +315,7 @@ describe("MCP endpoint", () => {
 
   it("blocks tool calls after connection revocation via the API", async () => {
     const repo = new InMemoryFamilyRepository();
-    const { token: healthToken, profileId } = await seedWithSteps(repo, userId);
+    const { token: healthToken, profileId } = await seedWithBloodPressure(repo, userId);
     const connection = await grantConnection(repo, userId);
     const { api } = app(repo);
 
@@ -318,7 +331,7 @@ describe("MCP endpoint", () => {
       method: "tools/call",
       params: {
         name: "family_os.get_health_data",
-        arguments: { personId: profileId, healthMetric: "steps", rangeDays: 7 }
+        arguments: { personId: profileId, healthMetric: "blood_pressure", rangeDays: 7 }
       }
     });
     const body = await parseJsonRpc(response);
@@ -328,7 +341,7 @@ describe("MCP endpoint", () => {
 
   it("does not accept browser-supplied oauthClientId for connection creation", async () => {
     const repo = new InMemoryFamilyRepository();
-    const { token: healthToken } = await seedWithSteps(repo, userId);
+    const { token: healthToken } = await seedWithBloodPressure(repo, userId);
     const { api } = app(repo);
     const response = await api.request(`${HEALTH_API_PREFIX}/mcp/connections`, {
       method: "POST",

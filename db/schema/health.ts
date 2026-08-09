@@ -197,6 +197,9 @@ export const healthkitSyncState = pgTable(
     lastErrorCode: text("last_error_code"),
     coverageStartAt: timestamp("coverage_start_at", { withTimezone: true }),
     coverageEndAt: timestamp("coverage_end_at", { withTimezone: true }),
+    historyImportCompletedAt: timestamp("history_import_completed_at", { withTimezone: true }),
+    historyImportInstallationId: uuid("history_import_installation_id"),
+    historyImportTimezoneVersion: integer("history_import_timezone_version"),
     status: text("status").notNull().default("never_synced"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },

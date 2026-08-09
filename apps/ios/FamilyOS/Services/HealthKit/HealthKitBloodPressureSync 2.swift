@@ -1,9 +1,11 @@
 import Foundation
 import HealthKit
 
-/// Blood pressure reads over an explicit range supplied by the run module.
-/// The run kind owns range selection; no adapter-level window defaults.
+/// Foreground BP import: query HealthKit → enqueue natural-key ops → drain.
+/// Milestone 1 only; no BG, no other metrics.
 enum HealthKitBloodPressureSync {
+    static let backfillWindowDays = 90
+
     struct BPSample: Sendable {
         let sourceObjectKey: String
         let measuredAtUtc: String
@@ -12,14 +14,9 @@ enum HealthKitBloodPressureSync {
         let pulse: Int?
     }
 
-    static func naturalKey(for sample: BPSample) -> String {
-        "blood_pressure:\(sample.sourceObjectKey)"
-    }
-
     static func fetchBloodPressure(
-        from start: Date,
-        through end: Date,
-        store: HKHealthStore = HKHealthStore()
+        store: HKHealthStore = HKHealthStore(),
+        now: Date = Date()
     ) async throws -> [BPSample] {
         #if DEBUG
         // Headless smoke cannot complete Health permission UI; empty import still proves pipeline.
@@ -34,7 +31,8 @@ enum HealthKitBloodPressureSync {
             return []
         }
 
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+        let start = Calendar.current.date(byAdding: .day, value: -backfillWindowDays, to: now) ?? now
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: now, options: .strictStartDate)
         let mmHg = HKUnit.millimeterOfMercury()
         let iso = makeISOFormatter()
 

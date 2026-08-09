@@ -88,14 +88,6 @@ final class HealthKitSyncStore: @unchecked Sendable {
                 CREATE INDEX pending_ops_natural ON pending_ops(natural_key, status);
                 """)
         }
-        migrator.registerMigration("v2_group_server_state") { db in
-            // Server-reported per-group state so background runs honor the
-            // initial-import gate without a settings round-trip (plan §6.6).
-            try db.execute(sql: """
-                ALTER TABLE group_state ADD COLUMN needs_initial_import INTEGER NOT NULL DEFAULT 1;
-                ALTER TABLE group_state ADD COLUMN server_status TEXT;
-                """)
-        }
         return migrator
     }
 
@@ -165,66 +157,6 @@ final class HealthKitSyncStore: @unchecked Sendable {
     func groupStatus(_ group: String) throws -> String? {
         try dbQueue.read { db in
             try String.fetchOne(db, sql: "SELECT status FROM group_state WHERE group_key = ?", arguments: [group])
-        }
-    }
-
-    // MARK: - Server group state (canonical enabled/import-completion cache)
-
-    /// Persist the server-reported per-group state after a settings load/save.
-    /// Rows for groups absent from `states` are left untouched.
-    func applyServerGroupStates(_ states: [ServerGroupStateInput]) throws {
-        try dbQueue.write { db in
-            for state in states {
-                try db.execute(
-                    sql: """
-                        INSERT INTO group_state (
-                          group_key, status, server_status, needs_initial_import,
-                          coverage_start, coverage_end, last_success_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                        ON CONFLICT(group_key) DO UPDATE SET
-                          server_status = excluded.server_status,
-                          needs_initial_import = excluded.needs_initial_import,
-                          coverage_start = excluded.coverage_start,
-                          coverage_end = excluded.coverage_end,
-                          last_success_at = excluded.last_success_at
-                        """,
-                    arguments: [
-                        state.groupKey,
-                        state.serverStatus,
-                        state.serverStatus,
-                        state.needsInitialImport ? 1 : 0,
-                        state.coverageStartAt,
-                        state.coverageEndAt,
-                        state.lastSuccessfulAt
-                    ]
-                )
-            }
-        }
-    }
-
-    /// Groups the server says still need Import history (background must skip them).
-    func groupsNeedingInitialImport() throws -> Set<String> {
-        try dbQueue.read { db in
-            let rows = try Row.fetchAll(
-                db,
-                sql: "SELECT group_key FROM group_state WHERE needs_initial_import = 1"
-            )
-            return Set(rows.map { $0["group_key"] as String })
-        }
-    }
-
-    /// Record a locally completed run (diagnostics; server state stays authoritative).
-    func recordLocalRunSuccess(group: String, at date: Date) throws {
-        try dbQueue.write { db in
-            try db.execute(
-                sql: """
-                    INSERT INTO group_state (group_key, status, last_success_at)
-                    VALUES (?, 'ready', ?)
-                    ON CONFLICT(group_key) DO UPDATE SET
-                      status = 'ready', last_success_at = excluded.last_success_at
-                    """,
-                arguments: [group, date.timeIntervalSince1970]
-            )
         }
     }
 
@@ -366,32 +298,6 @@ struct SyncConfigurationRow: Sendable {
     let healthTimezone: String
     let timezoneVersion: Int
     let enabledGroupsJSON: String
-}
-
-/// Server-reported group state persisted into the local store (plan §6.6).
-struct ServerGroupStateInput: Sendable {
-    let groupKey: String
-    let serverStatus: String
-    let needsInitialImport: Bool
-    let coverageStartAt: Double?
-    let coverageEndAt: Double?
-    let lastSuccessfulAt: Double?
-
-    init(
-        groupKey: String,
-        serverStatus: String,
-        needsInitialImport: Bool,
-        coverageStartAt: Double? = nil,
-        coverageEndAt: Double? = nil,
-        lastSuccessfulAt: Double? = nil
-    ) {
-        self.groupKey = groupKey
-        self.serverStatus = serverStatus
-        self.needsInitialImport = needsInitialImport
-        self.coverageStartAt = coverageStartAt
-        self.coverageEndAt = coverageEndAt
-        self.lastSuccessfulAt = lastSuccessfulAt
-    }
 }
 
 struct PendingOpRecord: Sendable {

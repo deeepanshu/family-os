@@ -116,6 +116,11 @@ enum HealthKitSyncMetric: String, Codable, CaseIterable, Identifiable, Sendable 
     static let steps = HealthKitSyncMetric.activity
     static let bloodPressure = HealthKitSyncMetric.vitals
 
+    /// The only groups with an implemented product surface in this release
+    /// (app labels: Blood pressure, Sleep, Workouts). Nonisolated so background
+    /// paths and the run engine can use it without MainActor hops.
+    static let productMetrics: Set<HealthKitSyncMetric> = [.vitals, .sleep, .workouts]
+
     var id: String { rawValue }
 
     var displayName: String {
@@ -337,8 +342,18 @@ struct HealthKitMetricState: Decodable, Identifiable {
     let lastErrorCode: String?
     let coverageStartAt: String?
     let coverageEndAt: String?
+    /// Server-derived: no completed history import matches the active
+    /// installation + timezone version. Optional for older server compatibility;
+    /// falls back to status-based derivation when absent.
+    let needsInitialImport: Bool?
+    let historyImportCompletedAt: String?
 
     var metric: HealthKitSyncMetric { group }
+
+    /// Display/Eligibility source of truth for the Import history vs Sync gate.
+    var needsImport: Bool {
+        needsInitialImport ?? (status != .ready)
+    }
 }
 
 /// Matches frozen API `HealthKitSettings` from GET/PUT `/healthkit/settings`.

@@ -1,6 +1,8 @@
 import type {
+  BeginHealthKitRunInput,
   BloodGlucoseReading,
   BloodPressureReading,
+  CompleteHealthKitRunInput,
   HealthDailyMetricRecord,
   HealthKitConsentGroup,
   HealthKitGroupImportStartResult,
@@ -12,6 +14,8 @@ import type {
   HealthKitOpPayload,
   HealthKitOpsBatchInput,
   HealthKitOpsBatchResult,
+  HealthKitRunBeginResult,
+  HealthKitRunCompleteResult,
   HealthKitSettings,
   HealthKitSyncOp,
   HealthMetricFreshness,
@@ -27,8 +31,12 @@ import { BACKFILL_WINDOW_MS, HEALTHKIT_METRIC_REGISTRY } from "@family-os/shared
 import { HttpError } from "../../errors";
 import {
   assertOpCoherent,
+  assertRunKindAllowed,
+  assertRunWindowShape,
   assertSelfProfileMatch,
   backfillRangeStart,
+  deriveNeedsInitialImport,
+  deriveRunRange,
   HEALTHKIT_METRICS,
   toUtcIso
 } from "../healthKitDomain";
@@ -219,6 +227,16 @@ export class PostgresHealthKitStore {
           await tx.unsafe(`savepoint ${savepoint}`);
           assertOpCoherent(op);
 
+          if (op.op === "delete") {
+            // Missing-key deletion lives inside repair completion reconciliation
+            // only (plan §7.3); client-supplied deletes can never bypass it.
+            throw new HttpError(
+              400,
+              "payload_invalid",
+              "Client delete ops are not accepted; repair completion owns missing-key deletion."
+            );
+          }
+
           if (!authority.enabledGroups.has(op.group)) {
             throw new HttpError(403, "group_disabled", `Group ${op.group} is not enabled.`);
           }
@@ -279,6 +297,11 @@ export class PostgresHealthKitStore {
     return { results };
   }
 
+  /**
+   * Legacy compatibility route for already-released clients. Behaves like
+   * `begin` with a 90-day window but never writes completed coverage — coverage
+   * only moves on successful completion (plan §9, "Coverage" row).
+   */
   async startHealthKitImport(
     actorUserId: string,
     group: HealthKitConsentGroup,
@@ -313,15 +336,17 @@ export class PostgresHealthKitStore {
         personId: input.personId,
         group,
         nowIso,
-        status: "syncing",
-        coverageStartAt,
-        coverageEndAt
+        status: "syncing"
       });
     });
 
     return { group, status: "syncing", coverageStartAt, coverageEndAt };
   }
 
+  /**
+   * Legacy compatibility completion. Completes coverage and records the
+   * initial-history completion marker so upgraded clients keep their history.
+   */
   async markHealthKitGroupReady(
     actorUserId: string,
     group: HealthKitConsentGroup,
@@ -371,7 +396,12 @@ export class PostgresHealthKitStore {
         status: "ready",
         success: true,
         coverageStartAt,
-        coverageEndAt
+        coverageEndAt,
+        historyMarker: {
+          completedAt: nowIso,
+          installationId: input.installationId,
+          timezoneVersion: input.timezoneVersion
+        }
       });
     });
 
@@ -381,6 +411,255 @@ export class PostgresHealthKitStore {
       coverageStartAt,
       coverageEndAt
     };
+  }
+
+  async beginHealthKitRun(
+    actorUserId: string,
+    group: HealthKitConsentGroup,
+    input: BeginHealthKitRunInput
+  ): Promise<HealthKitRunBeginResult> {
+    const self = await this.context.requireSelfPerson(actorUserId);
+    const access = await this.context.requirePersonAccess(actorUserId, input.personId);
+    assertSelfProfileMatch({ selfProfileId: self.personId, requestedPersonId: input.personId });
+
+    const now = new Date();
+    const nowIso = toUtcIso(now);
+
+    const descriptor = await this.context.sql.begin(async (tx: any) => {
+      const authority = await this.loadWriteAuthority(tx, actorUserId, access.familyId, input.personId);
+      if (!authority.settings?.consented_at) {
+        throw new HttpError(403, "consent_withdrawn", "HealthKit upload consent is required.");
+      }
+      if (authority.activeInstallationId !== input.installationId) {
+        throw new HttpError(403, "installation_inactive", "Installation is not the active HealthKit installation.");
+      }
+      if (authority.settings.health_timezone_version !== input.timezoneVersion) {
+        throw new HttpError(409, "timezone_stale", "Timezone version is stale.");
+      }
+      if (!authority.enabledGroups.has(group)) {
+        throw new HttpError(403, "group_disabled", `Group ${group} is not enabled.`);
+      }
+
+      const [state] = await tx`
+        select * from healthkit_sync_state
+        where person_id = ${input.personId} and group_key = ${group}
+      `;
+      const needsInitialImport = deriveNeedsInitialImport({
+        historyImportCompletedAt: state?.history_import_completed_at ?? null,
+        historyImportInstallationId: state?.history_import_installation_id ?? null,
+        historyImportTimezoneVersion: state?.history_import_timezone_version ?? null,
+        activeInstallationId: authority.activeInstallationId,
+        healthTimezoneVersion: authority.settings.health_timezone_version
+      });
+      assertRunKindAllowed(input.kind, group, needsInitialImport);
+
+      const range = deriveRunRange({
+        kind: input.kind,
+        group,
+        lastSuccessfulAt: state?.last_successful_at ?? null,
+        now
+      });
+
+      // Begin records the attempt only. Completed coverage, last success, and
+      // the history marker change solely on successful completion (plan §7.2).
+      await this.touchGroupState(tx, {
+        familyId: access.familyId,
+        personId: input.personId,
+        group,
+        nowIso,
+        status: "syncing"
+      });
+
+      return range;
+    });
+
+    await this.context.audit({
+      familyId: access.familyId,
+      actorUserId,
+      action: "healthkit.run_begin",
+      resourceType: "healthkit_sync",
+      resourceId: input.personId,
+      metadata: { group, kind: input.kind }
+    });
+
+    return { group, kind: input.kind, ...descriptor };
+  }
+
+  async completeHealthKitRun(
+    actorUserId: string,
+    group: HealthKitConsentGroup,
+    input: CompleteHealthKitRunInput
+  ): Promise<HealthKitRunCompleteResult> {
+    const self = await this.context.requireSelfPerson(actorUserId);
+    const access = await this.context.requirePersonAccess(actorUserId, input.personId);
+    assertSelfProfileMatch({ selfProfileId: self.personId, requestedPersonId: input.personId });
+
+    const now = new Date();
+    const nowIso = toUtcIso(now);
+
+    if (input.kind === "repair_import") {
+      if (input.completeSnapshot !== true || !Array.isArray(input.presentNaturalKeys)) {
+        throw new HttpError(
+          400,
+          "payload_invalid",
+          "Repair completion requires completeSnapshot=true and the complete presentNaturalKeys manifest."
+        );
+      }
+    } else if (input.completeSnapshot !== undefined || input.presentNaturalKeys !== undefined) {
+      // Deletion authority must never ride along on a non-repair completion.
+      throw new HttpError(400, "payload_invalid", "Only repair_import completion may supply a snapshot manifest.");
+    }
+    assertRunWindowShape({
+      kind: input.kind,
+      rangeStartAt: input.rangeStartAt,
+      rangeEndAt: input.rangeEndAt,
+      now
+    });
+
+    let deletedCount = 0;
+
+    await this.context.sql.begin(async (tx: any) => {
+      const authority = await this.loadWriteAuthority(tx, actorUserId, access.familyId, input.personId);
+      if (!authority.settings?.consented_at) {
+        throw new HttpError(403, "consent_withdrawn", "HealthKit upload consent is required.");
+      }
+      if (authority.activeInstallationId !== input.installationId) {
+        throw new HttpError(403, "installation_inactive", "Installation is not the active HealthKit installation.");
+      }
+      if (authority.settings.health_timezone_version !== input.timezoneVersion) {
+        throw new HttpError(409, "timezone_stale", "Timezone version is stale.");
+      }
+      if (!authority.enabledGroups.has(group)) {
+        throw new HttpError(403, "group_disabled", `Group ${group} is not enabled.`);
+      }
+
+      const [state] = await tx`
+        select * from healthkit_sync_state
+        where person_id = ${input.personId} and group_key = ${group}
+      `;
+      const needsInitialImport = deriveNeedsInitialImport({
+        historyImportCompletedAt: state?.history_import_completed_at ?? null,
+        historyImportInstallationId: state?.history_import_installation_id ?? null,
+        historyImportTimezoneVersion: state?.history_import_timezone_version ?? null,
+        activeInstallationId: authority.activeInstallationId,
+        healthTimezoneVersion: authority.settings.health_timezone_version
+      });
+      if (input.kind !== "initial_import" && needsInitialImport) {
+        throw new HttpError(409, "initial_import_required", "Complete Import history before running Sync or repair for this metric.");
+      }
+      if (input.kind === "repair_import") {
+        assertRunKindAllowed("repair_import", group, needsInitialImport);
+        deletedCount = await this.reconcileRepairWindow(tx, {
+          personId: input.personId,
+          group,
+          healthTimezone: authority.settings.health_timezone,
+          timezoneVersion: input.timezoneVersion,
+          rangeStartAt: input.rangeStartAt,
+          rangeEndAt: input.rangeEndAt,
+          presentNaturalKeys: input.presentNaturalKeys ?? []
+        });
+      }
+
+      await this.touchGroupState(tx, {
+        familyId: access.familyId,
+        personId: input.personId,
+        group,
+        nowIso,
+        status: "ready",
+        success: true,
+        coverageStartAt: input.rangeStartAt,
+        coverageEndAt: input.rangeEndAt,
+        historyMarker:
+          input.kind === "sync"
+            ? undefined
+            : {
+                completedAt: nowIso,
+                installationId: input.installationId,
+                timezoneVersion: input.timezoneVersion
+              }
+      });
+    });
+
+    await this.context.audit({
+      familyId: access.familyId,
+      actorUserId,
+      action: "healthkit.run_complete",
+      resourceType: "healthkit_sync",
+      resourceId: input.personId,
+      metadata: { group, kind: input.kind, deleted_count: deletedCount }
+    });
+
+    return {
+      group,
+      kind: input.kind,
+      status: "ready",
+      deletedCount,
+      lastSuccessfulAt: nowIso,
+      coverageStartAt: input.rangeStartAt,
+      coverageEndAt: input.rangeEndAt,
+      needsInitialImport: false
+    };
+  }
+
+  /**
+   * Repair-only missing-key reconciliation (plan §7.4): delete stored natural
+   * keys inside the exact repair window that are absent from the complete
+   * snapshot manifest. Records outside the window are untouched.
+   */
+  private async reconcileRepairWindow(
+    tx: any,
+    input: {
+      personId: string;
+      group: HealthKitConsentGroup;
+      healthTimezone: string;
+      timezoneVersion: number;
+      rangeStartAt: string;
+      rangeEndAt: string;
+      presentNaturalKeys: string[];
+    }
+  ): Promise<number> {
+    const manifest = input.presentNaturalKeys.filter((key) => typeof key === "string" && key.length <= 256);
+    switch (input.group) {
+      case "vitals": {
+        const keys = manifest.filter((key) => key.startsWith("blood_pressure:"));
+        const rows = await tx`
+          delete from health_blood_pressure_readings
+          where person_id = ${input.personId}
+            and measured_at >= ${input.rangeStartAt}::timestamptz
+            and measured_at <= ${input.rangeEndAt}::timestamptz
+            and not (('blood_pressure:' || source_sample_key::text) = any(${keys}))
+          returning id
+        `;
+        return rows.length;
+      }
+      case "sleep": {
+        const keys = manifest.filter((key) => key.startsWith("sleep_day:"));
+        const rows = await tx`
+          delete from health_sleep_days
+          where person_id = ${input.personId}
+            and timezone_version = ${input.timezoneVersion}
+            and sleep_day >= (${input.rangeStartAt}::timestamptz at time zone ${input.healthTimezone})::date
+            and sleep_day <= (${input.rangeEndAt}::timestamptz at time zone ${input.healthTimezone})::date
+            and not (('sleep_day:' || sleep_day::text) = any(${keys}))
+          returning id
+        `;
+        return rows.length;
+      }
+      case "workouts": {
+        const keys = manifest.filter((key) => key.startsWith("workout:"));
+        const rows = await tx`
+          delete from health_workouts
+          where person_id = ${input.personId}
+            and started_at >= ${input.rangeStartAt}::timestamptz
+            and started_at <= ${input.rangeEndAt}::timestamptz
+            and not (('workout:' || source_sample_key::text) = any(${keys}))
+          returning id
+        `;
+        return rows.length;
+      }
+      default:
+        throw new HttpError(400, "run_kind_not_allowed", `Repair is not supported for group ${input.group}.`);
+    }
   }
 
   async getHealthKitGroupStatus(
@@ -399,6 +678,14 @@ export class PostgresHealthKitStore {
     const [enabledRow] = await this.context.sql`
       select enabled from healthkit_sync_groups where person_id = ${target} and group_key = ${group}
     `;
+    const [settings] = await this.context.sql`
+      select health_timezone_version from healthkit_sync_profile_settings where person_id = ${target}
+    `;
+    const [active] = await this.context.sql`
+      select installation_id from healthkit_sync_installations
+      where person_id = ${target} and revoked_at is null
+      limit 1
+    `;
     return {
       personId: target,
       group,
@@ -408,7 +695,17 @@ export class PostgresHealthKitStore {
       lastAttemptAt: state?.last_attempt_at ? toIso(state.last_attempt_at) : undefined,
       lastErrorCode: state?.last_error_code ?? undefined,
       coverageStartAt: state?.coverage_start_at ? toIso(state.coverage_start_at) : undefined,
-      coverageEndAt: state?.coverage_end_at ? toIso(state.coverage_end_at) : undefined
+      coverageEndAt: state?.coverage_end_at ? toIso(state.coverage_end_at) : undefined,
+      needsInitialImport: deriveNeedsInitialImport({
+        historyImportCompletedAt: state?.history_import_completed_at ?? null,
+        historyImportInstallationId: state?.history_import_installation_id ?? null,
+        historyImportTimezoneVersion: state?.history_import_timezone_version ?? null,
+        activeInstallationId: active?.installation_id ?? null,
+        healthTimezoneVersion: settings?.health_timezone_version ?? 1
+      }),
+      historyImportCompletedAt: state?.history_import_completed_at
+        ? toIso(state.history_import_completed_at)
+        : undefined
     };
   }
 
@@ -649,9 +946,7 @@ export class PostgresHealthKitStore {
       return { opId: op.opId, result: "duplicate" };
     }
 
-    if (op.op === "delete") {
-      await this.applyDelete(tx, input.personId, op.naturalKey, input.timezoneVersion);
-    } else if (op.payload) {
+    if (op.payload) {
       await this.applyCanonical(tx, {
         familyId: input.familyId,
         personId: input.personId,
@@ -796,43 +1091,6 @@ export class PostgresHealthKitStore {
   }
 
 
-  private async applyDelete(tx: any, personId: string, naturalKey: string, timezoneVersion: number) {
-    if (naturalKey.startsWith("steps_hour:")) {
-      const hour = naturalKey.slice("steps_hour:".length);
-      await tx`delete from health_step_hours where person_id = ${personId} and hour_start_utc = ${hour}::timestamptz`;
-      return;
-    }
-    if (naturalKey.startsWith("sleep_day:")) {
-      const day = naturalKey.slice("sleep_day:".length);
-      await tx`delete from health_sleep_days where person_id = ${personId} and sleep_day = ${day}::date and timezone_version = ${timezoneVersion}`;
-      return;
-    }
-    if (naturalKey.startsWith("daily_metric:")) {
-      const rest = naturalKey.slice("daily_metric:".length);
-      const idx = rest.lastIndexOf(":");
-      const metric = rest.slice(0, idx);
-      const day = rest.slice(idx + 1);
-      await tx`delete from health_daily_metrics where person_id = ${personId} and metric_key = ${metric} and local_day = ${day}::date and timezone_version = ${timezoneVersion}`;
-      return;
-    }
-    if (naturalKey.startsWith("blood_pressure:")) {
-      const key = naturalKey.slice("blood_pressure:".length);
-      await tx`delete from health_blood_pressure_readings where person_id = ${personId} and source_sample_key = ${key}::uuid`;
-      return;
-    }
-    if (naturalKey.startsWith("blood_glucose:")) {
-      const key = naturalKey.slice("blood_glucose:".length);
-      await tx`delete from health_blood_glucose_readings where person_id = ${personId} and source_sample_key = ${key}::uuid`;
-      return;
-    }
-    if (naturalKey.startsWith("workout:")) {
-      const key = naturalKey.slice("workout:".length);
-      await tx`delete from health_workouts where person_id = ${personId} and source_sample_key = ${key}::uuid`;
-      return;
-    }
-    throw new HttpError(400, "payload_invalid", "Unknown natural key for delete.");
-  }
-
   private async loadSettings(actorUserId: string, familyId: string | null, personId: string): Promise<HealthKitSettings> {
     const [settings] = await this.context.sql`
       select * from healthkit_sync_profile_settings where person_id = ${personId}
@@ -850,6 +1108,7 @@ export class PostgresHealthKitStore {
     `;
     const enabledGroups = metricRows.filter((r: Row) => r.enabled).map((r: Row) => r.group_key as HealthKitMetric);
     const stateByGroup = new Map(stateRows.map((r: Row) => [r.group_key as HealthKitMetric, r]));
+    const timezoneVersion = settings?.health_timezone_version ?? 1;
     const groups = HEALTHKIT_METRICS.map((group) => {
       const state = stateByGroup.get(group) as Row | undefined;
       const enabled = enabledGroups.includes(group);
@@ -861,7 +1120,17 @@ export class PostgresHealthKitStore {
         lastErrorCode: state?.last_error_code ?? undefined,
         coverageStartAt: state?.coverage_start_at ? toIso(state.coverage_start_at) : undefined,
         coverageEndAt: state?.coverage_end_at ? toIso(state.coverage_end_at) : undefined,
-        status: (state?.status as HealthMetricSyncStatusCode) ?? (enabled ? "never_synced" : "disabled")
+        status: (state?.status as HealthMetricSyncStatusCode) ?? (enabled ? "never_synced" : "disabled"),
+        needsInitialImport: deriveNeedsInitialImport({
+          historyImportCompletedAt: state?.history_import_completed_at ?? null,
+          historyImportInstallationId: state?.history_import_installation_id ?? null,
+          historyImportTimezoneVersion: state?.history_import_timezone_version ?? null,
+          activeInstallationId: active?.installation_id ?? null,
+          healthTimezoneVersion: timezoneVersion
+        }),
+        historyImportCompletedAt: state?.history_import_completed_at
+          ? toIso(state.history_import_completed_at)
+          : undefined
       };
     });
     return {
@@ -906,24 +1175,22 @@ export class PostgresHealthKitStore {
       nowIso: string;
       status?: HealthMetricSyncStatusCode;
       success?: boolean;
-      touchOnly?: boolean;
       coverageStartAt?: string;
       coverageEndAt?: string;
       lastErrorCode?: string;
+      /** Set on completed history imports; undefined leaves the marker intact. */
+      historyMarker?: {
+        completedAt: string;
+        installationId: string;
+        timezoneVersion: number;
+      };
     }
   ) {
     const [existing] = await tx`
       select * from healthkit_sync_state where person_id = ${input.personId} and group_key = ${input.group}
     `;
-    let status: HealthMetricSyncStatusCode =
+    const status: HealthMetricSyncStatusCode =
       input.status ?? (existing?.status as HealthMetricSyncStatusCode) ?? "never_synced";
-
-    if (input.touchOnly) {
-      // Keep syncing / never_synced until client marks ready.
-      if (status === "error" && input.success) {
-        // leave error until explicit recovery; still record attempt
-      }
-    }
 
     const success = Boolean(input.success);
     const lastSuccessfulAt = success ? input.nowIso : (existing?.last_successful_at ?? null);
@@ -932,11 +1199,14 @@ export class PostgresHealthKitStore {
     const coverageStartAt = input.coverageStartAt ?? existing?.coverage_start_at ?? null;
     const coverageEndAt = input.coverageEndAt ?? existing?.coverage_end_at ?? null;
     const explicitError = input.lastErrorCode ?? null;
+    const marker = input.historyMarker;
 
     await tx`
       insert into healthkit_sync_state (
         person_id, family_id, group_key, last_successful_at, last_attempt_at, last_error_code,
-        coverage_start_at, coverage_end_at, status, updated_at
+        coverage_start_at, coverage_end_at,
+        history_import_completed_at, history_import_installation_id, history_import_timezone_version,
+        status, updated_at
       ) values (
         ${input.personId},
         ${input.familyId},
@@ -946,6 +1216,9 @@ export class PostgresHealthKitStore {
         ${lastErrorCode},
         ${coverageStartAt},
         ${coverageEndAt},
+        ${marker?.completedAt ?? null},
+        ${marker?.installationId ?? null},
+        ${marker?.timezoneVersion ?? null},
         ${status},
         ${input.nowIso}
       )
@@ -959,6 +1232,9 @@ export class PostgresHealthKitStore {
         end,
         coverage_start_at = coalesce(${coverageStartAt}::timestamptz, healthkit_sync_state.coverage_start_at),
         coverage_end_at = coalesce(${coverageEndAt}::timestamptz, healthkit_sync_state.coverage_end_at),
+        history_import_completed_at = coalesce(${marker?.completedAt ?? null}::timestamptz, healthkit_sync_state.history_import_completed_at),
+        history_import_installation_id = coalesce(${marker?.installationId ?? null}::uuid, healthkit_sync_state.history_import_installation_id),
+        history_import_timezone_version = coalesce(${marker?.timezoneVersion ?? null}::integer, healthkit_sync_state.history_import_timezone_version),
         status = ${status},
         updated_at = ${input.nowIso}::timestamptz
     `;

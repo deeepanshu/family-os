@@ -4,9 +4,9 @@ import HealthKit
 
 /// Background HealthKit pipeline (nonisolated — never MainActor-owned).
 ///
-/// Background execution is routine `Sync` only (plan §6.7): incremental range,
-/// never deletes, never starts a history import, never shows authorization UI,
-/// and serializes through the same process-wide run gate as foreground work.
+/// - Registers BGTask at launch
+/// - Enables HK background delivery + observer queries after FG sync
+/// - BG / become-active: bounded reimport + drain when config + token exist
 ///
 /// Fail soft: never crash; log stages via CrashReporting only.
 enum HealthKitBackgroundSync {
@@ -59,12 +59,10 @@ enum HealthKitBackgroundSync {
         }
     }
 
-    // MARK: - Delivery + observer reconciliation
+    // MARK: - Delivery + observers (after successful FG sync)
 
-    /// Reconcile HealthKit background delivery and observer queries with the
-    /// canonical enabled set (plan §6.7): disabled metrics lose their observers
-    /// and background delivery; enabled metrics keep or gain them.
-    static func reconcileDeliveryAndObservers(for metrics: Set<HealthKitSyncMetric>) async {
+    /// Enable background delivery and observer queries for implemented metrics that are enabled.
+    static func enableDeliveryAndObservers(for metrics: Set<HealthKitSyncMetric>) async {
         guard HKHealthStore.isHealthDataAvailable() else { return }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-FamilyOSLocalSmoke") {
@@ -73,22 +71,10 @@ enum HealthKitBackgroundSync {
         }
         #endif
 
-        let enabled = metrics.intersection(HealthKitSyncMetric.productMetrics)
-        let wantedTypes = Set(backgroundTypes(for: enabled))
-        let allTypes = Set(backgroundTypes(for: HealthKitSyncMetric.productMetrics))
-        let unwantedTypes = allTypes.subtracting(wantedTypes)
+        let types = backgroundTypes(for: metrics)
+        guard !types.isEmpty else { return }
 
-        // Stop observing / delivering types no longer enabled.
-        for type in unwantedTypes {
-            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                healthStore.disableBackgroundDelivery(for: type) { _, _ in
-                    cont.resume()
-                }
-            }
-            CrashReporting.log("healthkit_bg_delivery_disabled type=\(type.identifier)")
-        }
-
-        for type in wantedTypes {
+        for type in types {
             do {
                 try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
                     healthStore.enableBackgroundDelivery(for: type, frequency: .immediate) { success, error in
@@ -118,33 +104,8 @@ enum HealthKitBackgroundSync {
             }
         }
 
-        startObservers(for: Array(wantedTypes))
-        if !wantedTypes.isEmpty {
-            scheduleBackgroundSync()
-        }
-    }
-
-    /// Back-compat shim for older call sites: reconcile enables the given set.
-    static func enableDeliveryAndObservers(for metrics: Set<HealthKitSyncMetric>) async {
-        await reconcileDeliveryAndObservers(for: metrics)
-    }
-
-    /// Launch-time reconciliation from the locally saved configuration — stops
-    /// observers/delivery for metrics disabled while the app was not running.
-    static func reconcileFromLocalStore() async {
-        do {
-            let store = try HealthKitSyncStore()
-            guard let config = try store.configuration() else { return }
-            let enabled = decodeEnabledGroups(config.enabledGroupsJSON)
-            await reconcileDeliveryAndObservers(for: enabled)
-        } catch {
-            CrashReporting.healthKitNonFatal(
-                .storeOpenFailed,
-                stage: .storeOpenFailed,
-                message: "bg_reconcile_launch_failed",
-                underlying: error
-            )
-        }
+        startObservers(for: types)
+        scheduleBackgroundSync()
     }
 
     private static func backgroundTypes(for metrics: Set<HealthKitSyncMetric>) -> [HKSampleType] {
@@ -164,9 +125,6 @@ enum HealthKitBackgroundSync {
                 types.append(hr)
             }
         }
-        if metrics.contains(.workouts) {
-            types.append(HKObjectType.workoutType())
-        }
         return types
     }
 
@@ -184,7 +142,7 @@ enum HealthKitBackgroundSync {
                 CrashReporting.log("healthkit_observer_fired type=\(type.identifier)")
                 completionHandler()
                 scheduleBackgroundSync()
-                // Best-effort incremental sync while the app may be briefly awake.
+                // Best-effort limited reimport while app may be briefly awake.
                 Task {
                     await runBoundedSync(reason: "observer")
                 }
@@ -230,7 +188,7 @@ enum HealthKitBackgroundSync {
         }
     }
 
-    /// Lightweight path for app become-active: drain pending ops if config exists (no import).
+    /// Lightweight path for app become-active: drain pending ops if config exists (no full reimport).
     static func drainIfConfigured() async {
         do {
             let store = try HealthKitSyncStore()
@@ -266,9 +224,7 @@ enum HealthKitBackgroundSync {
         }
     }
 
-    /// Incremental routine sync for each saved enabled group whose initial
-    /// import is complete. Never imports history, never deletes, never shows
-    /// authorization UI, and serializes through the shared run gate.
+    /// Bounded reimport (90d) + drain for each enabled implemented group. Soft-fail.
     static func runBoundedSync(reason: String) async {
         CrashReporting.healthKit(.syncStarted, extra: ["reason": reason, "mode": "background"])
         do {
@@ -282,29 +238,21 @@ enum HealthKitBackgroundSync {
                 return
             }
 
-            let enabled = decodeEnabledGroups(config.enabledGroupsJSON)
-                .intersection(HealthKitSyncMetric.productMetrics)
-            guard !enabled.isEmpty else {
-                CrashReporting.log("healthkit_bg_sync_skip_no_groups")
-                return
+            let enabledRaw: [String]
+            if let data = config.enabledGroupsJSON.data(using: .utf8),
+               let decoded = try? JSONDecoder().decode([String].self, from: data) {
+                enabledRaw = decoded
+            } else {
+                enabledRaw = []
             }
-
-            // Skip metrics whose initial import is incomplete — background work
-            // never turns into a hidden history import (plan §6.7).
-            let needingImport = try store.groupsNeedingInitialImport()
-            let eligibility = incrementalEligibility(
-                enabled: enabled,
-                needingInitialImport: needingImport
+            let enabled = Set(enabledRaw.compactMap { HealthKitSyncMetric(rawValue: $0) })
+            // Local set avoids touching MainActor ViewModel types from BG entry.
+            let implemented: Set<HealthKitSyncMetric> = [.vitals, .sleep]
+            let groups = HealthKitSyncCoordinator.orderedGroups(
+                from: enabled.intersection(implemented)
             )
-            let eligible = eligibility.eligible
-            let skipped = eligibility.skipped
-            if !skipped.isEmpty {
-                CrashReporting.log(
-                    "healthkit_bg_sync_skip_needs_import groups=\(skipped.map(\.rawValue).joined(separator: ","))"
-                )
-            }
-            guard !eligible.isEmpty else {
-                CrashReporting.log("healthkit_bg_sync_skip_all_need_import")
+            guard !groups.isEmpty else {
+                CrashReporting.log("healthkit_bg_sync_skip_no_groups")
                 return
             }
 
@@ -316,30 +264,29 @@ enum HealthKitBackgroundSync {
             let timezoneVersion = config.timezoneVersion
             let healthTimezone = config.healthTimezone
 
-            let deps = HealthKitRunDependencies(
-                beginRun: { metric, kind in
-                    try await client.beginHealthKitRun(
+            // Soft auth only — never present UI sheets from BG.
+            let healthKitClient = HealthKitClient()
+            await healthKitClient.requestAuthorizationSoft(for: Set(groups))
+
+            let deps = HealthKitSyncCoordinator.Dependencies(
+                startImport: { group in
+                    _ = try await client.startHealthKitImport(
                         baseURL: baseURL,
                         accessToken: accessToken,
-                        group: metric.rawValue,
+                        group: group,
                         installationId: installationId,
                         personId: personId,
-                        timezoneVersion: timezoneVersion,
-                        kind: kind.rawValue
+                        timezoneVersion: timezoneVersion
                     )
                 },
-                completeRun: { metric, kind, descriptor, presentNaturalKeys in
-                    try await client.completeHealthKitRun(
+                markReady: { group in
+                    _ = try await client.markHealthKitGroupReady(
                         baseURL: baseURL,
                         accessToken: accessToken,
-                        group: metric.rawValue,
+                        group: group,
                         installationId: installationId,
                         personId: personId,
-                        timezoneVersion: timezoneVersion,
-                        kind: kind.rawValue,
-                        rangeStartAt: descriptor.rangeStartAt,
-                        rangeEndAt: descriptor.rangeEndAt,
-                        presentNaturalKeys: presentNaturalKeys
+                        timezoneVersion: timezoneVersion
                     )
                 },
                 postBatch: { batch in
@@ -349,41 +296,31 @@ enum HealthKitBackgroundSync {
                         body: batch
                     )
                 },
-                // A background wake must never request authorization: HealthKit
-                // may present its system permission UI. A user-triggered command
-                // performs that request; a background query simply succeeds with
-                // whatever read access is already granted.
-                ensureAuth: { _ in },
-                fetchAndEnqueue: HealthKitRunEngine.makeFetchAndEnqueue(
-                    syncStore: store,
-                    healthTimezone: healthTimezone
-                ),
-                isEnabled: { eligible.contains($0) },
-                needsInitialImport: { needingImport.contains($0.rawValue) }
+                ensureAuth: { metrics in
+                    // BG: do not hard-fail auth; soft request already ran.
+                    await healthKitClient.requestAuthorizationSoft(for: metrics)
+                },
+                healthTimezone: healthTimezone,
+                allowEmptySleep: true
             )
-            let engine = HealthKitRunEngine(syncStore: store, deps: deps)
 
-            do {
-                try await HealthKitRunGate.shared.withExclusiveRun {
-                    for metric in eligible {
-                        do {
-                            _ = try await engine.run(HealthKitRunRequest(metric: metric, kind: .sync))
-                        } catch {
-                            // One metric's failure never stops later eligible metrics.
-                            CrashReporting.healthKitNonFatal(
-                                .syncFailed,
-                                stage: .syncFailed,
-                                message: "bg_metric_sync_failed_continue",
-                                group: metric.rawValue,
-                                metric: metric.scopeMetricKey,
-                                underlying: error
-                            )
-                        }
-                    }
+            // Per-group isolation: one failure must not block the other.
+            for group in groups {
+                do {
+                    _ = try await HealthKitSyncCoordinator.run(
+                        groups: [group],
+                        syncStore: store,
+                        deps: deps
+                    )
+                } catch {
+                    CrashReporting.healthKitNonFatal(
+                        .syncFailed,
+                        stage: .syncFailed,
+                        message: "bg_group_sync_failed",
+                        group: group.rawValue,
+                        underlying: error
+                    )
                 }
-            } catch HealthKitRunError.runInProgress {
-                CrashReporting.log("healthkit_bg_sync_skip_run_in_progress")
-                return
             }
             CrashReporting.healthKit(.syncCompleted, extra: ["reason": reason, "mode": "background"])
         } catch {
@@ -397,29 +334,6 @@ enum HealthKitBackgroundSync {
     }
 
     // MARK: - Auth / config helpers (Keychain + defaults — no MainActor)
-
-    private static func decodeEnabledGroups(_ json: String) -> Set<HealthKitSyncMetric> {
-        guard let data = json.data(using: .utf8),
-              let decoded = try? JSONDecoder().decode([String].self, from: data) else {
-            return []
-        }
-        return Set(decoded.compactMap { HealthKitSyncMetric(rawValue: $0) })
-    }
-
-    /// Pure policy seam for background tests: only already-imported metrics may
-    /// run incrementally, in the same fixed product order as foreground Sync all.
-    static func incrementalEligibility(
-        enabled: Set<HealthKitSyncMetric>,
-        needingInitialImport: Set<String>
-    ) -> (eligible: [HealthKitSyncMetric], skipped: [HealthKitSyncMetric]) {
-        let eligible = HealthKitSyncAllRunner.metricOrder.filter {
-            enabled.contains($0) && !needingInitialImport.contains($0.rawValue)
-        }
-        let skipped = HealthKitSyncAllRunner.metricOrder.filter {
-            enabled.contains($0) && needingInitialImport.contains($0.rawValue)
-        }
-        return (eligible, skipped)
-    }
 
     private static func loadAccessToken() throws -> String? {
         try KeychainStore().string(for: DefaultsKey.accessToken)

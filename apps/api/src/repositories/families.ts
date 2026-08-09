@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import type {
   AuditLog,
+  BeginHealthKitRunInput,
   BloodGlucoseReading,
   BloodPressureReading,
   BootstrapResponse,
+  CompleteHealthKitRunInput,
   CreateInviteResponse,
   CurrentFamilyResponse,
   Family,
@@ -20,6 +22,8 @@ import type {
   HealthKitMetricKey,
   HealthKitOpsBatchInput,
   HealthKitOpsBatchResult,
+  HealthKitRunBeginResult,
+  HealthKitRunCompleteResult,
   HealthKitSettings,
   HealthMetricFreshness,
   HealthProfile,
@@ -576,6 +580,22 @@ export class InMemoryFamilyRepository implements FamilyRepository {
 
   async applyHealthKitOps(actorUserId: string, input: HealthKitOpsBatchInput): Promise<HealthKitOpsBatchResult> {
     return this.healthKit.applyHealthKitOps(actorUserId, input);
+  }
+
+  async beginHealthKitRun(
+    actorUserId: string,
+    group: HealthKitConsentGroup,
+    input: BeginHealthKitRunInput
+  ): Promise<HealthKitRunBeginResult> {
+    return this.healthKit.beginHealthKitRun(actorUserId, group, input);
+  }
+
+  async completeHealthKitRun(
+    actorUserId: string,
+    group: HealthKitConsentGroup,
+    input: CompleteHealthKitRunInput
+  ): Promise<HealthKitRunCompleteResult> {
+    return this.healthKit.completeHealthKitRun(actorUserId, group, input);
   }
 
   async startHealthKitImport(

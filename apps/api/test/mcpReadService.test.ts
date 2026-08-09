@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { HEALTH_API_PREFIX } from "@family-os/shared";
 import {
-  bloodPressureEvent,
-  seedHealthKitReadyGroup,
-  sleepDayEvent,
-  stepsHourEvent
-} from "./healthKitTestHelpers";
+  HEALTH_API_PREFIX,
+  MCP_HEALTH_METRICS,
+  MCP_HEALTH_METRIC_FOR_PRODUCT_GROUP,
+  mcpHealthMetricsForEnabledGroups
+} from "@family-os/shared";
+import { bloodPressureOp, seedHealthKitReadyGroup, sleepDayOp, beginRun, postOps } from "./healthKitTestHelpers";
 import { SignJWT } from "jose";
 import { createApp } from "../src/app";
 import { HealthMcpReadService } from "../src/mcp/HealthMcpReadService";
@@ -19,6 +19,7 @@ const supabaseUrl = "https://project.supabase.co";
 const userId = "00000000-0000-4000-8000-000000002001";
 const otherUserId = "00000000-0000-4000-8000-000000002002";
 const oauthClientId = "chatgpt-staging";
+const installationId = "53064303-35cf-4db0-a5d3-8af7d8f747e1";
 
 function fixedNow() {
   return new Date("2026-07-18T15:00:00.000Z");
@@ -35,7 +36,27 @@ async function jwtFor(subject: string) {
     .sign(new TextEncoder().encode(jwtSecret));
 }
 
-async function seedUserWithSteps(repo: InMemoryFamilyRepository, subject: string) {
+const workoutOp = {
+  opId: crypto.randomUUID(),
+  naturalKey: "workout:e9758548-5fab-4e47-a4ac-9a05693bea71",
+  group: "workouts" as const,
+  scopeKey: "workout",
+  op: "upsert" as const,
+  payload: {
+    kind: "workout" as const,
+    sourceSampleKey: "e9758548-5fab-4e47-a4ac-9a05693bea71",
+    workoutType: "running",
+    startedAtUtc: "2026-07-17T10:00:00.000Z",
+    endedAtUtc: "2026-07-17T10:30:00.000Z",
+    durationSeconds: 1800,
+    activeEnergyKcal: 250,
+    distanceMeters: 5000,
+    averageHeartRateBpm: 145,
+    maximumHeartRateBpm: 170
+  }
+};
+
+async function seedUserWithHealthData(repo: InMemoryFamilyRepository, subject: string) {
   const api = createApp({
     config: {
       NODE_ENV: "test",
@@ -66,33 +87,24 @@ async function seedUserWithSteps(repo: InMemoryFamilyRepository, subject: string
     body: JSON.stringify({ name: "Test Family" })
   });
 
-  const installationId = "53064303-35cf-4db0-a5d3-8af7d8f747e1";
   await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
     method: "PUT",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({
       personId: profileId,
       consentVersion: "2026-07-18",
-      enabledGroups: ["activity", "sleep", "vitals"],
+      enabledGroups: ["sleep", "vitals", "workouts"],
       healthTimezone: "UTC",
       installationId
     })
   });
 
-  await seedHealthKitReadyGroup(api, token, profileId, installationId, "activity", [
-    stepsHourEvent("2026-07-15T08:00:00.000Z", 1200),
-    stepsHourEvent("2026-07-15T14:00:00.000Z", 800),
-    stepsHourEvent("2026-07-16T10:00:00.000Z", 5000),
-    stepsHourEvent("2026-07-17T08:00:00.000Z", 500),
-    stepsHourEvent("2026-07-17T09:00:00.000Z", 500)
-  ]);
-
   await seedHealthKitReadyGroup(api, token, profileId, installationId, "sleep", [
-    sleepDayEvent("2026-07-16")
+    sleepDayOp("2026-07-16")
   ]);
 
   await seedHealthKitReadyGroup(api, token, profileId, installationId, "vitals", [
-    bloodPressureEvent({
+    bloodPressureOp({
       sourceObjectKey: "5e1ed621-4a6c-4e09-969e-31c6f0872c24",
       measuredAtUtc: "2026-07-16T09:30:00.000Z",
       systolic: 120,
@@ -101,29 +113,50 @@ async function seedUserWithSteps(repo: InMemoryFamilyRepository, subject: string
     })
   ]);
 
+  await seedHealthKitReadyGroup(api, token, profileId, installationId, "workouts", [workoutOp]);
+
   return { api, token, profileId };
 }
 
-describe("MCP metric registry", () => {
-  it("allows a 30-day daily steps query and rejects hourly beyond 7 days", () => {
-    const daily = resolveMetricQuery({ healthMetric: "steps", rangeDays: 30, granularity: "daily" });
-    expect(daily.viewType).toBe("daily_series");
-    expect(daily.rangeDays).toBe(30);
+async function serviceFor(repo: InMemoryFamilyRepository, options: { allowedOAuthClientIds?: string[] } = {}) {
+  const repositories = repositoriesFromFamilyRepository(repo);
+  await repositories.mcpConnections.createConnection({
+    userId,
+    oauthClientId,
+    capabilities: ["health_read"],
+    consentVersion: "2026-07-18"
+  });
+  return new HealthMcpReadService({ ...repositories, now: fixedNow, ...options });
+}
 
-    expect(() => resolveMetricQuery({ healthMetric: "steps", rangeDays: 30, granularity: "hourly" })).toThrow(
-      HttpError
-    );
-    try {
-      resolveMetricQuery({ healthMetric: "steps", rangeDays: 30, granularity: "hourly" });
-    } catch (error) {
-      expect(error).toBeInstanceOf(HttpError);
-      expect((error as HttpError).code).toBe("range_days_exceeded");
-    }
+describe("MCP product allowlist contract", () => {
+  it("exposes exactly blood_pressure, sleep, and workout", () => {
+    expect([...MCP_HEALTH_METRICS].sort()).toEqual(["blood_pressure", "sleep", "workout"]);
   });
 
-  it("rejects unknown metrics and free-form SQL-shaped input", () => {
-    expect(() => resolveMetricQuery({ healthMetric: "export.xml", rangeDays: 7 })).toThrow(HttpError);
-    expect(() => resolveMetricQuery({ healthMetric: "steps'; drop table", rangeDays: 7 })).toThrow(HttpError);
+  it("maps each enabled app toggle to exactly one MCP metric", () => {
+    expect(MCP_HEALTH_METRIC_FOR_PRODUCT_GROUP).toEqual({
+      vitals: "blood_pressure",
+      sleep: "sleep",
+      workouts: "workout"
+    });
+    expect(mcpHealthMetricsForEnabledGroups(["vitals"])).toEqual(["blood_pressure"]);
+    expect(mcpHealthMetricsForEnabledGroups(["sleep"])).toEqual(["sleep"]);
+    expect(mcpHealthMetricsForEnabledGroups(["workouts"])).toEqual(["workout"]);
+    // Broad groups never expand into registry metrics.
+    expect(mcpHealthMetricsForEnabledGroups(["activity", "body", "mobility", "mindfulness_environment", "nutrition"])).toEqual([]);
+  });
+
+  it("rejects unknown and previously registry-derived metrics", () => {
+    for (const metric of ["steps", "heart_rate", "blood_glucose", "oxygen_saturation", "export.xml", "steps'; drop table"]) {
+      try {
+        resolveMetricQuery({ healthMetric: metric, rangeDays: 7 });
+        throw new Error(`expected ${metric} to be rejected`);
+      } catch (error) {
+        expect(error).toBeInstanceOf(HttpError);
+        expect((error as HttpError).code).toBe("unsupported_metric");
+      }
+    }
   });
 
   it("rejects sleep attribute metrics and points callers at sleep", () => {
@@ -138,120 +171,106 @@ describe("MCP metric registry", () => {
       }
     }
   });
+
+  it("enforces the 90-day range bound", () => {
+    expect(resolveMetricQuery({ healthMetric: "sleep", rangeDays: 90 }).viewType).toBe("daily_duration_series");
+    try {
+      resolveMetricQuery({ healthMetric: "sleep", rangeDays: 91 });
+      throw new Error("expected range rejection");
+    } catch (error) {
+      expect((error as HttpError).code).toBe("range_days_exceeded");
+    }
+  });
 });
 
 describe("HealthMcpReadService", () => {
-  it("returns an authorized 30-day steps aggregate and records an audit event", async () => {
+  it("returns authorized blood pressure, sleep, and workout data and records an audit event", async () => {
     const repo = new InMemoryFamilyRepository();
-    const { profileId } = await seedUserWithSteps(repo, userId);
-    const repositories = repositoriesFromFamilyRepository(repo);
-    await repositories.mcpConnections.createConnection({
-      userId,
-      oauthClientId,
-      capabilities: ["health_read"],
-      consentVersion: "2026-07-18"
-    });
+    const { profileId } = await seedUserWithHealthData(repo, userId);
+    const service = await serviceFor(repo);
 
-    const service = new HealthMcpReadService({
-      ...repositories,
-      now: fixedNow
-    });
-
-    const result = await service.getHealthData(
+    const bp = await service.getHealthData(
       { userId, oauthClientId, correlationId: "corr-1" },
-      {
-        personId: profileId,
-        healthMetric: "steps",
-        rangeDays: 30,
-        granularity: "daily",
-        timezone: "UTC"
-      }
+      { personId: profileId, healthMetric: "blood_pressure", rangeDays: 30, timezone: "UTC" }
     );
-
-    expect(result.viewType).toBe("daily_series");
-    expect(result.healthMetric).toBe("steps");
-    expect(result.unit).toBe("count");
-    if (result.viewType !== "daily_series") {
-      throw new Error("expected daily_series");
+    expect(bp.viewType).toBe("daily_reading_table");
+    if (bp.viewType === "daily_reading_table") {
+      expect(bp.readings[0]?.systolic).toBe(120);
+      expect(bp.readings[0]?.diastolic).toBe(80);
+      expect(bp.truncated).toBe(false);
     }
-    expect(result.points.length).toBeGreaterThan(0);
-    expect(result.points.find((p) => p.bucket === "2026-07-15")?.value).toBe(2000);
-    expect(result.coverage.requestedRangeDays).toBe(30);
-    expect(result.disclaimer).toContain("Informational only");
+    expect(bp.unit).toBe("mmHg");
+    expect(bp.lastSyncedAt).toBeTruthy();
+    expect(bp.coverage.requestedRangeDays).toBe(30);
+    // Response contract: no disclaimer or metric sync status anywhere.
+    expect(JSON.stringify(bp)).not.toContain("disclaimer");
+    expect(JSON.stringify(bp)).not.toContain("metricSyncStatus");
 
+    const sleep = await service.getHealthData(
+      { userId, oauthClientId },
+      { personId: profileId, healthMetric: "sleep", rangeDays: 30, timezone: "UTC" }
+    );
+    expect(sleep.viewType).toBe("daily_duration_series");
+    if (sleep.viewType === "daily_duration_series") {
+      expect(sleep.unit).toBe("hours");
+      expect(sleep.points.find((p) => p.bucket === "2026-07-16")?.value).toBe(8);
+    }
+
+    const workouts = await service.getHealthData(
+      { userId, oauthClientId },
+      { personId: profileId, healthMetric: "workout", rangeDays: 30, timezone: "UTC" }
+    );
+    expect(workouts.viewType).toBe("workout_table");
+    if (workouts.viewType === "workout_table") {
+      expect(workouts.workouts[0]).toMatchObject({ workoutType: "running", durationMinutes: 30 });
+    }
+
+    const repositories = repositoriesFromFamilyRepository(repo);
     const managerLogs = await repositories.auditLogs.listAuditLogs(userId, 20);
     const mcpAudit = managerLogs.find((entry) => entry.action === "mcp.tool_called");
     expect(mcpAudit).toBeTruthy();
     expect(mcpAudit?.metadata?.tool_name).toBe("family_os.get_health_data");
     expect(mcpAudit?.metadata?.outcome).toBe("allowed");
     expect(mcpAudit?.metadata?.oauth_client_id).toBe(oauthClientId);
-    expect(JSON.stringify(mcpAudit?.metadata ?? {})).not.toContain("2000");
+    expect(JSON.stringify(mcpAudit?.metadata ?? {})).not.toContain("120");
   });
 
   it("denies clients not on the MCP OAuth allowlist even with an active grant", async () => {
     const repo = new InMemoryFamilyRepository();
-    const { profileId } = await seedUserWithSteps(repo, userId);
-    const repositories = repositoriesFromFamilyRepository(repo);
-    await repositories.mcpConnections.createConnection({
-      userId,
-      oauthClientId,
-      capabilities: ["health_read"],
-      consentVersion: "2026-07-18"
-    });
-
-    const service = new HealthMcpReadService({
-      ...repositories,
-      allowedOAuthClientIds: ["only-other-client"],
-      now: fixedNow
-    });
+    const { profileId } = await seedUserWithHealthData(repo, userId);
+    const service = await serviceFor(repo, { allowedOAuthClientIds: ["only-other-client"] });
 
     await expect(
       service.getHealthData(
         { userId, oauthClientId },
-        { personId: profileId, healthMetric: "steps", rangeDays: 7 }
+        { personId: profileId, healthMetric: "sleep", rangeDays: 7 }
       )
     ).rejects.toMatchObject({ status: 403, code: "oauth_client_not_allowed" });
   });
 
   it("denies a different-family profile even when the UUID is supplied by the model", async () => {
     const repo = new InMemoryFamilyRepository();
-    const { profileId: ownProfileId } = await seedUserWithSteps(repo, userId);
-    const { profileId: otherProfileId } = await seedUserWithSteps(repo, otherUserId);
-
-    const repositories = repositoriesFromFamilyRepository(repo);
-    await repositories.mcpConnections.createConnection({
-      userId,
-      oauthClientId,
-      capabilities: ["health_read"],
-      consentVersion: "2026-07-18"
-    });
-
-    const service = new HealthMcpReadService({
-      ...repositories,
-      now: fixedNow
-    });
+    const { profileId: ownProfileId } = await seedUserWithHealthData(repo, userId);
+    const { profileId: otherProfileId } = await seedUserWithHealthData(repo, otherUserId);
+    const service = await serviceFor(repo);
 
     await expect(
       service.getHealthData(
         { userId, oauthClientId },
-        {
-          personId: otherProfileId,
-          healthMetric: "steps",
-          rangeDays: 30
-        }
+        { personId: otherProfileId, healthMetric: "sleep", rangeDays: 30 }
       )
     ).rejects.toMatchObject({ status: 403, code: "profile_forbidden" });
 
     const own = await service.getHealthData(
       { userId, oauthClientId },
-      { personId: ownProfileId, healthMetric: "steps", rangeDays: 30 }
+      { personId: ownProfileId, healthMetric: "sleep", rangeDays: 30 }
     );
     expect(own.personId).toBe(ownProfileId);
   });
 
   it("blocks tool calls after connection revocation", async () => {
     const repo = new InMemoryFamilyRepository();
-    const { profileId } = await seedUserWithSteps(repo, userId);
+    const { profileId } = await seedUserWithHealthData(repo, userId);
     const repositories = repositoriesFromFamilyRepository(repo);
     const connection = await repositories.mcpConnections.createConnection({
       userId,
@@ -259,11 +278,7 @@ describe("HealthMcpReadService", () => {
       capabilities: ["health_read"],
       consentVersion: "2026-07-18"
     });
-
-    const service = new HealthMcpReadService({
-      ...repositories,
-      now: fixedNow
-    });
+    const service = new HealthMcpReadService({ ...repositories, now: fixedNow });
 
     await repositories.mcpConnections.revokeConnection(userId, connection.id);
 
@@ -275,38 +290,22 @@ describe("HealthMcpReadService", () => {
     ).rejects.toMatchObject({ status: 403, code: "mcp_connection_required" });
   });
 
-  it("lists authorized profiles with familiar labels and metrics for enabled groups only", async () => {
+  it("lists authorized profiles with the enabled-subset metrics only, without a disclaimer", async () => {
     const repo = new InMemoryFamilyRepository();
-    await seedUserWithSteps(repo, userId);
-    const repositories = repositoriesFromFamilyRepository(repo);
-    await repositories.mcpConnections.createConnection({
-      userId,
-      oauthClientId,
-      capabilities: ["health_read"],
-      consentVersion: "2026-07-18"
-    });
-
-    const service = new HealthMcpReadService({
-      ...repositories,
-      now: fixedNow
-    });
+    await seedUserWithHealthData(repo, userId);
+    const service = await serviceFor(repo);
 
     const listed = await service.listAuthorizedProfiles({ userId, oauthClientId });
     expect(listed.profiles.length).toBeGreaterThanOrEqual(1);
     expect(listed.profiles[0]?.label).toBeTruthy();
-    // seed enables activity + sleep + vitals (not workouts / nutrition)
-    expect(listed.profiles[0]?.availableMetrics).toEqual(
-      expect.arrayContaining(["steps", "sleep", "blood_pressure", "blood_glucose", "heart_rate"])
-    );
-    expect(listed.profiles[0]?.availableMetrics).not.toContain("workout");
-    expect(listed.profiles[0]?.availableMetrics).not.toContain("dietary_protein");
-    expect(listed.profiles[0]?.availableMetrics).not.toContain("sleeping_wrist_temperature");
-    expect(listed.profiles[0]?.availableMetrics).not.toContain("sleep_breathing_disturbance_events");
+    // Seed enables sleep + vitals + workouts → exactly the three product metrics.
+    expect(listed.profiles[0]?.availableMetrics).toEqual(["blood_pressure", "sleep", "workout"]);
+    expect(JSON.stringify(listed)).not.toContain("disclaimer");
     expect(JSON.stringify(listed)).not.toContain("familyId");
     expect(JSON.stringify(listed)).not.toContain("dateOfBirth");
   });
 
-  it("works for solo users without a household", async () => {
+  it("enabling Blood pressure never advertises heart rate, glucose, temperature, or oxygen saturation", async () => {
     const repo = new InMemoryFamilyRepository();
     const api = createApp({
       config: {
@@ -331,21 +330,17 @@ describe("HealthMcpReadService", () => {
       })
     ).json();
     const profileId = profile.data.id as string;
-    const installationId = "53064303-35cf-4db0-a5d3-8af7d8f747e1";
     await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({
         personId: profileId,
         consentVersion: "2026-07-18",
-        enabledGroups: ["activity"],
+        enabledGroups: ["vitals"],
         healthTimezone: "UTC",
         installationId
       })
     });
-    await seedHealthKitReadyGroup(api, token, profileId, installationId, "activity", [
-      stepsHourEvent("2026-07-15T08:00:00.000Z", 1500)
-    ]);
 
     const repositories = repositoriesFromFamilyRepository(repo);
     await repositories.mcpConnections.createConnection({
@@ -360,59 +355,37 @@ describe("HealthMcpReadService", () => {
     expect(listed.profiles).toEqual([
       expect.objectContaining({
         personId: profileId,
-        availableMetrics: expect.arrayContaining(["steps"])
+        availableMetrics: ["blood_pressure"]
       })
     ]);
-    expect(listed.profiles[0]?.availableMetrics.every((m) => !m.startsWith("dietary_"))).toBe(true);
-
-    const steps = await service.getHealthData(
-      { userId, oauthClientId, correlationId: "solo-1" },
-      { personId: profileId, healthMetric: "steps", rangeDays: 7, timezone: "UTC" }
-    );
-    expect(steps.viewType).toBe("daily_series");
-    if (steps.viewType === "daily_series") {
-      expect(steps.points.find((p) => p.bucket === "2026-07-15")?.value).toBe(1500);
-    }
   });
 
-  it("refuses get_health_data after consent group is disabled", async () => {
+  it("refuses get_health_data after the app toggle is disabled", async () => {
     const repo = new InMemoryFamilyRepository();
-    const { api, token, profileId } = await seedUserWithSteps(repo, userId);
-    const installationId = "53064303-35cf-4db0-a5d3-8af7d8f747e1";
+    const { api, token, profileId } = await seedUserWithHealthData(repo, userId);
+    const service = await serviceFor(repo);
 
-    const repositories = repositoriesFromFamilyRepository(repo);
-    await repositories.mcpConnections.createConnection({
-      userId,
-      oauthClientId,
-      capabilities: ["health_read"],
-      consentVersion: "2026-07-18"
-    });
-    const service = new HealthMcpReadService({ ...repositories, now: fixedNow });
-
-    // BP was seeded with vitals enabled.
     const before = await service.getHealthData(
       { userId, oauthClientId },
       { personId: profileId, healthMetric: "blood_pressure", rangeDays: 30, timezone: "UTC" }
     );
     expect(before.viewType).toBe("daily_reading_table");
 
-    // Disable vitals (and sleep); keep activity only.
+    // Disable Blood pressure and Sleep; keep Workouts only.
     await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({
         personId: profileId,
         consentVersion: "2026-07-18",
-        enabledGroups: ["activity"],
+        enabledGroups: ["workouts"],
         healthTimezone: "UTC",
         installationId
       })
     });
 
     const listed = await service.listAuthorizedProfiles({ userId, oauthClientId });
-    expect(listed.profiles[0]?.availableMetrics).toEqual(expect.arrayContaining(["steps"]));
-    expect(listed.profiles[0]?.availableMetrics).not.toContain("blood_pressure");
-    expect(listed.profiles[0]?.availableMetrics).not.toContain("sleep");
+    expect(listed.profiles[0]?.availableMetrics).toEqual(["workout"]);
 
     await expect(
       service.getHealthData(
@@ -421,161 +394,15 @@ describe("HealthMcpReadService", () => {
       )
     ).rejects.toMatchObject({ code: "group_disabled", status: 403 });
 
-    // Activity still readable.
-    const steps = await service.getHealthData(
+    // Workouts still readable.
+    const workouts = await service.getHealthData(
       { userId, oauthClientId },
-      { personId: profileId, healthMetric: "steps", rangeDays: 7, timezone: "UTC" }
+      { personId: profileId, healthMetric: "workout", rangeDays: 30, timezone: "UTC" }
     );
-    expect(steps.viewType).toBe("daily_series");
+    expect(workouts.viewType).toBe("workout_table");
   });
 
-  it("forbids MCP get_health_data for foreign personIds", async () => {
-    const repo = new InMemoryFamilyRepository();
-    const { profileId: ownProfile } = await seedUserWithSteps(repo, userId);
-    const { profileId: otherProfile } = await seedUserWithSteps(repo, otherUserId);
-    const repositories = repositoriesFromFamilyRepository(repo);
-    await repositories.mcpConnections.createConnection({
-      userId,
-      oauthClientId,
-      capabilities: ["health_read"],
-      consentVersion: "2026-07-18"
-    });
-    const service = new HealthMcpReadService({ ...repositories, now: fixedNow });
-
-    await expect(
-      service.getHealthData(
-        { userId, oauthClientId },
-        { personId: otherProfile, healthMetric: "steps", rangeDays: 7, timezone: "UTC" }
-      )
-    ).rejects.toMatchObject({ status: 403 });
-    // Own profile still works.
-    const own = await service.getHealthData(
-      { userId, oauthClientId },
-      { personId: ownProfile, healthMetric: "steps", rangeDays: 7, timezone: "UTC" }
-    );
-    expect(own.personId).toBe(ownProfile);
-  });
-
-  it("returns sleep as daily duration hours attributed to the end day, and blood pressure as a reading table", async () => {
-    const repo = new InMemoryFamilyRepository();
-    const { profileId } = await seedUserWithSteps(repo, userId);
-    const repositories = repositoriesFromFamilyRepository(repo);
-    await repositories.mcpConnections.createConnection({
-      userId,
-      oauthClientId,
-      capabilities: ["health_read"],
-      consentVersion: "2026-07-18"
-    });
-    const service = new HealthMcpReadService({ ...repositories, now: fixedNow });
-
-    const sleep = await service.getHealthData(
-      { userId, oauthClientId },
-      { personId: profileId, healthMetric: "sleep", rangeDays: 30, timezone: "UTC" }
-    );
-    expect(sleep.viewType).toBe("daily_duration_series");
-    if (sleep.viewType === "daily_duration_series") {
-      expect(sleep.unit).toBe("hours");
-      expect(sleep.points.find((p) => p.bucket === "2026-07-16")?.value).toBe(8);
-    }
-
-    const bp = await service.getHealthData(
-      { userId, oauthClientId },
-      { personId: profileId, healthMetric: "blood_pressure", rangeDays: 30, timezone: "UTC" }
-    );
-    expect(bp.viewType).toBe("daily_reading_table");
-    if (bp.viewType === "daily_reading_table") {
-      expect(bp.readings[0]?.systolic).toBe(120);
-      expect(bp.readings[0]?.diastolic).toBe(80);
-      expect(bp.truncated).toBe(false);
-    }
-  });
-
-  it("returns daily aggregate statistics, glucose readings, and workouts from canonical HealthKit storage", async () => {
-    const repo = new InMemoryFamilyRepository();
-    const { api, token, profileId } = await seedUserWithSteps(repo, userId);
-    const repositories = repositoriesFromFamilyRepository(repo);
-    await repositories.mcpConnections.createConnection({ userId, oauthClientId, capabilities: ["health_read"], consentVersion: "2026-07-18" });
-    await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
-      method: "PUT",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        personId: profileId,
-        consentVersion: "2026-07-18",
-        enabledGroups: ["activity", "sleep", "vitals", "workouts"],
-        healthTimezone: "UTC",
-        installationId: "53064303-35cf-4db0-a5d3-8af7d8f747e1"
-      })
-    });
-    const installationId = "53064303-35cf-4db0-a5d3-8af7d8f747e1";
-    const hrEvent = {
-      opId: crypto.randomUUID(),
-      naturalKey: "daily_metric:heart_rate:2026-07-17",
-      group: "vitals" as const,
-      scopeKey: "heart_rate",
-      op: "upsert" as const,
-      payload: {
-        kind: "daily_metric" as const,
-        healthMetric: "heart_rate" as const,
-        localDay: "2026-07-17",
-        averageValue: 70,
-        minimumValue: 50,
-        maximumValue: 120,
-        latestValue: 72,
-        sampleCount: 120
-      }
-    };
-    const glucoseEvent = {
-      opId: crypto.randomUUID(),
-      naturalKey: "blood_glucose:da6694a6-3f56-4a33-a9d8-3ba481670d57",
-      group: "vitals" as const,
-      scopeKey: "blood_glucose",
-      op: "upsert" as const,
-      payload: {
-        kind: "blood_glucose" as const,
-        sourceSampleKey: "da6694a6-3f56-4a33-a9d8-3ba481670d57",
-        measuredAtUtc: "2026-07-17T08:00:00.000Z",
-        valueMgDl: 104
-      }
-    };
-    await seedHealthKitReadyGroup(api, token, profileId, installationId, "vitals", [hrEvent, glucoseEvent]);
-    const workoutEvent = {
-      opId: crypto.randomUUID(),
-      naturalKey: "workout:e9758548-5fab-4e47-a4ac-9a05693bea71",
-      group: "workouts" as const,
-      scopeKey: "workout",
-      op: "upsert" as const,
-      payload: {
-        kind: "workout" as const,
-        sourceSampleKey: "e9758548-5fab-4e47-a4ac-9a05693bea71",
-        workoutType: "running",
-        startedAtUtc: "2026-07-17T10:00:00.000Z",
-        endedAtUtc: "2026-07-17T10:30:00.000Z",
-        durationSeconds: 1800,
-        activeEnergyKcal: 250,
-        distanceMeters: 5000,
-        averageHeartRateBpm: 145,
-        maximumHeartRateBpm: 170
-      }
-    };
-    await seedHealthKitReadyGroup(api, token, profileId, installationId, "workouts", [workoutEvent]);
-
-    const service = new HealthMcpReadService({ ...repositories, now: fixedNow });
-    const heartRate = await service.getHealthData({ userId, oauthClientId }, { personId: profileId, healthMetric: "heart_rate", rangeDays: 30, timezone: "UTC" });
-    expect(heartRate).toMatchObject({ viewType: "daily_series", unit: "bpm" });
-    if (heartRate.viewType === "daily_series") {
-      expect(heartRate.points).toEqual(expect.arrayContaining([expect.objectContaining({ bucket: "2026-07-17", value: 70, averageValue: 70, maximumValue: 120 })]));
-    }
-
-    const glucose = await service.getHealthData({ userId, oauthClientId }, { personId: profileId, healthMetric: "blood_glucose", rangeDays: 30, timezone: "UTC" });
-    expect(glucose).toMatchObject({ healthMetric: "blood_glucose", viewType: "daily_reading_table" });
-    if (glucose.healthMetric === "blood_glucose") expect(glucose.readings[0]).toMatchObject({ valueMgDl: 104 });
-
-    const workouts = await service.getHealthData({ userId, oauthClientId }, { personId: profileId, healthMetric: "workout", rangeDays: 30, timezone: "UTC" });
-    expect(workouts).toMatchObject({ healthMetric: "workout", viewType: "workout_table" });
-    if (workouts.healthMetric === "workout") expect(workouts.workouts[0]).toMatchObject({ workoutType: "running", durationMinutes: 30 });
-  });
-
-  it("marks sleep incomplete after timezone change until backfill completes", async () => {
+  it("returns stored rows while a phone import is in progress or interrupted (data-first)", async () => {
     const repo = new InMemoryFamilyRepository();
     const api = createApp({
       config: {
@@ -605,21 +432,101 @@ describe("HealthMcpReadService", () => {
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ name: "Test Family" })
     });
-    const installationId = "53064303-35cf-4db0-a5d3-8af7d8f747e1";
     await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({
         personId: profileId,
         consentVersion: "2026-07-18",
-        enabledGroups: ["sleep"],
+        enabledGroups: ["vitals"],
         healthTimezone: "UTC",
         installationId
       })
     });
-    await seedHealthKitReadyGroup(api, token, profileId, installationId, "sleep", [
-      sleepDayEvent("2026-07-16")
+
+    // Begin an initial import (phone shows syncing) and upload one record, then
+    // disappear without completing — the interrupted phone state.
+    const begin = await beginRun(api, token, profileId, installationId, "vitals", "initial_import");
+    expect(begin.status).toBe(200);
+    const descriptor = (await begin.json()).data;
+    const batch = await postOps(api, token, profileId, installationId, [
+      bloodPressureOp({
+        sourceObjectKey: "5e1ed621-4a6c-4e09-969e-31c6f0872c24",
+        measuredAtUtc: "2026-07-16T09:30:00.000Z",
+        systolic: 121,
+        diastolic: 81
+      })
     ]);
+    expect(batch.status).toBe(200);
+
+    const service = await serviceFor(repo);
+    const interrupted = await service.getHealthData(
+      { userId, oauthClientId },
+      { personId: profileId, healthMetric: "blood_pressure", rangeDays: 30, timezone: "UTC" }
+    );
+    expect(interrupted.viewType).toBe("daily_reading_table");
+    if (interrupted.viewType === "daily_reading_table") {
+      expect(interrupted.readings[0]?.systolic).toBe(121);
+    }
+    // No completed coverage yet; completeness is separate from presence.
+    expect(interrupted.coverage.complete).toBe(false);
+    expect(interrupted.lastSyncedAt).toBeUndefined();
+
+    const complete = await api.request(
+      `${HEALTH_API_PREFIX}/healthkit/groups/vitals/runs/complete`,
+      {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          installationId,
+          personId: profileId,
+          timezoneVersion: 1,
+          kind: "initial_import",
+          rangeStartAt: descriptor.rangeStartAt,
+          rangeEndAt: descriptor.rangeEndAt
+        })
+      }
+    );
+    expect(complete.status).toBe(200);
+
+    const ready = await service.getHealthData(
+      { userId, oauthClientId },
+      { personId: profileId, healthMetric: "blood_pressure", rangeDays: 30, timezone: "UTC" }
+    );
+    expect(ready.lastSyncedAt).toBeTruthy();
+    if (ready.viewType === "daily_reading_table") {
+      expect(ready.readings[0]?.systolic).toBe(121);
+    }
+  });
+
+  it("keeps completed coverage semantics when a newer attempt is in progress", async () => {
+    const repo = new InMemoryFamilyRepository();
+    const { api, token, profileId } = await seedUserWithHealthData(repo, userId);
+    const service = await serviceFor(repo);
+
+    const baseline = await service.getHealthData(
+      { userId, oauthClientId },
+      { personId: profileId, healthMetric: "sleep", rangeDays: 30, timezone: "UTC" }
+    );
+    expect(baseline.coverage.complete).toBe(true);
+
+    // A newer sync begins (server attempt state is syncing) but coverage is intact.
+    const begin = await beginRun(api, token, profileId, installationId, "sleep", "sync");
+    expect(begin.status).toBe(200);
+
+    const midAttempt = await service.getHealthData(
+      { userId, oauthClientId },
+      { personId: profileId, healthMetric: "sleep", rangeDays: 30, timezone: "UTC" }
+    );
+    expect(midAttempt.coverage.complete).toBe(true);
+    if (midAttempt.viewType === "daily_duration_series") {
+      expect(midAttempt.points.find((p) => p.bucket === "2026-07-16")?.value).toBe(8);
+    }
+  });
+
+  it("marks coverage incomplete after a timezone change until a new import completes", async () => {
+    const repo = new InMemoryFamilyRepository();
+    const { api, token, profileId } = await seedUserWithHealthData(repo, userId);
 
     await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
       method: "PUT",
@@ -633,158 +540,16 @@ describe("HealthMcpReadService", () => {
       })
     });
 
-    const repositories = repositoriesFromFamilyRepository(repo);
-    await repositories.mcpConnections.createConnection({
-      userId,
-      oauthClientId,
-      capabilities: ["health_read"],
-      consentVersion: "2026-07-18"
-    });
-    const service = new HealthMcpReadService({ ...repositories, now: fixedNow });
+    const service = await serviceFor(repo);
     const afterTz = await service.getHealthData(
       { userId, oauthClientId },
       { personId: profileId, healthMetric: "sleep", rangeDays: 30, timezone: "UTC" }
     );
-    expect(afterTz.metricSyncStatus).toBe("never_synced");
     expect(afterTz.healthTimezone).toBe("Asia/Bangkok");
     expect(afterTz.coverage.complete).toBe(false);
     // Prior timezone version rows are not read; no current-version data yet.
     if (afterTz.viewType === "daily_duration_series") {
       expect(afterTz.points).toEqual([]);
-    }
-  });
-
-  it("exposes step points while a metric repair is incomplete (data-first)", async () => {
-    const repo = new InMemoryFamilyRepository();
-    const api = createApp({
-      config: {
-        NODE_ENV: "test",
-        PORT: 3001,
-        HEALTH_API_ENABLE_DEV_AUTH: false,
-        SUPABASE_JWT_SECRET: jwtSecret,
-        SUPABASE_URL: supabaseUrl
-      },
-      familyRepository: repo
-    });
-    const token = await jwtFor(userId);
-    await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}` }
-    });
-    const profile = await (
-      await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ displayName: "Deepanshu" })
-      })
-    ).json();
-    const profileId = profile.data.id as string;
-    await api.request(`${HEALTH_API_PREFIX}/families`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ name: "Test Family" })
-    });
-    const installationId = "53064303-35cf-4db0-a5d3-8af7d8f747e1";
-    await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
-      method: "PUT",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        personId: profileId,
-        consentVersion: "2026-07-18",
-        enabledGroups: ["activity"],
-        healthTimezone: "UTC",
-        installationId
-      })
-    });
-    // Start import (syncing) without marking ready.
-    await api.request(`${HEALTH_API_PREFIX}/healthkit/groups/activity/start-import`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        installationId,
-        personId: profileId,
-        timezoneVersion: 1
-      })
-    });
-    const step = stepsHourEvent("2026-07-15T08:00:00.000Z", 9999);
-    await api.request(`${HEALTH_API_PREFIX}/healthkit/ops:batch`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        installationId,
-        personId: profileId,
-        timezoneVersion: 1,
-        ops: [step]
-      })
-    });
-
-    const repositories = repositoriesFromFamilyRepository(repo);
-    await repositories.mcpConnections.createConnection({
-      userId,
-      oauthClientId,
-      capabilities: ["health_read"],
-      consentVersion: "2026-07-18"
-    });
-    const service = new HealthMcpReadService({ ...repositories, now: fixedNow });
-    const partial = await service.getHealthData(
-      { userId, oauthClientId },
-      { personId: profileId, healthMetric: "steps", rangeDays: 30, timezone: "UTC" }
-    );
-    expect(partial.metricSyncStatus).toBe("syncing");
-    expect(partial.coverage.complete).toBe(false);
-    // Mid-import still returns stored rows; completeness is separate from presence.
-    if (partial.viewType === "daily_series") {
-      expect(partial.points.find((p) => p.bucket === "2026-07-15")?.value).toBe(9999);
-    }
-
-    const readyRes = await api.request(`${HEALTH_API_PREFIX}/healthkit/groups/activity/ready`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        installationId,
-        personId: profileId,
-        timezoneVersion: 1
-      })
-    });
-    expect(readyRes.status).toBe(200);
-    const ready = await service.getHealthData(
-      { userId, oauthClientId },
-      { personId: profileId, healthMetric: "steps", rangeDays: 30, timezone: "UTC" }
-    );
-    expect(ready.metricSyncStatus).toBe("ready");
-    if (ready.viewType === "daily_series") {
-      expect(ready.points.find((p) => p.bucket === "2026-07-15")?.value).toBe(9999);
-    }
-  });
-
-  it("aggregates hourly steps within a 7-day window and splits spanning samples", async () => {
-    const repo = new InMemoryFamilyRepository();
-    const { profileId } = await seedUserWithSteps(repo, userId);
-    const repositories = repositoriesFromFamilyRepository(repo);
-    await repositories.mcpConnections.createConnection({
-      userId,
-      oauthClientId,
-      capabilities: ["health_read"],
-      consentVersion: "2026-07-18"
-    });
-    const service = new HealthMcpReadService({ ...repositories, now: fixedNow });
-
-    const hourly = await service.getHealthData(
-      { userId, oauthClientId },
-      {
-        personId: profileId,
-        healthMetric: "steps",
-        rangeDays: 7,
-        granularity: "hourly",
-        timezone: "UTC"
-      }
-    );
-    expect(hourly.viewType).toBe("hourly_series");
-    if (hourly.viewType === "hourly_series") {
-      expect(hourly.points.find((p) => p.bucket === "2026-07-15T08:00")?.value).toBe(1200);
-      expect(hourly.points.find((p) => p.bucket === "2026-07-15T14:00")?.value).toBe(800);
-      expect(hourly.points.find((p) => p.bucket === "2026-07-17T08:00")?.value).toBeCloseTo(500, 5);
-      expect(hourly.points.find((p) => p.bucket === "2026-07-17T09:00")?.value).toBeCloseTo(500, 5);
     }
   });
 });

@@ -306,6 +306,148 @@ describe("Postgres repository wiring", () => {
     expect(steps).toEqual([{ count: 1200 }]);
   });
 
+  it("repair reconciliation deletes only absent keys inside the exact window (postgres)", async () => {
+    const api = app();
+    const token = await jwtFor(managerId, "manager@example.com");
+    await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const profile = await (
+      await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ displayName: "Manager" })
+      })
+    ).json();
+    const profileId = profile.data.id as string;
+    const installationId = "00000000-0000-4000-8000-000000009010";
+    const settings = await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        personId: profileId,
+        enabledGroups: ["vitals", "sleep"],
+        healthTimezone: "UTC",
+        installationId,
+        consentVersion: "healthkit-v1"
+      })
+    });
+    expect(settings.status).toBe(200);
+
+    const dayMs = 24 * 60 * 60 * 1000;
+    const isoDaysAgo = (days: number) => new Date(Date.now() - days * dayMs).toISOString();
+    const bp = (key: string, daysAgo: number) => ({
+      opId: crypto.randomUUID(),
+      naturalKey: `blood_pressure:${key}`,
+      group: "vitals" as const,
+      scopeKey: "blood_pressure",
+      op: "upsert" as const,
+      payload: {
+        kind: "blood_pressure" as const,
+        sourceObjectKey: key,
+        measuredAtUtc: isoDaysAgo(daysAgo),
+        systolic: 120,
+        diastolic: 80
+      }
+    });
+    const keepIn = "00000000-0000-4000-8000-000000009030";
+    const dropIn = "00000000-0000-4000-8000-000000009031";
+    const keepOut = "00000000-0000-4000-8000-000000009032";
+    await seedHealthKitReadyGroup(api, token, profileId, installationId, "vitals", [
+      bp(keepIn, 5),
+      bp(dropIn, 20),
+      bp(keepOut, 100)
+    ]);
+
+    const begin = await api.request(`${HEALTH_API_PREFIX}/healthkit/groups/vitals/runs/begin`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ installationId, personId: profileId, timezoneVersion: 1, kind: "repair_import" })
+    });
+    expect(begin.status).toBe(200);
+    const descriptor = (await begin.json()).data;
+    expect(descriptor.allowDeletes).toBe(true);
+
+    const complete = await api.request(`${HEALTH_API_PREFIX}/healthkit/groups/vitals/runs/complete`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        installationId,
+        personId: profileId,
+        timezoneVersion: 1,
+        kind: "repair_import",
+        rangeStartAt: descriptor.rangeStartAt,
+        rangeEndAt: descriptor.rangeEndAt,
+        completeSnapshot: true,
+        presentNaturalKeys: [`blood_pressure:${keepIn}`]
+      })
+    });
+    expect(complete.status).toBe(200);
+    expect((await complete.json()).data.deletedCount).toBe(1);
+
+    const remaining = await sql`
+      select source_sample_key from health_blood_pressure_readings where person_id = ${profileId} order by 1
+    `;
+    expect(remaining.map((row) => row.source_sample_key).sort()).toEqual([keepIn, keepOut].sort());
+
+    // Sleep: absent in-window day is removed; out-of-window day survives.
+    const sleepDay = (day: string) => ({
+      opId: crypto.randomUUID(),
+      naturalKey: `sleep_day:${day}`,
+      group: "sleep" as const,
+      scopeKey: "sleep",
+      op: "upsert" as const,
+      payload: {
+        kind: "sleep_day" as const,
+        sleepDay: day,
+        totalMinutes: 480,
+        coreMinutes: 240,
+        deepMinutes: 90,
+        remMinutes: 90,
+        unspecifiedAsleepMinutes: 60,
+        awakeMinutes: 0,
+        inBedMinutes: 480
+      }
+    });
+    const keepDay = isoDaysAgo(3).slice(0, 10);
+    const dropDay = isoDaysAgo(30).slice(0, 10);
+    const outsideDay = isoDaysAgo(100).slice(0, 10);
+    await seedHealthKitReadyGroup(api, token, profileId, installationId, "sleep", [
+      sleepDay(keepDay),
+      sleepDay(dropDay),
+      sleepDay(outsideDay)
+    ]);
+
+    const beginSleep = await api.request(`${HEALTH_API_PREFIX}/healthkit/groups/sleep/runs/begin`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ installationId, personId: profileId, timezoneVersion: 1, kind: "repair_import" })
+    });
+    const sleepDescriptor = (await beginSleep.json()).data;
+    const completeSleep = await api.request(`${HEALTH_API_PREFIX}/healthkit/groups/sleep/runs/complete`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        installationId,
+        personId: profileId,
+        timezoneVersion: 1,
+        kind: "repair_import",
+        rangeStartAt: sleepDescriptor.rangeStartAt,
+        rangeEndAt: sleepDescriptor.rangeEndAt,
+        completeSnapshot: true,
+        presentNaturalKeys: [`sleep_day:${keepDay}`]
+      })
+    });
+    expect(completeSleep.status).toBe(200);
+    expect((await completeSleep.json()).data.deletedCount).toBe(1);
+
+    const sleepRows = await sql`
+      select sleep_day from health_sleep_days where person_id = ${profileId} order by 1
+    `;
+    expect(sleepRows.map((row) => row.sleep_day.toISOString().slice(0, 10))).toEqual([outsideDay, keepDay].sort());
+  });
+
   it("returns canonical ISO sleep days from Postgres", async () => {
     const familyId = "00000000-0000-4000-8000-000000000003";
     const profileId = "00000000-0000-4000-8000-000000000004";

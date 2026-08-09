@@ -1,15 +1,12 @@
 import {
   HEALTHKIT_METRIC_REGISTRY,
-  MCP_HEALTH_DISCLAIMER,
-  MCP_HEALTH_METRICS,
+  mcpHealthMetricsForEnabledGroups,
   type McpConnectionGrant,
   type McpGetHealthDataInput,
   type McpGetHealthDataResult,
-  type McpDailyMetricPoint,
   type McpHealthMetric,
-  type McpSleepPoint,
   type McpListAuthorizedProfilesResult,
-  type McpSeriesPoint
+  type McpSleepPoint
 } from "@family-os/shared";
 import { randomUUID } from "node:crypto";
 import { HttpError } from "../errors";
@@ -37,11 +34,6 @@ export type McpCallerContext = {
   oauthClientId: string;
   correlationId?: string;
 };
-
-type DailyMcpMetric = Exclude<
-  McpHealthMetric,
-  "steps" | "sleep" | "blood_pressure" | "blood_glucose" | "workout"
->;
 
 export type HealthMcpReadServiceDeps = {
   families: FamilyStore;
@@ -80,10 +72,7 @@ export class HealthMcpReadService {
           availableMetrics: await this.availableMetricsForProfile(caller.userId, profile.id)
         }))
       );
-      return {
-        profiles: listed,
-        disclaimer: MCP_HEALTH_DISCLAIMER
-      };
+      return { profiles: listed };
     });
   }
 
@@ -92,8 +81,7 @@ export class HealthMcpReadService {
       await this.requireActiveConnection(caller);
       const query = resolveMetricQuery({
         healthMetric: input.healthMetric,
-        rangeDays: input.rangeDays,
-        granularity: input.granularity
+        rangeDays: input.rangeDays
       });
 
       let presentationTimezone: string;
@@ -104,7 +92,7 @@ export class HealthMcpReadService {
       }
 
       await this.deps.profiles.getProfile(caller.userId, input.personId);
-      // Match list_authorized_profiles: refuse metrics whose consent group is not enabled.
+      // Runtime filter: the metric's app toggle must be enabled (plan §8.2).
       await this.assertMetricConsented(caller.userId, input.personId, query.metric);
       const freshness = await this.deps.healthKit.getHealthMetricFreshness(
         caller.userId,
@@ -112,172 +100,49 @@ export class HealthMcpReadService {
         query.metric
       );
       const healthTimezone = freshness.healthTimezone || "UTC";
-      const definition = HEALTHKIT_METRIC_REGISTRY[query.metric];
       // Sleep-day and coverage windows use the profile health timezone; request timezone is presentation-only.
-      const rangeTimezone = definition.storage === "daily_numeric" || definition.storage === "sleep_day" ? healthTimezone : presentationTimezone;
+      const rangeTimezone = query.metric === "sleep" ? healthTimezone : presentationTimezone;
       const { rangeStart, rangeEnd } = localDateRangeEndingToday(query.rangeDays, rangeTimezone, this.now());
+      // Completed coverage only; an in-progress or interrupted attempt never
+      // clears completeness (plan §8.5).
       const complete = coverageComplete({
-        status: freshness.status,
         coverageStartAt: freshness.coverageStartAt,
         coverageEndAt: freshness.coverageEndAt,
         rangeStart: `${rangeStart}T00:00:00.000Z`,
         rangeEnd: `${rangeEnd}T23:59:59.999Z`
       });
-      // Data-first: return whatever rows exist in storage. Import status is metadata only.
-      // Consent group must still be enabled (assertMetricConsented above).
+      // Data-first: return whatever rows exist in storage. Import lifecycle is
+      // never a reason to withhold stored rows (plan §8.3); consent group must
+      // still be enabled (assertMetricConsented above).
 
-      if (query.metric === "steps" && query.granularity === "hourly") {
-        const points = await this.loadHourlySteps(
-          caller.userId,
-          input.personId,
-          rangeStart,
-          rangeEnd,
-          presentationTimezone
-        );
-        return {
-          personId: input.personId,
-          healthMetric: "steps",
-          viewType: "hourly_series",
-          unit: query.unit,
-          healthTimezone,
-          timezone: presentationTimezone,
-          coverage: {
-            requestedRangeDays: query.rangeDays,
-            rangeStart,
-            rangeEnd,
-            daysWithData: countDistinctDaysFromBuckets(points.map((p) => p.bucket.slice(0, 10))),
-            complete,
-            availableStart: freshness.coverageStartAt,
-            availableEnd: freshness.coverageEndAt
-          },
-          lastSyncedAt: freshness.lastSuccessfulAt,
-          metricSyncStatus: freshness.status,
-          disclaimer: MCP_HEALTH_DISCLAIMER,
-          points
-        };
-      }
-
-      if (query.metric === "steps") {
-        const points = await this.loadDailySteps(
-          caller.userId,
-          input.personId,
-          rangeStart,
-          rangeEnd,
-          presentationTimezone
-        );
-        return {
-          personId: input.personId,
-          healthMetric: "steps",
-          viewType: "daily_series",
-          unit: query.unit,
-          healthTimezone,
-          timezone: presentationTimezone,
-          coverage: {
-            requestedRangeDays: query.rangeDays,
-            rangeStart,
-            rangeEnd,
-            daysWithData: points.length,
-            complete,
-            availableStart: freshness.coverageStartAt,
-            availableEnd: freshness.coverageEndAt
-          },
-          lastSyncedAt: freshness.lastSuccessfulAt,
-          metricSyncStatus: freshness.status,
-          disclaimer: MCP_HEALTH_DISCLAIMER,
-          points
-        };
-      }
+      const coverage = {
+        requestedRangeDays: query.rangeDays,
+        rangeStart,
+        rangeEnd,
+        complete,
+        availableStart: freshness.coverageStartAt,
+        availableEnd: freshness.coverageEndAt
+      };
+      const base = {
+        personId: input.personId,
+        unit: query.unit,
+        healthTimezone,
+        timezone: presentationTimezone,
+        lastSyncedAt: freshness.lastSuccessfulAt
+      };
 
       if (query.metric === "sleep") {
         const points = await this.loadDailySleepHours(caller.userId, input.personId, rangeStart, rangeEnd);
         return {
-          personId: input.personId,
+          ...base,
           healthMetric: "sleep",
           viewType: "daily_duration_series",
-          unit: query.unit,
-          healthTimezone,
-          timezone: presentationTimezone,
-          coverage: {
-            requestedRangeDays: query.rangeDays,
-            rangeStart,
-            rangeEnd,
-            daysWithData: points.length,
-            complete,
-            availableStart: freshness.coverageStartAt,
-            availableEnd: freshness.coverageEndAt
-          },
-          lastSyncedAt: freshness.lastSuccessfulAt,
-          metricSyncStatus: freshness.status,
-          disclaimer: MCP_HEALTH_DISCLAIMER,
-          points
-        };
-      }
-
-      if (definition.storage === "daily_numeric") {
-        const points = await this.loadDailyMetricPoints(
-          caller.userId,
-          input.personId,
-          query.metric as DailyMcpMetric,
-          rangeStart,
-          rangeEnd
-        );
-        return {
-          personId: input.personId,
-          healthMetric: query.metric as DailyMcpMetric,
-          viewType: "daily_series",
-          unit: query.unit,
-          healthTimezone,
-          timezone: presentationTimezone,
-          coverage: {
-            requestedRangeDays: query.rangeDays,
-            rangeStart,
-            rangeEnd,
-            daysWithData: points.length,
-            complete,
-            availableStart: freshness.coverageStartAt,
-            availableEnd: freshness.coverageEndAt
-          },
-          lastSyncedAt: freshness.lastSuccessfulAt,
-          metricSyncStatus: freshness.status,
-          disclaimer: MCP_HEALTH_DISCLAIMER,
+          coverage: { ...coverage, daysWithData: points.length },
           points
         };
       }
 
       const maxReadings = query.maxReadings ?? 200;
-      if (query.metric === "blood_glucose") {
-        const { readings, truncated } = await this.loadBloodGlucoseTable(
-          caller.userId,
-          input.personId,
-          rangeStart,
-          rangeEnd,
-          presentationTimezone,
-          maxReadings
-        );
-        return {
-          personId: input.personId,
-          healthMetric: "blood_glucose",
-          viewType: "daily_reading_table",
-          unit: query.unit,
-          healthTimezone,
-          timezone: presentationTimezone,
-          coverage: {
-            requestedRangeDays: query.rangeDays,
-            rangeStart,
-            rangeEnd,
-            daysWithData: countDistinctDaysFromBuckets(readings.map((reading) => reading.localDate)),
-            complete,
-            availableStart: freshness.coverageStartAt,
-            availableEnd: freshness.coverageEndAt
-          },
-          lastSyncedAt: freshness.lastSuccessfulAt,
-          metricSyncStatus: freshness.status,
-          disclaimer: MCP_HEALTH_DISCLAIMER,
-          readings,
-          truncated
-        };
-      }
-
       if (query.metric === "workout") {
         const { workouts, truncated } = await this.loadWorkoutTable(
           caller.userId,
@@ -288,24 +153,10 @@ export class HealthMcpReadService {
           maxReadings
         );
         return {
-          personId: input.personId,
+          ...base,
           healthMetric: "workout",
           viewType: "workout_table",
-          unit: query.unit,
-          healthTimezone,
-          timezone: presentationTimezone,
-          coverage: {
-            requestedRangeDays: query.rangeDays,
-            rangeStart,
-            rangeEnd,
-            daysWithData: countDistinctDaysFromBuckets(workouts.map((workout) => workout.localDate)),
-            complete,
-            availableStart: freshness.coverageStartAt,
-            availableEnd: freshness.coverageEndAt
-          },
-          lastSyncedAt: freshness.lastSuccessfulAt,
-          metricSyncStatus: freshness.status,
-          disclaimer: MCP_HEALTH_DISCLAIMER,
+          coverage: { ...coverage, daysWithData: countDistinctDaysFromBuckets(workouts.map((workout) => workout.localDate)) },
           workouts,
           truncated
         };
@@ -321,24 +172,10 @@ export class HealthMcpReadService {
           maxReadings
         );
         return {
-          personId: input.personId,
+          ...base,
           healthMetric: "blood_pressure",
           viewType: "daily_reading_table",
-          unit: query.unit,
-          healthTimezone,
-          timezone: presentationTimezone,
-          coverage: {
-            requestedRangeDays: query.rangeDays,
-            rangeStart,
-            rangeEnd,
-            daysWithData: countDistinctDaysFromBuckets(readings.map((r) => r.localDate)),
-            complete,
-            availableStart: freshness.coverageStartAt,
-            availableEnd: freshness.coverageEndAt
-          },
-          lastSyncedAt: freshness.lastSuccessfulAt,
-          metricSyncStatus: freshness.status,
-          disclaimer: MCP_HEALTH_DISCLAIMER,
+          coverage: { ...coverage, daysWithData: countDistinctDaysFromBuckets(readings.map((r) => r.localDate)) },
           readings,
           truncated
         };
@@ -354,15 +191,16 @@ export class HealthMcpReadService {
   }
 
   /**
-   * Metrics whose consent group is enabled for this person.
-   * HealthKit settings are Self-only today; other profiles get an empty list.
-   * Only expected access/settings failures collapse to []; unexpected errors rethrow.
+   * The explicit app-toggle → MCP metric mapping (plan §8.2): Blood pressure /
+   * `vitals` exposes `blood_pressure` only, Sleep exposes `sleep`, Workouts
+   * exposes `workout`. HealthKit settings are Self-only today; other profiles
+   * get an empty list. Only expected access/settings failures collapse to [];
+   * unexpected errors rethrow.
    */
   private async availableMetricsForProfile(userId: string, personId: string): Promise<McpHealthMetric[]> {
     try {
       const settings = await this.deps.healthKit.getHealthKitSettings(userId, personId);
-      const enabled = new Set(settings.enabledGroups);
-      return MCP_HEALTH_METRICS.filter((metric) => enabled.has(HEALTHKIT_METRIC_REGISTRY[metric].group));
+      return mcpHealthMetricsForEnabledGroups(settings.enabledGroups);
     } catch (error) {
       if (error instanceof HttpError) {
         // Self-only settings, missing profile, or no HealthKit config → advertise nothing.
@@ -382,7 +220,7 @@ export class HealthMcpReadService {
     }
   }
 
-  /** Fail closed when the metric's consent group is not enabled for this Self profile. */
+  /** Fail closed when the metric's app toggle is not enabled for this Self profile. */
   private async assertMetricConsented(
     userId: string,
     personId: string,
@@ -391,7 +229,7 @@ export class HealthMcpReadService {
     const group = HEALTHKIT_METRIC_REGISTRY[metric].group;
     try {
       const settings = await this.deps.healthKit.getHealthKitSettings(userId, personId);
-      if (!settings.enabledGroups.includes(group)) {
+      if (!mcpHealthMetricsForEnabledGroups(settings.enabledGroups).includes(metric)) {
         throw new HttpError(
           403,
           "group_disabled",
@@ -417,25 +255,6 @@ export class HealthMcpReadService {
     }
   }
 
-  private async loadDailySteps(
-    userId: string,
-    personId: string,
-    rangeStart: string,
-    rangeEnd: string,
-    timezone: string
-  ): Promise<McpSeriesPoint[]> {
-    const hours = await this.loadStepHours(userId, personId, rangeStart, rangeEnd, timezone);
-    const byDay = new Map<string, number>();
-    for (const hour of hours) {
-      const localDay = localDateString(new Date(hour.hourStartUtc), timezone);
-      if (!isDateInInclusiveRange(localDay, rangeStart, rangeEnd)) continue;
-      byDay.set(localDay, (byDay.get(localDay) ?? 0) + hour.count);
-    }
-    return [...byDay.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([bucket, value]) => ({ bucket, value }));
-  }
-
   private async loadDailySleepHours(
     userId: string,
     personId: string,
@@ -458,64 +277,6 @@ export class HealthMcpReadService {
         wristTemperatureCelsius: day.wristTemperatureCelsius,
         breathingDisturbanceCount: day.breathingDisturbanceCount
       }));
-  }
-
-  private async loadDailyMetricPoints(
-    userId: string,
-    personId: string,
-    healthMetric: DailyMcpMetric,
-    rangeStart: string,
-    rangeEnd: string
-  ): Promise<McpDailyMetricPoint[]> {
-    const records = await this.deps.healthKit.listDailyMetrics(userId, personId, healthMetric, rangeStart, rangeEnd);
-    return records.map((record) => ({
-      bucket: record.localDay,
-      value: record.sumValue ?? record.averageValue ?? record.latestValue ?? record.maximumValue ?? record.minimumValue ?? 0,
-      sumValue: record.sumValue,
-      averageValue: record.averageValue,
-      minimumValue: record.minimumValue,
-      maximumValue: record.maximumValue,
-      latestValue: record.latestValue,
-      sampleCount: record.sampleCount
-    }));
-  }
-
-  private async loadHourlySteps(
-    userId: string,
-    personId: string,
-    rangeStart: string,
-    rangeEnd: string,
-    timezone: string
-  ): Promise<McpSeriesPoint[]> {
-    const hours = await this.loadStepHours(userId, personId, rangeStart, rangeEnd, timezone);
-    return hours
-      .map((hour) => {
-        const instant = new Date(hour.hourStartUtc);
-        const localDay = localDateString(instant, timezone);
-        if (!isDateInInclusiveRange(localDay, rangeStart, rangeEnd)) return null;
-        const localHour = localTimeOfDay(instant, timezone).slice(0, 2);
-        return {
-          bucket: `${localDay}T${localHour}:00`,
-          value: hour.count
-        };
-      })
-      .filter((point): point is McpSeriesPoint => point !== null);
-  }
-
-  private async loadStepHours(
-    userId: string,
-    personId: string,
-    rangeStart: string,
-    rangeEnd: string,
-    timezone: string
-  ) {
-    // Expand one day on each side so local calendar edges near UTC boundaries are included.
-    const start = new Date(`${rangeStart}T00:00:00.000Z`);
-    start.setUTCDate(start.getUTCDate() - 1);
-    const end = new Date(`${rangeEnd}T00:00:00.000Z`);
-    end.setUTCDate(end.getUTCDate() + 2);
-    void timezone;
-    return this.deps.healthKit.listStepHours(userId, personId, start.toISOString(), end.toISOString());
   }
 
   private async loadBloodPressureTable(
@@ -556,33 +317,6 @@ export class HealthMcpReadService {
           systolic: reading.systolic,
           diastolic: reading.diastolic,
           pulse: reading.pulse
-        };
-      })
-    };
-  }
-
-  private async loadBloodGlucoseTable(
-    userId: string,
-    personId: string,
-    rangeStart: string,
-    rangeEnd: string,
-    timezone: string,
-    maxReadings: number
-  ) {
-    const { start, end } = expandedInstantRange(rangeStart, rangeEnd);
-    const rows = await this.deps.healthKit.listHealthKitBloodGlucose(userId, personId, start, end, maxReadings + 50);
-    const inRange = rows
-      .filter((reading) => isDateInInclusiveRange(localDateString(new Date(reading.measuredAt), timezone), rangeStart, rangeEnd))
-      .sort((a, b) => Date.parse(a.measuredAt) - Date.parse(b.measuredAt));
-    const truncated = inRange.length > maxReadings;
-    return {
-      truncated,
-      readings: (truncated ? inRange.slice(-maxReadings) : inRange).map((reading) => {
-        const instant = new Date(reading.measuredAt);
-        return {
-          localDate: localDateString(instant, timezone),
-          localTime: localTimeOfDay(instant, timezone),
-          valueMgDl: reading.value
         };
       })
     };

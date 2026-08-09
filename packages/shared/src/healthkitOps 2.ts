@@ -171,69 +171,6 @@ export type HealthKitGroupReadyResult = {
   coverageEndAt?: string;
 };
 
-/**
- * Run kinds for the generic run lifecycle (docs/HEALTHKIT_SYNC_AND_MCP_PRODUCT_PLAN.md).
- * - initial_import: first 90-day fill; never deletes.
- * - sync: incremental (last success minus overlap); never deletes.
- * - repair_import: explicit 90-day repair; only kind allowed to delete, via
- *   completion-time missing-key reconciliation.
- */
-export const HEALTHKIT_RUN_KINDS = ["initial_import", "sync", "repair_import"] as const;
-export type HealthKitRunKind = (typeof HEALTHKIT_RUN_KINDS)[number];
-
-export function isHealthKitRunKind(value: string): value is HealthKitRunKind {
-  return (HEALTHKIT_RUN_KINDS as readonly string[]).includes(value);
-}
-
-export type BeginHealthKitRunInput = {
-  installationId: string;
-  personId: string;
-  timezoneVersion: number;
-  kind: HealthKitRunKind;
-};
-
-/** Authoritative run descriptor derived by the server at begin time. */
-export type HealthKitRunBeginResult = {
-  group: HealthKitConsentGroup;
-  kind: HealthKitRunKind;
-  rangeStartAt: string;
-  rangeEndAt: string;
-  allowDeletes: boolean;
-};
-
-export type CompleteHealthKitRunInput = {
-  installationId: string;
-  personId: string;
-  timezoneVersion: number;
-  kind: HealthKitRunKind;
-  /** Authoritative range echoed back from the begin descriptor. */
-  rangeStartAt: string;
-  rangeEndAt: string;
-  /**
-   * Repair only: explicit declaration that the client read the complete Apple
-   * Health snapshot for the repair window. Required for repair_import; forbidden
-   * for initial_import and sync.
-   */
-  completeSnapshot?: boolean;
-  /**
-   * Repair only: complete set of present natural keys inside the repair window.
-   * May be empty (a user can legitimately have no matching records). Forbidden
-   * for initial_import and sync so deletes can never bypass repair reconciliation.
-   */
-  presentNaturalKeys?: string[];
-};
-
-export type HealthKitRunCompleteResult = {
-  group: HealthKitConsentGroup;
-  kind: HealthKitRunKind;
-  status: "ready";
-  deletedCount: number;
-  lastSuccessfulAt: string;
-  coverageStartAt?: string;
-  coverageEndAt?: string;
-  needsInitialImport: boolean;
-};
-
 export type HealthKitGroupStatus = {
   personId: string;
   group: HealthKitConsentGroup;
@@ -244,9 +181,6 @@ export type HealthKitGroupStatus = {
   lastErrorCode?: string;
   coverageStartAt?: string;
   coverageEndAt?: string;
-  /** True until a completed history import matches the active installation + timezone version. */
-  needsInitialImport: boolean;
-  historyImportCompletedAt?: string;
 };
 
 /** Worker / client actions for transport + fencing errors (no session abort). */
@@ -304,19 +238,6 @@ export const HEALTHKIT_OPS_BATCH_MAX = 200;
 export const BACKFILL_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 /** Short-TTL op receipt retention (days). */
 export const HEALTHKIT_OP_RECEIPT_TTL_DAYS = 30;
-/** Routine sync re-reads this much already-synced history (idempotent upserts make it safe). */
-export const HEALTHKIT_SYNC_OVERLAP_MS = 24 * 60 * 60 * 1000;
-
-/**
- * The only consent groups with an implemented product surface in this release
- * (app labels: Blood pressure, Sleep, Workouts).
- */
-export const HEALTHKIT_PRODUCT_GROUPS = ["vitals", "sleep", "workouts"] as const satisfies readonly HealthKitConsentGroup[];
-export type HealthKitProductGroup = (typeof HEALTHKIT_PRODUCT_GROUPS)[number];
-
-export function isHealthKitProductGroup(value: string): value is HealthKitProductGroup {
-  return (HEALTHKIT_PRODUCT_GROUPS as readonly string[]).includes(value);
-}
 
 /**
  * Narrow v1 allowlist for the correctness milestone.

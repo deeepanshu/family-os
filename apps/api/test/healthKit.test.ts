@@ -201,7 +201,7 @@ describe("HealthKit ops:batch (BP milestone)", () => {
     expect(bp.diastolic).toBe(82);
   });
 
-  it("deletes BP by natural key", async () => {
+  it("rejects client delete ops; repair reconciliation owns missing-key deletion", async () => {
     const api = app();
     const { token, profileId } = await setup(api);
     await putSettings(api, token, profileId);
@@ -235,7 +235,17 @@ describe("HealthKit ops:batch (BP milestone)", () => {
       })
     });
     expect(res.status).toBe(200);
-    expect((await res.json()).data.results[0].result).toBe("applied");
+    const result = (await res.json()).data.results[0];
+    expect(result.result).toBe("rejected");
+    expect(result.errorCode).toBe("payload_invalid");
+
+    // The stored row survived the rejected client delete.
+    const readings = await (
+      await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure?personId=${profileId}`, {
+        headers: { authorization: `Bearer ${token}` }
+      })
+    ).json();
+    expect(readings.data.some((r: { id: string }) => r.id === sourceObjectKey)).toBe(true);
   });
 
   it("rejects invalid BP payload without failing fencing of valid ops", async () => {
@@ -280,10 +290,15 @@ describe("HealthKit ops:batch (BP milestone)", () => {
     expect(results[1].result).toBe("rejected");
   });
 
-  it("start-import sets syncing; ready marks complete", async () => {
+  it("start-import sets syncing; ready marks complete and records history completion", async () => {
     const api = app();
     const { token, profileId } = await setup(api);
     await putSettings(api, token, profileId);
+
+    const before = await api.request(`${HEALTH_API_PREFIX}/healthkit/groups/vitals/status`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    expect((await before.json()).data.needsInitialImport).toBe(true);
 
     const start = await api.request(`${HEALTH_API_PREFIX}/healthkit/groups/vitals/start-import`, {
       method: "POST",
@@ -305,6 +320,13 @@ describe("HealthKit ops:batch (BP milestone)", () => {
     });
     expect(ready.status).toBe(200);
     expect((await ready.json()).data.status).toBe("ready");
+
+    const after = await api.request(`${HEALTH_API_PREFIX}/healthkit/groups/vitals/status`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const afterData = (await after.json()).data;
+    expect(afterData.needsInitialImport).toBe(false);
+    expect(afterData.historyImportCompletedAt).toBeTruthy();
   });
 
   it("installation replace forces never_synced", async () => {
@@ -325,6 +347,7 @@ describe("HealthKit ops:batch (BP milestone)", () => {
     const settings = await replaced.json();
     const vitals = settings.data.groups.find((g: { group: string }) => g.group === "vitals");
     expect(vitals.status).toBe("never_synced");
+    expect(vitals.needsInitialImport).toBe(true);
     expect(settings.data.activeInstallationId).toBe(otherInstallationId);
   });
 

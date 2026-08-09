@@ -225,6 +225,61 @@ struct HealthAPIClient {
         )
     }
 
+    /// Generic run begin: the server derives the authoritative range and delete
+    /// permission for the requested kind.
+    func beginHealthKitRun(
+        baseURL: String,
+        accessToken: String,
+        group: String,
+        installationId: String,
+        personId: String,
+        timezoneVersion: Int,
+        kind: String
+    ) async throws -> HealthKitRunDescriptorWire {
+        try await post(
+            path: "healthkit/groups/\(group)/runs/begin",
+            baseURL: baseURL,
+            accessToken: accessToken,
+            body: HealthKitRunBeginRequest(
+                installationId: installationId,
+                personId: personId,
+                timezoneVersion: timezoneVersion,
+                kind: kind
+            )
+        )
+    }
+
+    /// Generic run completion. Repair passes the complete present-key manifest;
+    /// other kinds must not (the server rejects deletion authority on them).
+    func completeHealthKitRun(
+        baseURL: String,
+        accessToken: String,
+        group: String,
+        installationId: String,
+        personId: String,
+        timezoneVersion: Int,
+        kind: String,
+        rangeStartAt: String,
+        rangeEndAt: String,
+        presentNaturalKeys: [String]? = nil
+    ) async throws -> HealthKitRunCompleteResultWire {
+        try await post(
+            path: "healthkit/groups/\(group)/runs/complete",
+            baseURL: baseURL,
+            accessToken: accessToken,
+            body: HealthKitRunCompleteRequest(
+                installationId: installationId,
+                personId: personId,
+                timezoneVersion: timezoneVersion,
+                kind: kind,
+                rangeStartAt: rangeStartAt,
+                rangeEndAt: rangeEndAt,
+                completeSnapshot: presentNaturalKeys != nil ? true : nil,
+                presentNaturalKeys: presentNaturalKeys
+            )
+        )
+    }
+
     private func put<T: Decodable, Body: Encodable>(
         path: String,
         baseURL: String,

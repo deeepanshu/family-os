@@ -2,6 +2,7 @@ import type {
   HealthKitConsentGroup,
   HealthKitMetric,
   HealthKitOpPayload,
+  HealthKitRunKind,
   HealthKitSyncOp,
   HealthMetricSyncStatusCode
 } from "@family-os/shared";
@@ -9,9 +10,11 @@ import {
   BACKFILL_WINDOW_MS,
   HEALTHKIT_CONSENT_GROUPS,
   HEALTHKIT_METRIC_REGISTRY,
+  HEALTHKIT_SYNC_OVERLAP_MS,
   groupForScopeKey,
   healthKitNaturalKey,
   isHealthKitMetricKey,
+  isHealthKitProductGroup,
   requiredScopeKeysForGroup
 } from "@family-os/shared";
 import { HttpError } from "../errors";
@@ -39,26 +42,126 @@ export function isValidIanaTimezone(timezone: string): boolean {
   }
 }
 
+/**
+ * Completed-coverage comparison only (plan §8.5). Attempt status never clears
+ * completeness: coverage moves solely on successful completion, so an
+ * in-progress or interrupted run cannot make stored coverage look incomplete.
+ */
 export function coverageComplete(input: {
-  status: HealthMetricSyncStatusCode;
   coverageStartAt?: string;
   coverageEndAt?: string;
   rangeStart: string;
   rangeEnd: string;
 }): boolean {
-  if (
-    input.status === "syncing" ||
-    input.status === "backfilling" ||
-    input.status === "never_synced" ||
-    input.status === "disabled" ||
-    input.status === "error"
-  ) {
-    return false;
-  }
   if (!input.coverageStartAt || !input.coverageEndAt) {
     return false;
   }
   return Date.parse(input.coverageStartAt) <= Date.parse(input.rangeStart) && Date.parse(input.coverageEndAt) >= Date.parse(input.rangeEnd);
+}
+
+/**
+ * needsInitialImport is true when no completed history marker matches the
+ * active installation and current timezone version (plan §7.1). Never derived
+ * from the attempt status label.
+ */
+export function deriveNeedsInitialImport(input: {
+  historyImportCompletedAt?: string | null;
+  historyImportInstallationId?: string | null;
+  historyImportTimezoneVersion?: number | null;
+  activeInstallationId?: string | null;
+  healthTimezoneVersion: number;
+}): boolean {
+  if (!input.historyImportCompletedAt) return true;
+  if (!input.activeInstallationId) return true;
+  if (input.historyImportInstallationId !== input.activeInstallationId) return true;
+  return Number(input.historyImportTimezoneVersion) !== Number(input.healthTimezoneVersion);
+}
+
+export type DerivedRunRange = {
+  rangeStartAt: string;
+  rangeEndAt: string;
+  allowDeletes: boolean;
+};
+
+/**
+ * Server-authoritative range + delete permission for a run kind (plan §7.2).
+ * The server never trusts client-supplied ranges or deletion authority.
+ */
+export function deriveRunRange(input: {
+  kind: HealthKitRunKind;
+  group: HealthKitConsentGroup;
+  lastSuccessfulAt?: string | null;
+  now: Date;
+}): DerivedRunRange {
+  const rangeEndAt = toUtcIso(input.now);
+  if (input.kind === "sync") {
+    const anchor = input.lastSuccessfulAt ? Date.parse(input.lastSuccessfulAt) : input.now.getTime();
+    const start = new Date(Math.min(anchor, input.now.getTime()) - HEALTHKIT_SYNC_OVERLAP_MS);
+    return { rangeStartAt: toUtcIso(start), rangeEndAt, allowDeletes: false };
+  }
+  const rangeStartAt = toUtcIso(backfillRangeStart(input.group, input.now));
+  return { rangeStartAt, rangeEndAt, allowDeletes: input.kind === "repair_import" };
+}
+
+/**
+ * Begin-time state transition validation (plan §6.2/§7.2): initial import only
+ * when history is incomplete; sync and repair only once it is complete. Repair
+ * reconciliation exists only for the implemented product groups.
+ */
+export function assertRunKindAllowed(kind: HealthKitRunKind, group: HealthKitConsentGroup, needsInitialImport: boolean) {
+  if (kind === "initial_import") {
+    if (!needsInitialImport) {
+      throw new HttpError(409, "run_kind_not_allowed", "Initial history import is already complete for this installation.");
+    }
+    return;
+  }
+  if (needsInitialImport) {
+    throw new HttpError(409, "initial_import_required", "Complete Import history before running Sync or repair for this metric.");
+  }
+  if (kind === "repair_import" && !isHealthKitProductGroup(group)) {
+    throw new HttpError(400, "run_kind_not_allowed", `Repair is not supported for group ${group}.`);
+  }
+}
+
+const RUN_WINDOW_TOLERANCE_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * Completion-time window validation (plan §7.4). The 90-day windows (initial,
+ * repair) must be the bounded window derived at begin; deletion safety depends
+ * on it. Sync windows are unbounded below (long gaps re-read more history) and
+ * never delete, so only ordering and future-bounds are enforced.
+ */
+export function assertRunWindowShape(input: {
+  kind: HealthKitRunKind;
+  rangeStartAt: string;
+  rangeEndAt: string;
+  now: Date;
+}) {
+  const start = Date.parse(input.rangeStartAt);
+  const end = Date.parse(input.rangeEndAt);
+  if (Number.isNaN(start) || Number.isNaN(end)) {
+    throw new HttpError(400, "payload_invalid", "Run range timestamps are invalid.");
+  }
+  if (end <= start) {
+    throw new HttpError(400, "payload_invalid", "Run range end must be after range start.");
+  }
+  const nowMs = input.now.getTime();
+  if (end > nowMs + RUN_WINDOW_TOLERANCE_MS) {
+    throw new HttpError(400, "payload_invalid", "Run range cannot end in the future.");
+  }
+  if (input.kind === "sync") {
+    return;
+  }
+  const duration = end - start;
+  if (
+    duration < BACKFILL_WINDOW_MS - RUN_WINDOW_TOLERANCE_MS ||
+    duration > BACKFILL_WINDOW_MS + RUN_WINDOW_TOLERANCE_MS
+  ) {
+    throw new HttpError(400, "payload_invalid", "History import windows must span the 90-day import window.");
+  }
+  if (start < nowMs - BACKFILL_WINDOW_MS - RUN_WINDOW_TOLERANCE_MS) {
+    throw new HttpError(400, "payload_invalid", "History import window cannot start before the 90-day window.");
+  }
 }
 
 export function toUtcIso(date: Date): string {

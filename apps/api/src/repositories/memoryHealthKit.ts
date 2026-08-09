@@ -3,8 +3,10 @@
  * Mirrors PostgresHealthKitStore natural-key apply rules without SQL.
  */
 import type {
+  BeginHealthKitRunInput,
   BloodGlucoseReading,
   BloodPressureReading,
+  CompleteHealthKitRunInput,
   HealthDailyMetricRecord,
   HealthKitConsentGroup,
   HealthKitGroupImportStartResult,
@@ -15,6 +17,8 @@ import type {
   HealthKitOpApplyResult,
   HealthKitOpsBatchInput,
   HealthKitOpsBatchResult,
+  HealthKitRunBeginResult,
+  HealthKitRunCompleteResult,
   HealthKitSettings,
   HealthKitSyncOp,
   HealthMetricFreshness,
@@ -30,8 +34,12 @@ import { BACKFILL_WINDOW_MS, HEALTHKIT_METRIC_REGISTRY } from "@family-os/shared
 import { HttpError } from "../errors";
 import {
   assertOpCoherent,
+  assertRunKindAllowed,
+  assertRunWindowShape,
   assertSelfProfileMatch,
   backfillRangeStart,
+  deriveNeedsInitialImport,
+  deriveRunRange,
   HEALTHKIT_METRICS,
   toUtcIso
 } from "./healthKitDomain";
@@ -83,6 +91,9 @@ export class MemoryHealthKitEngine {
       lastErrorCode?: string;
       coverageStartAt?: string;
       coverageEndAt?: string;
+      historyImportCompletedAt?: string;
+      historyImportInstallationId?: string;
+      historyImportTimezoneVersion?: number;
       status: HealthMetricSyncStatusCode;
     }
   >();
@@ -290,6 +301,14 @@ export class MemoryHealthKitEngine {
     for (const op of input.ops) {
       try {
         assertOpCoherent(op);
+        if (op.op === "delete") {
+          // Repair completion owns missing-key deletion (plan §7.3).
+          throw new HttpError(
+            400,
+            "payload_invalid",
+            "Client delete ops are not accepted; repair completion owns missing-key deletion."
+          );
+        }
         if (!this.groupEnabled.get(`${input.personId}:${op.group}`)) {
           throw new HttpError(403, "group_disabled", `Group ${op.group} is not enabled.`);
         }
@@ -333,6 +352,7 @@ export class MemoryHealthKitEngine {
     return { results };
   }
 
+  /** Legacy compatibility begin: 90-day window; never writes completed coverage. */
   async startHealthKitImport(
     actorUserId: string,
     group: HealthKitConsentGroup,
@@ -356,14 +376,13 @@ export class MemoryHealthKitEngine {
       personId: input.personId,
       group,
       nowIso,
-      status: "syncing",
-      coverageStartAt,
-      coverageEndAt
+      status: "syncing"
     });
 
     return { group, status: "syncing", coverageStartAt, coverageEndAt };
   }
 
+  /** Legacy compatibility completion: also records the history-import marker. */
   async markHealthKitGroupReady(
     actorUserId: string,
     group: HealthKitConsentGroup,
@@ -392,10 +411,220 @@ export class MemoryHealthKitEngine {
       status: "ready",
       success: true,
       coverageStartAt,
-      coverageEndAt
+      coverageEndAt,
+      historyMarker: {
+        completedAt: nowIso,
+        installationId: input.installationId,
+        timezoneVersion: input.timezoneVersion
+      }
     });
 
     return { group, status: "ready", coverageStartAt, coverageEndAt };
+  }
+
+  async beginHealthKitRun(
+    actorUserId: string,
+    group: HealthKitConsentGroup,
+    input: BeginHealthKitRunInput
+  ): Promise<HealthKitRunBeginResult> {
+    const self = await this.requireSelf(actorUserId);
+    assertSelfProfileMatch({ selfProfileId: self.id, requestedPersonId: input.personId });
+    this.assertWriteFence(input);
+
+    if (!this.groupEnabled.get(`${input.personId}:${group}`)) {
+      throw new HttpError(403, "group_disabled", `Group ${group} is not enabled.`);
+    }
+
+    const settings = this.profileSettings.get(input.personId);
+    const state = this.syncState.get(`${input.personId}:${group}`);
+    const needsInitialImport = this.needsInitialImport(input.personId, group);
+    assertRunKindAllowed(input.kind, group, needsInitialImport);
+
+    const now = new Date();
+    const range = deriveRunRange({
+      kind: input.kind,
+      group,
+      lastSuccessfulAt: state?.lastSuccessfulAt ?? null,
+      now
+    });
+
+    // Begin records the attempt only; completed coverage changes on completion.
+    this.touchState({
+      familyId: self.familyId,
+      personId: input.personId,
+      group,
+      nowIso: toUtcIso(now),
+      status: "syncing"
+    });
+
+    this.host.audit({
+      familyId: self.familyId,
+      actorUserId,
+      action: "healthkit.run_begin",
+      resourceType: "healthkit_sync",
+      resourceId: input.personId,
+      metadata: { group, kind: input.kind, timezone_version: settings?.healthTimezoneVersion ?? 1 }
+    });
+
+    return { group, kind: input.kind, ...range };
+  }
+
+  async completeHealthKitRun(
+    actorUserId: string,
+    group: HealthKitConsentGroup,
+    input: CompleteHealthKitRunInput
+  ): Promise<HealthKitRunCompleteResult> {
+    const self = await this.requireSelf(actorUserId);
+    assertSelfProfileMatch({ selfProfileId: self.id, requestedPersonId: input.personId });
+    this.assertWriteFence(input);
+
+    if (!this.groupEnabled.get(`${input.personId}:${group}`)) {
+      throw new HttpError(403, "group_disabled", `Group ${group} is not enabled.`);
+    }
+
+    const now = new Date();
+    const nowIso = toUtcIso(now);
+
+    if (input.kind === "repair_import") {
+      if (input.completeSnapshot !== true || !Array.isArray(input.presentNaturalKeys)) {
+        throw new HttpError(
+          400,
+          "payload_invalid",
+          "Repair completion requires completeSnapshot=true and the complete presentNaturalKeys manifest."
+        );
+      }
+    } else if (input.completeSnapshot !== undefined || input.presentNaturalKeys !== undefined) {
+      throw new HttpError(400, "payload_invalid", "Only repair_import completion may supply a snapshot manifest.");
+    }
+    assertRunWindowShape({
+      kind: input.kind,
+      rangeStartAt: input.rangeStartAt,
+      rangeEndAt: input.rangeEndAt,
+      now
+    });
+
+    const needsInitialImport = this.needsInitialImport(input.personId, group);
+    if (input.kind !== "initial_import" && needsInitialImport) {
+      throw new HttpError(409, "initial_import_required", "Complete Import history before running Sync or repair for this metric.");
+    }
+
+    let deletedCount = 0;
+    if (input.kind === "repair_import") {
+      assertRunKindAllowed("repair_import", group, needsInitialImport);
+      deletedCount = this.reconcileRepairWindow({
+        personId: input.personId,
+        group,
+        timezoneVersion: input.timezoneVersion,
+        rangeStartAt: input.rangeStartAt,
+        rangeEndAt: input.rangeEndAt,
+        presentNaturalKeys: input.presentNaturalKeys ?? []
+      });
+    }
+
+    this.touchState({
+      familyId: self.familyId,
+      personId: input.personId,
+      group,
+      nowIso,
+      status: "ready",
+      success: true,
+      coverageStartAt: input.rangeStartAt,
+      coverageEndAt: input.rangeEndAt,
+      historyMarker:
+        input.kind === "sync"
+          ? undefined
+          : {
+              completedAt: nowIso,
+              installationId: input.installationId,
+              timezoneVersion: input.timezoneVersion
+            }
+    });
+
+    this.host.audit({
+      familyId: self.familyId,
+      actorUserId,
+      action: "healthkit.run_complete",
+      resourceType: "healthkit_sync",
+      resourceId: input.personId,
+      metadata: { group, kind: input.kind, deleted_count: deletedCount }
+    });
+
+    return {
+      group,
+      kind: input.kind,
+      status: "ready",
+      deletedCount,
+      lastSuccessfulAt: nowIso,
+      coverageStartAt: input.rangeStartAt,
+      coverageEndAt: input.rangeEndAt,
+      needsInitialImport: false
+    };
+  }
+
+  /** Repair-only in-memory missing-key reconciliation within the exact window. */
+  private reconcileRepairWindow(input: {
+    personId: string;
+    group: HealthKitConsentGroup;
+    timezoneVersion: number;
+    rangeStartAt: string;
+    rangeEndAt: string;
+    presentNaturalKeys: string[];
+  }): number {
+    const manifest = new Set(input.presentNaturalKeys);
+    let deleted = 0;
+    switch (input.group) {
+      case "vitals": {
+        for (const [key, row] of this.host.bloodPressureReadings) {
+          if (row.personId !== input.personId || row.deletedAt) continue;
+          if (row.measuredAt < input.rangeStartAt || row.measuredAt > input.rangeEndAt) continue;
+          if (!manifest.has(`blood_pressure:${key}`)) {
+            this.host.bloodPressureReadings.set(key, { ...row, deletedAt: new Date().toISOString() });
+            deleted += 1;
+          }
+        }
+        return deleted;
+      }
+      case "sleep": {
+        const healthTimezone = this.profileSettings.get(input.personId)?.healthTimezone ?? "UTC";
+        const startDay = localDayStringInTimezone(input.rangeStartAt, healthTimezone);
+        const endDay = localDayStringInTimezone(input.rangeEndAt, healthTimezone);
+        for (const [key, row] of this.sleepDays) {
+          if (row.personId !== input.personId || row.timezoneVersion !== input.timezoneVersion) continue;
+          if (row.sleepDay < startDay || row.sleepDay > endDay) continue;
+          if (!manifest.has(`sleep_day:${row.sleepDay}`)) {
+            this.sleepDays.delete(key);
+            deleted += 1;
+          }
+        }
+        return deleted;
+      }
+      case "workouts": {
+        for (const [key, row] of this.workouts) {
+          if (row.personId !== input.personId) continue;
+          if (row.startedAtUtc < input.rangeStartAt || row.startedAtUtc > input.rangeEndAt) continue;
+          if (!manifest.has(`workout:${row.sourceSampleKey}`)) {
+            this.workouts.delete(key);
+            deleted += 1;
+          }
+        }
+        return deleted;
+      }
+      default:
+        throw new HttpError(400, "run_kind_not_allowed", `Repair is not supported for group ${input.group}.`);
+    }
+  }
+
+  private needsInitialImport(personId: string, group: HealthKitConsentGroup): boolean {
+    const settings = this.profileSettings.get(personId);
+    const state = this.syncState.get(`${personId}:${group}`);
+    const active = this.activeInstallation(personId);
+    return deriveNeedsInitialImport({
+      historyImportCompletedAt: state?.historyImportCompletedAt ?? null,
+      historyImportInstallationId: state?.historyImportInstallationId ?? null,
+      historyImportTimezoneVersion: state?.historyImportTimezoneVersion ?? null,
+      activeInstallationId: active?.installationId ?? null,
+      healthTimezoneVersion: settings?.healthTimezoneVersion ?? 1
+    });
   }
 
   async getHealthKitGroupStatus(
@@ -420,7 +649,9 @@ export class MemoryHealthKitEngine {
       lastAttemptAt: state?.lastAttemptAt,
       lastErrorCode: state?.lastErrorCode,
       coverageStartAt: state?.coverageStartAt,
-      coverageEndAt: state?.coverageEndAt
+      coverageEndAt: state?.coverageEndAt,
+      needsInitialImport: this.needsInitialImport(target, group),
+      historyImportCompletedAt: state?.historyImportCompletedAt
     };
   }
 
@@ -603,9 +834,7 @@ export class MemoryHealthKitEngine {
       return { opId: op.opId, result: "duplicate" };
     }
 
-    if (op.op === "delete") {
-      this.applyDelete(op.naturalKey, ctx);
-    } else if (op.payload) {
+    if (op.payload) {
       this.applyUpsert(op.payload, ctx);
     }
 
@@ -722,46 +951,6 @@ export class MemoryHealthKitEngine {
     }
   }
 
-  private applyDelete(naturalKey: string, ctx: { personId: string; timezoneVersion: number }) {
-    if (naturalKey.startsWith("steps_hour:")) {
-      const hour = naturalKey.slice("steps_hour:".length);
-      this.stepHours.delete(`${ctx.personId}:${hour}`);
-      return;
-    }
-    if (naturalKey.startsWith("sleep_day:")) {
-      const day = naturalKey.slice("sleep_day:".length);
-      this.sleepDays.delete(`${ctx.personId}:${day}:${ctx.timezoneVersion}`);
-      return;
-    }
-    if (naturalKey.startsWith("daily_metric:")) {
-      const rest = naturalKey.slice("daily_metric:".length);
-      const idx = rest.lastIndexOf(":");
-      const metric = rest.slice(0, idx) as HealthKitMetricKey;
-      const day = rest.slice(idx + 1);
-      this.dailyMetrics.delete(`${ctx.personId}:${metric}:${day}:${ctx.timezoneVersion}`);
-      return;
-    }
-    if (naturalKey.startsWith("blood_pressure:")) {
-      const key = naturalKey.slice("blood_pressure:".length);
-      const row = this.host.bloodPressureReadings.get(key);
-      if (row && row.personId === ctx.personId) {
-        this.host.bloodPressureReadings.set(key, { ...row, deletedAt: new Date().toISOString() });
-      }
-      return;
-    }
-    if (naturalKey.startsWith("blood_glucose:")) {
-      const key = naturalKey.slice("blood_glucose:".length);
-      this.glucose.delete(`${ctx.personId}:${key}`);
-      return;
-    }
-    if (naturalKey.startsWith("workout:")) {
-      const key = naturalKey.slice("workout:".length);
-      this.workouts.delete(`${ctx.personId}:${key}`);
-      return;
-    }
-    throw new HttpError(400, "payload_invalid", "Unknown natural key for delete.");
-  }
-
   private assertWriteFence(input: {
     personId: string;
     installationId: string;
@@ -797,6 +986,12 @@ export class MemoryHealthKitEngine {
     lastErrorCode?: string;
     coverageStartAt?: string;
     coverageEndAt?: string;
+    /** Set on completed history imports; undefined leaves the marker intact. */
+    historyMarker?: {
+      completedAt: string;
+      installationId: string;
+      timezoneVersion: number;
+    };
   }) {
     const key = `${input.personId}:${input.group}`;
     const prev = this.syncState.get(key);
@@ -809,6 +1004,9 @@ export class MemoryHealthKitEngine {
       lastErrorCode: input.lastErrorCode ?? (input.success ? undefined : prev?.lastErrorCode),
       coverageStartAt: input.coverageStartAt ?? prev?.coverageStartAt,
       coverageEndAt: input.coverageEndAt ?? prev?.coverageEndAt,
+      historyImportCompletedAt: input.historyMarker?.completedAt ?? prev?.historyImportCompletedAt,
+      historyImportInstallationId: input.historyMarker?.installationId ?? prev?.historyImportInstallationId,
+      historyImportTimezoneVersion: input.historyMarker?.timezoneVersion ?? prev?.historyImportTimezoneVersion,
       status: input.status
     });
   }
@@ -827,7 +1025,9 @@ export class MemoryHealthKitEngine {
         lastErrorCode: state?.lastErrorCode,
         coverageStartAt: state?.coverageStartAt,
         coverageEndAt: state?.coverageEndAt,
-        status: state?.status ?? (enabled ? "never_synced" : "disabled")
+        status: state?.status ?? (enabled ? "never_synced" : "disabled"),
+        needsInitialImport: this.needsInitialImport(personId, group),
+        historyImportCompletedAt: state?.historyImportCompletedAt
       };
     });
     return {
@@ -840,5 +1040,23 @@ export class MemoryHealthKitEngine {
       activeInstallationId: active?.installationId,
       groups
     };
+  }
+}
+
+/** In-memory counterpart of the postgres `at time zone` day conversion. */
+function localDayStringInTimezone(iso: string, timezone: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(new Date(iso));
+    const year = parts.find((p) => p.type === "year")?.value ?? "1970";
+    const month = parts.find((p) => p.type === "month")?.value ?? "01";
+    const day = parts.find((p) => p.type === "day")?.value ?? "01";
+    return `${year}-${month}-${day}`;
+  } catch {
+    return iso.slice(0, 10);
   }
 }

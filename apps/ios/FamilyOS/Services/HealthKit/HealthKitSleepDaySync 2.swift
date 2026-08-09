@@ -1,9 +1,11 @@
 import Foundation
 import HealthKit
 
-/// Sleep reads over an explicit range supplied by the run module.
+/// Foreground / BG sleep import: query HealthKit sleepAnalysis → day totals → enqueue.
 /// Day key = local calendar day of sample **end** in profile `healthTimezone`.
 enum HealthKitSleepDaySync {
+    static let backfillWindowDays = 90
+
     struct SleepDaySample: Sendable {
         let sleepDay: String // YYYY-MM-DD
         let totalMinutes: Int
@@ -15,15 +17,10 @@ enum HealthKitSleepDaySync {
         let inBedMinutes: Int
     }
 
-    static func naturalKey(for sample: SleepDaySample) -> String {
-        "sleep_day:\(sample.sleepDay)"
-    }
-
     static func fetchSleepDays(
-        from start: Date,
-        through end: Date,
+        store: HKHealthStore = HKHealthStore(),
         healthTimezone: String,
-        store: HKHealthStore = HKHealthStore()
+        now: Date = Date()
     ) async throws -> [SleepDaySample] {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-FamilyOSLocalSmoke") {
@@ -36,7 +33,8 @@ enum HealthKitSleepDaySync {
             return []
         }
 
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+        let start = Calendar.current.date(byAdding: .day, value: -backfillWindowDays, to: now) ?? now
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: now, options: .strictStartDate)
         let samples: [HKCategorySample] = try await querySamples(
             store: store,
             sampleType: sleepType,

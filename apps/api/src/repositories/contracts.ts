@@ -1,7 +1,9 @@
 import type {
   AuditLog,
+  BeginHealthKitRunInput,
   BloodPressureReading,
   BootstrapResponse,
+  CompleteHealthKitRunInput,
   CreateInviteResponse,
   CurrentFamilyResponse,
   FamilyMember,
@@ -13,6 +15,8 @@ import type {
   HealthKitMetricKey,
   HealthKitOpsBatchInput,
   HealthKitOpsBatchResult,
+  HealthKitRunBeginResult,
+  HealthKitRunCompleteResult,
   HealthKitSettings,
   HealthDailyMetricRecord,
   HealthMetricFreshness,
@@ -84,11 +88,25 @@ export interface HealthKitStore {
   getHealthKitSettings(actorUserId: string, personId?: string): Promise<HealthKitSettings>;
   putHealthKitSettings(actorUserId: string, input: PutHealthKitSettingsInput): Promise<HealthKitSettings>;
   applyHealthKitOps(actorUserId: string, input: HealthKitOpsBatchInput): Promise<HealthKitOpsBatchResult>;
+  /** Generic run begin: server derives kind-specific range + delete permission. */
+  beginHealthKitRun(
+    actorUserId: string,
+    group: HealthKitConsentGroup,
+    input: BeginHealthKitRunInput
+  ): Promise<HealthKitRunBeginResult>;
+  /** Generic run completion; repair_import additionally reconciles missing keys. */
+  completeHealthKitRun(
+    actorUserId: string,
+    group: HealthKitConsentGroup,
+    input: CompleteHealthKitRunInput
+  ): Promise<HealthKitRunCompleteResult>;
+  /** @deprecated Compatibility for released clients; prefer beginHealthKitRun. */
   startHealthKitImport(
     actorUserId: string,
     group: HealthKitConsentGroup,
     input: StartHealthKitImportInput
   ): Promise<HealthKitGroupImportStartResult>;
+  /** @deprecated Compatibility for released clients; prefer completeHealthKitRun. */
   markHealthKitGroupReady(
     actorUserId: string,
     group: HealthKitConsentGroup,

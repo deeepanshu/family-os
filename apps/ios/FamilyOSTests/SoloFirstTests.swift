@@ -131,7 +131,7 @@ final class SoloFirstTests: XCTestCase {
         viewModel.healthKit.isAvailable = true
         viewModel.healthKit.consentGranted = true
         viewModel.healthKit.enabledMetrics = [.vitals]
-        await viewModel.syncHealthKitNow()
+        await viewModel.syncAllEnabledHealthMetrics()
         XCTAssertTrue(viewModel.isError)
         XCTAssertEqual(viewModel.statusMessage, "HealthKit sync must target your own profile.")
     }
@@ -285,7 +285,7 @@ final class SoloFirstTests: XCTestCase {
         ).union(HealthKitClient.readTypes(for: [.workouts])))
     }
 
-    func testHealthKitSyncNowRequiresConsentAndImplementedMetric() async {
+    func testHealthKitSyncAllRequiresConsentAndImplementedMetric() async {
         let viewModel = HealthBootstrapViewModel()
         viewModel.auth.signedInUserId = "user-1"
         let selfProfile = makeProfile(id: "p1", linkedUserId: "user-1", displayName: "Me", relationshipLabel: "Self")
@@ -293,12 +293,12 @@ final class SoloFirstTests: XCTestCase {
         viewModel.healthKit.linkedProfileId = selfProfile.id
         viewModel.healthKit.isAvailable = true
         viewModel.healthKit.consentGranted = false
-        await viewModel.syncHealthKitNow()
+        await viewModel.syncAllEnabledHealthMetrics()
         XCTAssertTrue(viewModel.isError)
         XCTAssertTrue(viewModel.statusMessage.lowercased().contains("consent"))
     }
 
-    func testHealthKitSyncNowAllowsSleepOnly() async {
+    func testHealthKitSyncAllAllowsSleepOnly() async {
         // Guard path: sleep-only enabled should not fail for "vitals consent" specifically.
         let viewModel = HealthBootstrapViewModel()
         viewModel.auth.signedInUserId = "user-1"
@@ -309,7 +309,7 @@ final class SoloFirstTests: XCTestCase {
         viewModel.healthKit.consentGranted = true
         viewModel.healthKit.enabledMetrics = [.sleep]
         // Will fail later on network/settings, but must pass the consent/metric gate.
-        await viewModel.syncHealthKitNow()
+        await viewModel.syncAllEnabledHealthMetrics()
         XCTAssertFalse(viewModel.statusMessage.lowercased().contains("vitals consent"))
         XCTAssertNotEqual(
             viewModel.statusMessage,

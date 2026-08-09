@@ -6,19 +6,15 @@ import type { McpCallerContext, HealthMcpReadService } from "./HealthMcpReadServ
 import { encodeCappedJson, withTimeout } from "./responseCap";
 import { toSafeToolErrorMessage } from "./toolErrors";
 
-// MCP_HEALTH_METRICS is a non-empty allowlist (registry minus sleep attributes).
-const healthMetricSchema = z.enum(MCP_HEALTH_METRICS as [McpHealthMetric, ...McpHealthMetric[]]);
-const granularitySchema = z.enum(["hourly", "daily"]);
+// Fixed product allowlist: exactly blood_pressure, sleep, workout (plan §8.2).
+const healthMetricSchema = z.enum([...MCP_HEALTH_METRICS] as [McpHealthMetric, ...McpHealthMetric[]]);
 
 const getHealthDataInput = {
   personId: z.string().uuid().describe("Untrusted profile ID from list_authorized_profiles"),
   healthMetric: healthMetricSchema.describe(
-    "Allowlisted Family OS HealthKit metric. Use sleep for night summaries (includes stages, optional wrist temperature and breathing disturbances)."
+    "One of blood_pressure, sleep, workout. Use sleep for night summaries (includes stages, optional wrist temperature and breathing disturbances)."
   ),
   rangeDays: z.number().int().min(1).max(90).describe("Number of local days to include, inclusive of today"),
-  granularity: granularitySchema
-    .optional()
-    .describe("Steps only. hourly max 7 days; daily max 90 days. Defaults to daily."),
   timezone: z.string().min(1).max(64).optional().describe("IANA timezone for local buckets. Defaults to UTC.")
 };
 
@@ -38,7 +34,7 @@ export function createFamilyOsMcpServer(options: {
     {
       title: "List authorized profiles",
       description:
-        "Lists Family OS profiles the connected user may query. Returns familiar labels and untrusted person IDs plus available metric categories. Data is informational only and not medical advice. Coverage depends on what has been synced into Family OS."
+        "Lists Family OS profiles the connected user may query. Returns familiar labels, untrusted person IDs, and the per-profile available health metrics (blood_pressure, sleep, workout) based on the user's enabled app toggles."
     },
     async () => {
       try {
@@ -63,7 +59,7 @@ export function createFamilyOsMcpServer(options: {
     {
       title: "Get health data",
       description:
-        "Returns bounded, metric-specific health data for one authorized profile. Steps support hourly or daily series; daily metrics include aggregate statistics; sleep returns a per-night summary (stages plus optional wrist temperature and breathing disturbance fields); blood pressure, glucose, and workouts return bounded tables. Always includes coverage and freshness. Informational only, not medical advice, diagnosis, or treatment guidance.",
+        "Returns bounded, metric-specific health data for one authorized profile: blood pressure as a reading table, sleep as a per-night summary (stages plus optional wrist temperature and breathing disturbance fields), and workouts as a bounded table. Returns stored data with coverage and last-synced metadata, up to 90 days per call.",
       inputSchema: getHealthDataInput
     },
     async (args) => {
@@ -73,7 +69,6 @@ export function createFamilyOsMcpServer(options: {
             personId: args.personId,
             healthMetric: args.healthMetric,
             rangeDays: args.rangeDays,
-            granularity: args.granularity,
             timezone: args.timezone
           }),
           config.MCP_TOOL_TIMEOUT_MS

@@ -250,4 +250,66 @@ struct HealthKitGroupReadyResult: Decodable, Sendable {
     let coverageEndAt: String?
 }
 
+// MARK: - Generic run lifecycle (POST /healthkit/groups/:group/runs/begin|complete)
+
+struct HealthKitRunBeginRequest: Encodable, Sendable {
+    let installationId: String
+    let personId: String
+    let timezoneVersion: Int
+    let kind: String
+}
+
+/// Server-authoritative run descriptor: the app never picks its own range or
+/// deletion authority.
+struct HealthKitRunDescriptorWire: Decodable, Sendable {
+    let group: String
+    let kind: String
+    let rangeStartAt: String
+    let rangeEndAt: String
+    let allowDeletes: Bool
+}
+
+struct HealthKitRunCompleteRequest: Encodable, Sendable {
+    let installationId: String
+    let personId: String
+    let timezoneVersion: Int
+    let kind: String
+    let rangeStartAt: String
+    let rangeEndAt: String
+    /// Repair only: explicit complete-snapshot declaration + present key manifest.
+    let completeSnapshot: Bool?
+    let presentNaturalKeys: [String]?
+
+    init(
+        installationId: String,
+        personId: String,
+        timezoneVersion: Int,
+        kind: String,
+        rangeStartAt: String,
+        rangeEndAt: String,
+        completeSnapshot: Bool? = nil,
+        presentNaturalKeys: [String]? = nil
+    ) {
+        self.installationId = installationId
+        self.personId = personId
+        self.timezoneVersion = timezoneVersion
+        self.kind = kind
+        self.rangeStartAt = rangeStartAt
+        self.rangeEndAt = rangeEndAt
+        self.completeSnapshot = completeSnapshot
+        self.presentNaturalKeys = presentNaturalKeys
+    }
+}
+
+struct HealthKitRunCompleteResultWire: Decodable, Sendable {
+    let group: String
+    let kind: String
+    let status: String
+    let deletedCount: Int
+    let lastSuccessfulAt: String?
+    let coverageStartAt: String?
+    let coverageEndAt: String?
+    let needsInitialImport: Bool?
+}
+
 

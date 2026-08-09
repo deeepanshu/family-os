@@ -1,9 +1,64 @@
-import { HEALTH_API_PREFIX, bloodPressureNaturalKey, type HealthKitConsentGroup, type HealthKitSyncOp } from "@family-os/shared";
+import {
+  HEALTH_API_PREFIX,
+  bloodPressureNaturalKey,
+  type HealthKitConsentGroup,
+  type HealthKitRunBeginResult,
+  type HealthKitRunKind,
+  type HealthKitSyncOp
+} from "@family-os/shared";
 
 type Api = {
   request: (input: string, init?: RequestInit) => Response | Promise<Response>;
 };
 
+export async function beginRun(
+  api: Api,
+  token: string,
+  profileId: string,
+  installationId: string,
+  group: HealthKitConsentGroup,
+  kind: HealthKitRunKind,
+  timezoneVersion = 1
+) {
+  return api.request(`${HEALTH_API_PREFIX}/healthkit/groups/${group}/runs/begin`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ installationId, personId: profileId, timezoneVersion, kind })
+  });
+}
+
+export async function completeRun(
+  api: Api,
+  token: string,
+  profileId: string,
+  installationId: string,
+  group: HealthKitConsentGroup,
+  body: Record<string, unknown>,
+  timezoneVersion = 1
+) {
+  return api.request(`${HEALTH_API_PREFIX}/healthkit/groups/${group}/runs/complete`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ installationId, personId: profileId, timezoneVersion, ...body })
+  });
+}
+
+export async function postOps(
+  api: Api,
+  token: string,
+  profileId: string,
+  installationId: string,
+  ops: HealthKitSyncOp[],
+  timezoneVersion = 1
+) {
+  return api.request(`${HEALTH_API_PREFIX}/healthkit/ops:batch`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ installationId, personId: profileId, timezoneVersion, ops })
+  });
+}
+
+/** Runs a full initial import through the generic run contract and ends ready. */
 export async function seedHealthKitReadyGroup(
   api: Api,
   token: string,
@@ -13,46 +68,34 @@ export async function seedHealthKitReadyGroup(
   ops: HealthKitSyncOp[],
   timezoneVersion = 1
 ) {
-  const start = await api.request(`${HEALTH_API_PREFIX}/healthkit/groups/${group}/start-import`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      installationId,
-      personId: profileId,
-      timezoneVersion
-    })
-  });
-  if (!start.ok) {
-    throw new Error(`start-import failed: ${start.status} ${await start.text()}`);
+  const begin = await beginRun(api, token, profileId, installationId, group, "initial_import", timezoneVersion);
+  if (!begin.ok) {
+    throw new Error(`runs/begin failed: ${begin.status} ${await begin.text()}`);
   }
+  const descriptor = (await begin.json()).data as HealthKitRunBeginResult;
 
   if (ops.length > 0) {
-    const batch = await api.request(`${HEALTH_API_PREFIX}/healthkit/ops:batch`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        installationId,
-        personId: profileId,
-        timezoneVersion,
-        ops
-      })
-    });
+    const batch = await postOps(api, token, profileId, installationId, ops, timezoneVersion);
     if (!batch.ok) {
       throw new Error(`ops batch failed: ${batch.status} ${await batch.text()}`);
     }
   }
 
-  const ready = await api.request(`${HEALTH_API_PREFIX}/healthkit/groups/${group}/ready`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      installationId,
-      personId: profileId,
-      timezoneVersion
-    })
-  });
-  if (!ready.ok) {
-    throw new Error(`ready failed: ${ready.status} ${await ready.text()}`);
+  const complete = await completeRun(
+    api,
+    token,
+    profileId,
+    installationId,
+    group,
+    {
+      kind: "initial_import",
+      rangeStartAt: descriptor.rangeStartAt,
+      rangeEndAt: descriptor.rangeEndAt
+    },
+    timezoneVersion
+  );
+  if (!complete.ok) {
+    throw new Error(`runs/complete failed: ${complete.status} ${await complete.text()}`);
   }
 }
 

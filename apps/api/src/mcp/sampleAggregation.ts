@@ -1,4 +1,3 @@
-import type { McpSeriesPoint } from "@family-os/shared";
 import { isDateInInclusiveRange, localDateString, localHourBucket } from "./timezone";
 
 /** Local shape for pure aggregation helpers/tests (not a storage/API contract). */
@@ -7,6 +6,12 @@ export type AggregateSample = {
   endDate?: string;
   value?: number;
   metricType: string;
+};
+
+/** Local bucket/value point shape (not a storage/API contract). */
+export type McpSeriesPoint = {
+  bucket: string;
+  value: number;
 };
 
 export function expandDateRangeForTimezoneEdges(rangeStart: string, rangeEnd: string): {

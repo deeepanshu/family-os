@@ -1,9 +1,11 @@
 import postgres from "postgres";
 import type {
   AuditLog,
+  BeginHealthKitRunInput,
   BloodGlucoseReading,
   BloodPressureReading,
   BootstrapResponse,
+  CompleteHealthKitRunInput,
   CreateInviteResponse,
   CurrentFamilyResponse,
   FamilyMember,
@@ -16,6 +18,8 @@ import type {
   HealthKitMetricKey,
   HealthKitOpsBatchInput,
   HealthKitOpsBatchResult,
+  HealthKitRunBeginResult,
+  HealthKitRunCompleteResult,
   HealthKitSettings,
   HealthMetricFreshness,
   HealthProfile,
@@ -150,6 +154,22 @@ export class PostgresFamilyRepository implements FamilyRepository {
 
   applyHealthKitOps(actorUserId: string, input: HealthKitOpsBatchInput): Promise<HealthKitOpsBatchResult> {
     return this.healthKitStore.applyHealthKitOps(actorUserId, input);
+  }
+
+  beginHealthKitRun(
+    actorUserId: string,
+    group: HealthKitConsentGroup,
+    input: BeginHealthKitRunInput
+  ): Promise<HealthKitRunBeginResult> {
+    return this.healthKitStore.beginHealthKitRun(actorUserId, group, input);
+  }
+
+  completeHealthKitRun(
+    actorUserId: string,
+    group: HealthKitConsentGroup,
+    input: CompleteHealthKitRunInput
+  ): Promise<HealthKitRunCompleteResult> {
+    return this.healthKitStore.completeHealthKitRun(actorUserId, group, input);
   }
 
   startHealthKitImport(

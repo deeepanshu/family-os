@@ -170,6 +170,9 @@ export type HealthKitMetricSyncState = {
   coverageStartAt?: string;
   coverageEndAt?: string;
   status: HealthMetricSyncStatusCode;
+  /** True until a completed history import matches the active installation + timezone version. */
+  needsInitialImport: boolean;
+  historyImportCompletedAt?: string;
 };
 
 export type HealthKitSettings = {
@@ -352,17 +355,43 @@ export const MCP_SLEEP_ATTRIBUTE_METRICS = [
 
 export type McpSleepAttributeMetric = (typeof MCP_SLEEP_ATTRIBUTE_METRICS)[number];
 
-/** Metrics accepted by MCP get_health_data (registry keys minus sleep attributes). */
-export type McpHealthMetric = Exclude<HealthKitMetricKey, McpSleepAttributeMetric>;
+/**
+ * Fixed product allowlist for MCP get_health_data in this release
+ * (docs/HEALTHKIT_SYNC_AND_MCP_PRODUCT_PLAN.md §8.2). Deliberately NOT derived
+ * from the HealthKit registry: enabling a broad consent group must never
+ * advertise unrelated registry metrics.
+ */
+export const MCP_HEALTH_METRICS = ["blood_pressure", "sleep", "workout"] as const satisfies readonly HealthKitMetricKey[];
+
+export type McpHealthMetric = (typeof MCP_HEALTH_METRICS)[number];
+
+/**
+ * Explicit app-toggle → MCP metric mapping. `vitals` means blood pressure only
+ * on this product surface; it never advertises heart rate, glucose, or any
+ * other broad-registry vital.
+ */
+export const MCP_HEALTH_METRIC_FOR_PRODUCT_GROUP = {
+  vitals: "blood_pressure",
+  sleep: "sleep",
+  workouts: "workout"
+} as const satisfies Record<string, McpHealthMetric>;
+
+export function mcpHealthMetricForProductGroup(group: HealthKitConsentGroup): McpHealthMetric | null {
+  return (MCP_HEALTH_METRIC_FOR_PRODUCT_GROUP as Record<string, McpHealthMetric>)[group] ?? null;
+}
+
+/** Runtime filter: the MCP metrics available for a set of enabled app toggles. */
+export function mcpHealthMetricsForEnabledGroups(enabledGroups: readonly HealthKitConsentGroup[]): McpHealthMetric[] {
+  const metrics = enabledGroups
+    .map(mcpHealthMetricForProductGroup)
+    .filter((metric): metric is McpHealthMetric => metric !== null);
+  return MCP_HEALTH_METRICS.filter((metric) => metrics.includes(metric));
+}
 
 export type McpHealthViewType =
-  | "hourly_series"
-  | "daily_series"
   | "daily_duration_series"
   | "daily_reading_table"
   | "workout_table";
-
-export type McpStepsGranularity = "hourly" | "daily";
 
 export type McpCapability = "health_read";
 
@@ -385,14 +414,12 @@ export type McpAuthorizedProfile = {
 
 export type McpListAuthorizedProfilesResult = {
   profiles: McpAuthorizedProfile[];
-  disclaimer: string;
 };
 
 export type McpGetHealthDataInput = {
   personId: string;
   healthMetric: McpHealthMetric;
   rangeDays: number;
-  granularity?: McpStepsGranularity;
   timezone?: string;
 };
 
@@ -401,27 +428,14 @@ export type McpCoverage = {
   rangeStart: string;
   rangeEnd: string;
   daysWithData: number;
-  /** True when stored coverage fully covers the requested range and the metric is not mid-backfill. */
+  /**
+   * True when the last successfully completed coverage window fully covers the
+   * requested range. Never cleared merely because a newer attempt is in
+   * progress or was interrupted.
+   */
   complete: boolean;
   availableStart?: string;
   availableEnd?: string;
-};
-
-export type McpSeriesPoint = {
-  bucket: string;
-  value: number;
-};
-
-export type McpDailyMetricPoint = {
-  bucket: string;
-  /** Primary value: sum for totals, latest for latest-value metrics, average for statistics. */
-  value: number;
-  sumValue?: number;
-  averageValue?: number;
-  minimumValue?: number;
-  maximumValue?: number;
-  latestValue?: number;
-  sampleCount: number;
 };
 
 export type McpSleepPoint = {
@@ -445,15 +459,6 @@ export type McpBloodPressureReadingRow = {
   systolic: number;
   diastolic: number;
   pulse?: number;
-};
-
-export type McpBloodGlucoseReadingRow = {
-  localDate: string;
-  localTime: string;
-  valueMgDl: number;
-  /** Present only to preserve discriminated-union property access for existing clients. */
-  systolic?: never;
-  diastolic?: never;
 };
 
 export type McpWorkoutRow = {
@@ -486,28 +491,8 @@ export type McpHealthDataBase = {
   /** Request timezone used only for local presentation of instants (e.g. BP table). */
   timezone: string;
   coverage: McpCoverage;
+  /** Last completed successful run; never moved by in-progress or interrupted attempts. */
   lastSyncedAt?: string;
-  /** Redacted per-metric sync status (never implies device online / permission). */
-  metricSyncStatus: HealthMetricSyncStatusCode;
-  disclaimer: string;
-};
-
-export type McpHourlySeriesResult = McpHealthDataBase & {
-  viewType: "hourly_series";
-  healthMetric: "steps";
-  points: McpSeriesPoint[];
-};
-
-export type McpDailySeriesResult = McpHealthDataBase & {
-  viewType: "daily_series";
-  healthMetric: Exclude<McpHealthMetric, "steps" | "sleep" | "blood_pressure" | "blood_glucose" | "workout">;
-  points: McpDailyMetricPoint[];
-};
-
-export type McpStepsDailySeriesResult = McpHealthDataBase & {
-  viewType: "daily_series";
-  healthMetric: "steps";
-  points: McpSeriesPoint[];
 };
 
 export type McpDailyDurationSeriesResult = McpHealthDataBase & {
@@ -523,13 +508,6 @@ export type McpDailyReadingTableResult = McpHealthDataBase & {
   truncated: boolean;
 };
 
-export type McpBloodGlucoseTableResult = McpHealthDataBase & {
-  viewType: "daily_reading_table";
-  healthMetric: "blood_glucose";
-  readings: McpBloodGlucoseReadingRow[];
-  truncated: boolean;
-};
-
 export type McpWorkoutTableResult = McpHealthDataBase & {
   viewType: "workout_table";
   healthMetric: "workout";
@@ -538,24 +516,10 @@ export type McpWorkoutTableResult = McpHealthDataBase & {
 };
 
 export type McpGetHealthDataResult =
-  | McpHourlySeriesResult
-  | McpStepsDailySeriesResult
-  | McpDailySeriesResult
   | McpDailyDurationSeriesResult
   | McpDailyReadingTableResult
-  | McpBloodGlucoseTableResult
   | McpWorkoutTableResult;
 
-export const MCP_HEALTH_DISCLAIMER =
-  "Informational only. Not medical advice. Coverage and freshness metadata describe the stored Family OS data and may be incomplete or delayed." as const;
-
-const MCP_SLEEP_ATTRIBUTE_METRIC_SET = new Set<string>(MCP_SLEEP_ATTRIBUTE_METRICS);
-
 export function isMcpHealthMetric(value: string): value is McpHealthMetric {
-  return isHealthKitMetricKey(value) && !MCP_SLEEP_ATTRIBUTE_METRIC_SET.has(value);
+  return (MCP_HEALTH_METRICS as readonly string[]).includes(value);
 }
-
-/** Queryable MCP metrics: full HealthKit registry except sleep-day attribute keys. */
-export const MCP_HEALTH_METRICS: readonly McpHealthMetric[] = Object.freeze(
-  HEALTHKIT_METRIC_KEYS.filter(isMcpHealthMetric)
-);

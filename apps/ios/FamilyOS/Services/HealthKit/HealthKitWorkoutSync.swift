@@ -1,11 +1,10 @@
 import Foundation
 import HealthKit
 
-/// All-type workout import: fat summary (A) + events (B) + multi-sport activities (C).
+/// Workout reads over an explicit range supplied by the run module:
+/// fat summary (A) + events (B) + multi-sport activities (C).
 /// No GPS routes or per-second metric series.
 enum HealthKitWorkoutSync {
-    static let backfillWindowDays = 90
-
     struct WorkoutSample: Sendable {
         let sourceSampleKey: String
         let workoutType: String
@@ -43,9 +42,14 @@ enum HealthKitWorkoutSync {
         let durationSeconds: Int
     }
 
+    static func naturalKey(for sample: WorkoutSample) -> String {
+        "workout:\(sample.sourceSampleKey)"
+    }
+
     static func fetchWorkouts(
-        store: HKHealthStore = HKHealthStore(),
-        now: Date = Date()
+        from start: Date,
+        through end: Date,
+        store: HKHealthStore = HKHealthStore()
     ) async throws -> [WorkoutSample] {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-FamilyOSLocalSmoke") {
@@ -54,8 +58,7 @@ enum HealthKitWorkoutSync {
         }
         #endif
 
-        let start = Calendar.current.date(byAdding: .day, value: -backfillWindowDays, to: now) ?? now
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: now, options: .strictStartDate)
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
         let workouts: [HKWorkout] = try await querySamples(
             store: store,
             sampleType: HKObjectType.workoutType(),

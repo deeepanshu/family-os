@@ -249,7 +249,8 @@ final class HealthBootstrapViewModel: ObservableObject {
         saveConnectionSettings()
     }
 
-    private func refreshSessionIfNeeded() async throws {
+    /// Internal so the HealthKit command extension can refresh before throwing saves.
+    func refreshSessionIfNeeded() async throws {
         guard AccessTokenExpiry.requiresRefresh(auth.accessToken) else {
             return
         }

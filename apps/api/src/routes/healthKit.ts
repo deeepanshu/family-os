@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   HEALTHKIT_CONSENT_GROUPS,
   HEALTHKIT_OPS_BATCH_MAX,
+  HEALTHKIT_RUN_KINDS,
   isHealthKitMetricKey
 } from "@family-os/shared";
 import type { HealthKitOpsBatchInput } from "@family-os/shared";
@@ -169,6 +170,30 @@ const groupActionBody = z
   })
   .strict();
 
+const runKind = z.enum(HEALTHKIT_RUN_KINDS);
+
+const runBeginBody = z
+  .object({
+    installationId: uuid,
+    personId: uuid,
+    timezoneVersion: z.number().int().min(1),
+    kind: runKind
+  })
+  .strict();
+
+const runCompleteBody = z
+  .object({
+    installationId: uuid,
+    personId: uuid,
+    timezoneVersion: z.number().int().min(1),
+    kind: runKind,
+    rangeStartAt: isoInstant,
+    rangeEndAt: isoInstant,
+    completeSnapshot: z.boolean().optional(),
+    presentNaturalKeys: z.array(z.string().min(1).max(256)).max(100_000).optional()
+  })
+  .strict();
+
 export function createHealthKitRoutes(repository: HealthKitStore) {
   const healthKit = new Hono<{ Variables: AppVariables }>();
   healthKit.use("*", requireAuth());
@@ -204,6 +229,32 @@ export function createHealthKitRoutes(repository: HealthKitStore) {
       }
     }
     const data = await repository.applyHealthKitOps(c.get("user").id, body);
+    return c.json({ data });
+  });
+
+  healthKit.post("/groups/:group/runs/begin", zValidator("json", runBeginBody), async (c) => {
+    const groupKey = c.req.param("group");
+    if (!group.safeParse(groupKey).success) {
+      throw new HttpError(400, "payload_invalid", "group is not allowlisted.");
+    }
+    const data = await repository.beginHealthKitRun(
+      c.get("user").id,
+      groupKey as (typeof HEALTHKIT_CONSENT_GROUPS)[number],
+      c.req.valid("json")
+    );
+    return c.json({ data });
+  });
+
+  healthKit.post("/groups/:group/runs/complete", zValidator("json", runCompleteBody), async (c) => {
+    const groupKey = c.req.param("group");
+    if (!group.safeParse(groupKey).success) {
+      throw new HttpError(400, "payload_invalid", "group is not allowlisted.");
+    }
+    const data = await repository.completeHealthKitRun(
+      c.get("user").id,
+      groupKey as (typeof HEALTHKIT_CONSENT_GROUPS)[number],
+      c.req.valid("json")
+    );
     return c.json({ data });
   });
 

@@ -81,7 +81,7 @@ extension HealthBootstrapViewModel {
         healthKit.enabledMetrics = [.vitals]
         // Claim this simulator install (E2E / prior runs may hold a different active id).
         await saveHealthKitSettings(replaceInstallation: true, showsFeedback: true)
-        await syncHealthKitNow()
+        await syncAllEnabledHealthMetrics()
         #endif
     }
 

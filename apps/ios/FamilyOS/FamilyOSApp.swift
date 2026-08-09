@@ -52,6 +52,10 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, @preconcur
         // Nonisolated BG registration — never own handlers on a @MainActor coordinator.
         HealthKitBackgroundSync.registerBackgroundTask()
         HealthKitBackgroundSync.scheduleBackgroundSync()
+        // Rebuild observers/delivery from the saved enabled set (plan §6.7).
+        Task {
+            await HealthKitBackgroundSync.reconcileFromLocalStore()
+        }
         return true
     }
 
