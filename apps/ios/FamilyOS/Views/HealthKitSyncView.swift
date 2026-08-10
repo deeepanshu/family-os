@@ -130,18 +130,25 @@ struct HealthKitSyncView: View {
                         Button("Import history") {
                             Task { await viewModel.importHealthKitHistory(metric: metric) }
                         }
+                        // Form's automatic button style can otherwise treat the
+                        // whole HStack as one row and invoke sibling actions.
+                        .buttonStyle(.borderless)
                         .disabled(healthKit.isBusy)
                         .accessibilityIdentifier("healthkit.metric.\(metric.rawValue).import")
                     } else {
                         Button("Sync") {
                             Task { await viewModel.syncHealthKitMetric(metric: metric) }
                         }
+                        // Keep Sync and the destructive repair control as
+                        // independent hit targets inside this Form row.
+                        .buttonStyle(.borderless)
                         .disabled(healthKit.isBusy)
                         .accessibilityIdentifier("healthkit.metric.\(metric.rawValue).sync")
 
                         Button("Import history") {
                             repairConfirmationMetric = metric
                         }
+                        .buttonStyle(.borderless)
                         .disabled(healthKit.isBusy)
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("healthkit.metric.\(metric.rawValue).repair")
