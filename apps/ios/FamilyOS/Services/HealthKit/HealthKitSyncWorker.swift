@@ -4,14 +4,18 @@ import Foundation
 actor HealthKitSyncWorker {
     private let store: HealthKitSyncStore
     private let postBatch: @Sendable (HealthKitOpsBatchRequest) async throws -> HealthKitOpsBatchResult
+    private let batchSize: Int
     private var isDraining = false
 
     init(
         store: HealthKitSyncStore,
-        postBatch: @escaping @Sendable (HealthKitOpsBatchRequest) async throws -> HealthKitOpsBatchResult
+        postBatch: @escaping @Sendable (HealthKitOpsBatchRequest) async throws -> HealthKitOpsBatchResult,
+        batchSize: Int = 50
     ) {
+        precondition(batchSize > 0)
         self.store = store
         self.postBatch = postBatch
+        self.batchSize = batchSize
     }
 
     @discardableResult
@@ -23,7 +27,7 @@ actor HealthKitSyncWorker {
         var appliedTotal = 0
         var batchIndex = 0
         while true {
-            let batch = try store.claimBatch(limit: 50)
+            let batch = try store.claimBatch(limit: batchSize)
             guard !batch.isEmpty else { break }
             guard let config = try store.configuration() else {
                 CrashReporting.healthKit(

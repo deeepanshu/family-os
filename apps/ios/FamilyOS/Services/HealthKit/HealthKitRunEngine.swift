@@ -173,7 +173,9 @@ struct HealthKitRunEngine: HealthKitRunning {
     static let fetchTimeoutSeconds: TimeInterval = 90
     static let activityInitialImportFetchTimeoutSeconds: TimeInterval = 300
     static let drainTimeoutSeconds: TimeInterval = 180
-    static let activityInitialImportDrainTimeoutSeconds: TimeInterval = 1_200
+    static let activityInitialImportDrainTimeoutSeconds: TimeInterval = 1_800
+    static let uploadBatchSize = 50
+    static let activityInitialImportUploadBatchSize = 20
 
     static func fetchTimeout(for metric: HealthKitSyncMetric, kind: HealthKitRunKind) -> TimeInterval {
         if metric == .activity, kind == .initialImport {
@@ -187,6 +189,13 @@ struct HealthKitRunEngine: HealthKitRunning {
             return activityInitialImportDrainTimeoutSeconds
         }
         return drainTimeoutSeconds
+    }
+
+    static func uploadBatchSize(for metric: HealthKitSyncMetric, kind: HealthKitRunKind) -> Int {
+        if metric == .activity, kind == .initialImport {
+            return activityInitialImportUploadBatchSize
+        }
+        return uploadBatchSize
     }
 
     let syncStore: HealthKitSyncStore
@@ -309,7 +318,11 @@ struct HealthKitRunEngine: HealthKitRunning {
 
         // 4. Drain the pending queue; readiness requires an empty queue.
         await report(metric, .uploading)
-        let worker = HealthKitSyncWorker(store: syncStore, postBatch: deps.postBatch)
+        let worker = HealthKitSyncWorker(
+            store: syncStore,
+            postBatch: deps.postBatch,
+            batchSize: Self.uploadBatchSize(for: metric, kind: kind)
+        )
         CrashReporting.healthKit(.drainStarted, group: groupKey, count: try syncStore.pendingCount(group: groupKey))
         let applied: Int
         do {

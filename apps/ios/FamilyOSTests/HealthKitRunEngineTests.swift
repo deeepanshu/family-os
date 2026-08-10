@@ -17,18 +17,30 @@ final class HealthKitRunEngineTests: XCTestCase {
         )
     }
 
-    func testActivityInitialImportUsesExtendedDrainBudget() {
+    func testActivityInitialImportUsesBoundedUploadBudget() {
         XCTAssertEqual(
             HealthKitRunEngine.drainTimeout(for: .activity, kind: .initialImport),
-            1_200
+            1_800
+        )
+        XCTAssertEqual(
+            HealthKitRunEngine.uploadBatchSize(for: .activity, kind: .initialImport),
+            20
         )
         XCTAssertEqual(
             HealthKitRunEngine.drainTimeout(for: .activity, kind: .sync),
             HealthKitRunEngine.drainTimeoutSeconds
         )
         XCTAssertEqual(
+            HealthKitRunEngine.uploadBatchSize(for: .activity, kind: .sync),
+            HealthKitRunEngine.uploadBatchSize
+        )
+        XCTAssertEqual(
             HealthKitRunEngine.drainTimeout(for: .sleep, kind: .initialImport),
             HealthKitRunEngine.drainTimeoutSeconds
+        )
+        XCTAssertEqual(
+            HealthKitRunEngine.uploadBatchSize(for: .sleep, kind: .initialImport),
+            HealthKitRunEngine.uploadBatchSize
         )
     }
 
