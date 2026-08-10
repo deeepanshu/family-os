@@ -171,7 +171,15 @@ struct HealthKitRunDependencies: Sendable {
 struct HealthKitRunEngine: HealthKitRunning {
     /// Soft timeouts so a run cannot hang forever on a HK query or upload.
     static let fetchTimeoutSeconds: TimeInterval = 90
+    static let activityInitialImportFetchTimeoutSeconds: TimeInterval = 300
     static let drainTimeoutSeconds: TimeInterval = 180
+
+    static func fetchTimeout(for metric: HealthKitSyncMetric, kind: HealthKitRunKind) -> TimeInterval {
+        if metric == .activity, kind == .initialImport {
+            return activityInitialImportFetchTimeoutSeconds
+        }
+        return fetchTimeoutSeconds
+    }
 
     let syncStore: HealthKitSyncStore
     let deps: HealthKitRunDependencies
@@ -249,7 +257,7 @@ struct HealthKitRunEngine: HealthKitRunning {
         await report(metric, .reading)
         let fetchResult: HealthKitMetricFetchResult
         do {
-            fetchResult = try await Self.withTimeout(seconds: Self.fetchTimeoutSeconds, label: "\(groupKey)_fetch") {
+            fetchResult = try await Self.withTimeout(seconds: Self.fetchTimeout(for: metric, kind: kind), label: "\(groupKey)_fetch") {
                 try await deps.fetchAndEnqueue(metric, rangeStart, rangeEnd)
             }
         } catch {

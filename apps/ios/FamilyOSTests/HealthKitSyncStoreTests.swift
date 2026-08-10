@@ -294,6 +294,41 @@ final class HealthKitSyncStoreTests: XCTestCase {
         XCTAssertEqual(samples.map(\.count), [30, 60])
     }
 
+    func testStepsSplitsServerRangeIntoContiguousSevenDayWindows() throws {
+        let start = try XCTUnwrap(HealthKitRunEngine.parseISODate("2026-05-01T00:00:00.000Z"))
+        let end = try XCTUnwrap(HealthKitRunEngine.parseISODate("2026-05-16T00:00:00.000Z"))
+
+        let windows = HealthKitStepsSync.queryWindows(from: start, through: end)
+
+        XCTAssertEqual(windows.map { $0.start }, [
+            try XCTUnwrap(HealthKitRunEngine.parseISODate("2026-05-01T00:00:00.000Z")),
+            try XCTUnwrap(HealthKitRunEngine.parseISODate("2026-05-08T00:00:00.000Z")),
+            try XCTUnwrap(HealthKitRunEngine.parseISODate("2026-05-15T00:00:00.000Z"))
+        ])
+        XCTAssertEqual(windows.map { $0.end }, [
+            try XCTUnwrap(HealthKitRunEngine.parseISODate("2026-05-08T00:00:00.000Z")),
+            try XCTUnwrap(HealthKitRunEngine.parseISODate("2026-05-15T00:00:00.000Z")),
+            end
+        ])
+    }
+
+    func testStepsCancellationDoesNotReturnPartialHourlyAggregates() async throws {
+        let start = try XCTUnwrap(HealthKitRunEngine.parseISODate("2026-05-01T00:00:00.000Z"))
+        let end = try XCTUnwrap(HealthKitRunEngine.parseISODate("2026-05-10T00:00:00.000Z"))
+
+        do {
+            _ = try await HealthKitStepsSync.fetchHourlyAggregates(from: start, through: end) { window in
+                if window.start == start {
+                    return [.init(hourStart: start, count: 12)]
+                }
+                throw CancellationError()
+            }
+            XCTFail("Expected cancellation to discard partial aggregate results")
+        } catch is CancellationError {
+            // Expected: callers can never enqueue partial results after a cancelled window.
+        }
+    }
+
     func testMarkRejectedUsesOpGroupKey() throws {
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("healthkit-reject-test-\(UUID().uuidString).sqlite")

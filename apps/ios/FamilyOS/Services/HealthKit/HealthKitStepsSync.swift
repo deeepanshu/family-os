@@ -5,6 +5,73 @@ import HealthKit
 /// UTC hour buckets. The adapter uploads aggregates only; raw HealthKit samples
 /// never leave the device.
 enum HealthKitStepsSync {
+    private final class StatisticsQueryState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var isFinished = false
+        private var store: HKHealthStore?
+        private var query: HKStatisticsCollectionQuery?
+        private var continuation: CheckedContinuation<[HKStatistics], Error>?
+
+        func installAndExecute(
+            _ query: HKStatisticsCollectionQuery,
+            store: HKHealthStore,
+            continuation: CheckedContinuation<[HKStatistics], Error>
+        ) {
+            lock.lock()
+            guard !isFinished else {
+                lock.unlock()
+                store.stop(query)
+                continuation.resume(throwing: CancellationError())
+                return
+            }
+            self.store = store
+            self.query = query
+            self.continuation = continuation
+            store.execute(query)
+            lock.unlock()
+        }
+
+        func finish(_ result: Result<[HKStatistics], Error>) {
+            lock.lock()
+            guard !isFinished else {
+                lock.unlock()
+                return
+            }
+            isFinished = true
+            store = nil
+            query = nil
+            let continuation = continuation
+            self.continuation = nil
+            lock.unlock()
+            continuation?.resume(with: result)
+        }
+
+        func cancel() {
+            lock.lock()
+            guard !isFinished else {
+                lock.unlock()
+                return
+            }
+            isFinished = true
+            let store = store
+            self.store = nil
+            let query = query
+            self.query = nil
+            let continuation = continuation
+            self.continuation = nil
+            lock.unlock()
+            if let query {
+                store?.stop(query)
+            }
+            continuation?.resume(throwing: CancellationError())
+        }
+    }
+
+    struct QueryWindow: Sendable {
+        let start: Date
+        let end: Date
+    }
+
     struct HourlyAggregate: Sendable {
         let hourStart: Date
         let count: Double
@@ -17,6 +84,35 @@ enum HealthKitStepsSync {
 
     static func naturalKey(for sample: StepHourSample) -> String {
         "steps_hour:\(sample.hourStartUtc)"
+    }
+
+    static func queryWindows(from start: Date, through end: Date) -> [QueryWindow] {
+        guard start < end else { return [] }
+
+        let windowDuration: TimeInterval = 7 * 24 * 60 * 60
+        var windows: [QueryWindow] = []
+        var windowStart = start
+        while windowStart < end {
+            let windowEnd = min(windowStart.addingTimeInterval(windowDuration), end)
+            windows.append(QueryWindow(start: windowStart, end: windowEnd))
+            windowStart = windowEnd
+        }
+        return windows
+    }
+
+    static func fetchHourlyAggregates(
+        from start: Date,
+        through end: Date,
+        fetchWindow: (QueryWindow) async throws -> [HourlyAggregate]
+    ) async throws -> [HourlyAggregate] {
+        var aggregates: [HourlyAggregate] = []
+        for window in queryWindows(from: start, through: end) {
+            try Task.checkCancellation()
+            let windowAggregates = try await fetchWindow(window)
+            try Task.checkCancellation()
+            aggregates.append(contentsOf: windowAggregates)
+        }
+        return aggregates
     }
 
     static func makeStepHourSamples(from aggregates: [HourlyAggregate]) throws -> [StepHourSample] {
@@ -59,25 +155,32 @@ enum HealthKitStepsSync {
         }
 
         let queryStart = utcHourStart(atOrBefore: start)
-        let predicate = HKQuery.predicateForSamples(withStart: queryStart, end: end, options: .strictStartDate)
-        let statistics = try await queryHourlyStatistics(
-            store: store,
-            stepType: stepType,
-            predicate: predicate,
-            anchorDate: utcEpoch(),
-            from: queryStart,
-            through: end
-        )
-
-        var aggregates: [HourlyAggregate] = []
-        aggregates.reserveCapacity(statistics.count)
-        for statistic in statistics {
-            guard let quantity = statistic.sumQuantity() else { continue }
-            let value = quantity.doubleValue(for: .count())
-            aggregates.append(HourlyAggregate(hourStart: statistic.startDate, count: value))
+        let aggregates = try await fetchHourlyAggregates(from: queryStart, through: end) { window in
+            let predicate = HKQuery.predicateForSamples(
+                withStart: window.start,
+                end: window.end,
+                options: .strictStartDate
+            )
+            let statistics = try await queryHourlyStatistics(
+                store: store,
+                stepType: stepType,
+                predicate: predicate,
+                anchorDate: utcEpoch(),
+                from: window.start,
+                through: window.end
+            )
+            return statistics.compactMap { statistic in
+                guard statistic.startDate < window.end,
+                      let quantity = statistic.sumQuantity() else { return nil }
+                return HourlyAggregate(
+                    hourStart: statistic.startDate,
+                    count: quantity.doubleValue(for: .count())
+                )
+            }
         }
 
         let samples = try makeStepHourSamples(from: aggregates)
+        try Task.checkCancellation()
 
         CrashReporting.log("healthkit_steps_hour_count=\(samples.count)")
         return samples
@@ -115,26 +218,31 @@ enum HealthKitStepsSync {
         from: Date,
         through: Date
     ) async throws -> [HKStatistics] {
-        try await withCheckedThrowingContinuation { continuation in
-            let query = HKStatisticsCollectionQuery(
-                quantityType: stepType,
-                quantitySamplePredicate: predicate,
-                options: .cumulativeSum,
-                anchorDate: anchorDate,
-                intervalComponents: DateComponents(hour: 1)
-            )
-            query.initialResultsHandler = { _, collection, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
+        let state = StatisticsQueryState()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let query = HKStatisticsCollectionQuery(
+                    quantityType: stepType,
+                    quantitySamplePredicate: predicate,
+                    options: .cumulativeSum,
+                    anchorDate: anchorDate,
+                    intervalComponents: DateComponents(hour: 1)
+                )
+                query.initialResultsHandler = { _, collection, error in
+                    if let error {
+                        state.finish(.failure(error))
+                        return
+                    }
+                    var results: [HKStatistics] = []
+                    collection?.enumerateStatistics(from: from, to: through) { statistic, _ in
+                        results.append(statistic)
+                    }
+                    state.finish(.success(results))
                 }
-                var results: [HKStatistics] = []
-                collection?.enumerateStatistics(from: from, to: through) { statistic, _ in
-                    results.append(statistic)
-                }
-                continuation.resume(returning: results)
+                state.installAndExecute(query, store: store, continuation: continuation)
             }
-            store.execute(query)
+        } onCancel: {
+            state.cancel()
         }
     }
 

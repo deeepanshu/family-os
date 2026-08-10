@@ -2,6 +2,21 @@ import XCTest
 @testable import FamilyOS
 
 final class HealthKitRunEngineTests: XCTestCase {
+    func testActivityInitialImportUsesExtendedFetchBudget() {
+        XCTAssertEqual(
+            HealthKitRunEngine.fetchTimeout(for: .activity, kind: .initialImport),
+            300
+        )
+        XCTAssertEqual(
+            HealthKitRunEngine.fetchTimeout(for: .activity, kind: .sync),
+            HealthKitRunEngine.fetchTimeoutSeconds
+        )
+        XCTAssertEqual(
+            HealthKitRunEngine.fetchTimeout(for: .sleep, kind: .initialImport),
+            HealthKitRunEngine.fetchTimeoutSeconds
+        )
+    }
+
     func testActivityInitialImportRunsTheAdapterAndCompletes() async throws {
         let recorder = RunRecorder()
         let engine = try makeEngine(
