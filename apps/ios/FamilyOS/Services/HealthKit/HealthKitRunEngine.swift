@@ -173,12 +173,20 @@ struct HealthKitRunEngine: HealthKitRunning {
     static let fetchTimeoutSeconds: TimeInterval = 90
     static let activityInitialImportFetchTimeoutSeconds: TimeInterval = 300
     static let drainTimeoutSeconds: TimeInterval = 180
+    static let activityInitialImportDrainTimeoutSeconds: TimeInterval = 1_200
 
     static func fetchTimeout(for metric: HealthKitSyncMetric, kind: HealthKitRunKind) -> TimeInterval {
         if metric == .activity, kind == .initialImport {
             return activityInitialImportFetchTimeoutSeconds
         }
         return fetchTimeoutSeconds
+    }
+
+    static func drainTimeout(for metric: HealthKitSyncMetric, kind: HealthKitRunKind) -> TimeInterval {
+        if metric == .activity, kind == .initialImport {
+            return activityInitialImportDrainTimeoutSeconds
+        }
+        return drainTimeoutSeconds
     }
 
     let syncStore: HealthKitSyncStore
@@ -305,7 +313,7 @@ struct HealthKitRunEngine: HealthKitRunning {
         CrashReporting.healthKit(.drainStarted, group: groupKey, count: try syncStore.pendingCount(group: groupKey))
         let applied: Int
         do {
-            applied = try await Self.withTimeout(seconds: Self.drainTimeoutSeconds, label: "\(groupKey)_drain") {
+            applied = try await Self.withTimeout(seconds: Self.drainTimeout(for: metric, kind: kind), label: "\(groupKey)_drain") {
                 try await worker.drain()
             }
         } catch {

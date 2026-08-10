@@ -17,6 +17,21 @@ final class HealthKitRunEngineTests: XCTestCase {
         )
     }
 
+    func testActivityInitialImportUsesExtendedDrainBudget() {
+        XCTAssertEqual(
+            HealthKitRunEngine.drainTimeout(for: .activity, kind: .initialImport),
+            1_200
+        )
+        XCTAssertEqual(
+            HealthKitRunEngine.drainTimeout(for: .activity, kind: .sync),
+            HealthKitRunEngine.drainTimeoutSeconds
+        )
+        XCTAssertEqual(
+            HealthKitRunEngine.drainTimeout(for: .sleep, kind: .initialImport),
+            HealthKitRunEngine.drainTimeoutSeconds
+        )
+    }
+
     func testActivityInitialImportRunsTheAdapterAndCompletes() async throws {
         let recorder = RunRecorder()
         let engine = try makeEngine(
