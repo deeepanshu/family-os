@@ -2,6 +2,29 @@ import XCTest
 @testable import FamilyOS
 
 final class HealthKitRunEngineTests: XCTestCase {
+    func testActivityInitialImportRunsTheAdapterAndCompletes() async throws {
+        let recorder = RunRecorder()
+        let engine = try makeEngine(
+            enabled: [.activity],
+            needsImport: [.activity],
+            descriptor: descriptor(metric: .activity, kind: .initialImport),
+            fetch: { metric, _, _ in
+                XCTAssertEqual(metric, .activity)
+                return .init(fetchedCount: 2, presentNaturalKeys: [])
+            },
+            recorder: recorder
+        )
+
+        let result = try await engine.run(.init(metric: .activity, kind: .initialImport))
+
+        XCTAssertEqual(result.metric, .activity)
+        XCTAssertEqual(result.fetchedCount, 2)
+        XCTAssertEqual(recorder.authorizationCalls, [.activity])
+        XCTAssertEqual(recorder.beginCalls, [.activity])
+        XCTAssertEqual(recorder.fetchCalls, 1)
+        XCTAssertEqual(recorder.completeCalls.map(\.metric), [.activity])
+    }
+
     func testSyncIsRejectedBeforeAuthorizationWhenHistoryImportIsRequired() async throws {
         let recorder = RunRecorder()
         let engine = try makeEngine(
@@ -125,7 +148,7 @@ final class HealthKitRunEngineTests: XCTestCase {
     func testSyncAllUsesFixedOrderSkipsImportsAndContinuesAfterFailure() async throws {
         let recorder = RunRecorder()
         let engine = try makeEngine(
-            enabled: [.vitals, .sleep, .workouts],
+            enabled: [.vitals, .sleep, .workouts, .activity],
             needsImport: [.sleep],
             fetch: { metric, _, _ in
                 if metric == .vitals {
@@ -137,14 +160,14 @@ final class HealthKitRunEngineTests: XCTestCase {
         )
 
         let outcome = await HealthKitSyncAllRunner.runAll(
-            enabledSnapshot: [.vitals, .sleep, .workouts],
+            enabledSnapshot: [.vitals, .sleep, .workouts, .activity],
             engine: engine
         )
 
         XCTAssertEqual(outcome.skipped, [.sleep])
         XCTAssertEqual(outcome.failures.map(\.metric), [.vitals])
-        XCTAssertEqual(outcome.synced.map(\.metric), [.workouts])
-        XCTAssertEqual(recorder.beginCalls, [.vitals, .workouts])
+        XCTAssertEqual(outcome.synced.map(\.metric), [.workouts, .activity])
+        XCTAssertEqual(recorder.beginCalls, [.vitals, .workouts, .activity])
     }
 
     func testRunGateRejectsConcurrentRun() async throws {
@@ -176,12 +199,12 @@ final class HealthKitRunEngineTests: XCTestCase {
 
     func testBackgroundEligibilitySkipsMetricsNeedingInitialImport() {
         let eligibility = HealthKitBackgroundSync.incrementalEligibility(
-            enabled: [.vitals, .sleep, .workouts],
+            enabled: [.activity, .vitals, .sleep, .workouts],
             needingInitialImport: [HealthKitSyncMetric.sleep.rawValue]
         )
 
         XCTAssertEqual(eligibility.eligible, [.vitals, .workouts])
-        XCTAssertEqual(eligibility.skipped, [.sleep])
+        XCTAssertEqual(eligibility.skipped, [.sleep, .activity])
     }
 
     private func makeEngine(

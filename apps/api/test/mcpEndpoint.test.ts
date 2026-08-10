@@ -220,7 +220,7 @@ describe("MCP endpoint", () => {
     // Discovery exposes exactly the three product metrics and nothing else.
     const getHealthData = tools.find((tool: { name: string }) => tool.name === "family_os.get_health_data");
     const enumValues = getHealthData?.inputSchema?.properties?.healthMetric?.enum ?? [];
-    expect([...enumValues].sort()).toEqual(["blood_pressure", "sleep", "workout"]);
+    expect([...enumValues].sort()).toEqual(["blood_pressure", "sleep", "steps", "workout"]);
   });
 
   it("calls get_health_data for an authorized profile through the MCP endpoint", async () => {

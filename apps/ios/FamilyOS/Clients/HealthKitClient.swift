@@ -72,6 +72,9 @@ struct HealthKitClient {
     /// Combined set for auth, tests, and diagnostics.
     static func readTypes(for metrics: Set<HealthKitSyncMetric>) -> Set<HKObjectType> {
         var types = Set<HKObjectType>()
+        if metrics.contains(.activity) {
+            types.formUnion(stepsReadTypes())
+        }
         if metrics.contains(.vitals) {
             types.formUnion(bloodPressureReadTypes())
             types.formUnion(pulseReadTypes())
@@ -81,6 +84,14 @@ struct HealthKitClient {
         }
         if metrics.contains(.workouts) {
             types.formUnion(workoutReadTypes())
+        }
+        return types
+    }
+
+    static func stepsReadTypes() -> Set<HKObjectType> {
+        var types = Set<HKObjectType>()
+        if let steps = HKObjectType.quantityType(forIdentifier: .stepCount) {
+            types.insert(steps)
         }
         return types
     }

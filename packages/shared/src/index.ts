@@ -361,7 +361,7 @@ export type McpSleepAttributeMetric = (typeof MCP_SLEEP_ATTRIBUTE_METRICS)[numbe
  * from the HealthKit registry: enabling a broad consent group must never
  * advertise unrelated registry metrics.
  */
-export const MCP_HEALTH_METRICS = ["blood_pressure", "sleep", "workout"] as const satisfies readonly HealthKitMetricKey[];
+export const MCP_HEALTH_METRICS = ["steps", "blood_pressure", "sleep", "workout"] as const satisfies readonly HealthKitMetricKey[];
 
 export type McpHealthMetric = (typeof MCP_HEALTH_METRICS)[number];
 
@@ -371,6 +371,7 @@ export type McpHealthMetric = (typeof MCP_HEALTH_METRICS)[number];
  * other broad-registry vital.
  */
 export const MCP_HEALTH_METRIC_FOR_PRODUCT_GROUP = {
+  activity: "steps",
   vitals: "blood_pressure",
   sleep: "sleep",
   workouts: "workout"
@@ -389,6 +390,7 @@ export function mcpHealthMetricsForEnabledGroups(enabledGroups: readonly HealthK
 }
 
 export type McpHealthViewType =
+  | "hourly_count_series"
   | "daily_duration_series"
   | "daily_reading_table"
   | "workout_table";
@@ -453,6 +455,11 @@ export type McpSleepPoint = {
   breathingDisturbanceCount?: number;
 };
 
+export type McpStepHourPoint = {
+  hourStartUtc: string;
+  count: number;
+};
+
 export type McpBloodPressureReadingRow = {
   localDate: string;
   localTime: string;
@@ -495,6 +502,12 @@ export type McpHealthDataBase = {
   lastSyncedAt?: string;
 };
 
+export type McpHourlyCountSeriesResult = McpHealthDataBase & {
+  viewType: "hourly_count_series";
+  healthMetric: "steps";
+  points: McpStepHourPoint[];
+};
+
 export type McpDailyDurationSeriesResult = McpHealthDataBase & {
   viewType: "daily_duration_series";
   healthMetric: "sleep";
@@ -516,6 +529,7 @@ export type McpWorkoutTableResult = McpHealthDataBase & {
 };
 
 export type McpGetHealthDataResult =
+  | McpHourlyCountSeriesResult
   | McpDailyDurationSeriesResult
   | McpDailyReadingTableResult
   | McpWorkoutTableResult;

@@ -376,6 +376,13 @@ struct HealthKitRunEngine: HealthKitRunning {
     ) -> @Sendable (HealthKitSyncMetric, Date, Date) async throws -> HealthKitMetricFetchResult {
         { metric, from, through in
             switch metric {
+            case .activity:
+                let samples = try await HealthKitStepsSync.fetchStepHours(from: from, through: through)
+                try HealthKitStepsSync.enqueueSamples(samples, into: syncStore)
+                return HealthKitMetricFetchResult(
+                    fetchedCount: samples.count,
+                    presentNaturalKeys: samples.map { HealthKitStepsSync.naturalKey(for: $0) }
+                )
             case .vitals:
                 let samples = try await HealthKitBloodPressureSync.fetchBloodPressure(from: from, through: through)
                 try HealthKitBloodPressureSync.enqueueSamples(samples, into: syncStore)
@@ -481,8 +488,8 @@ struct HealthKitSyncAllOutcome: Sendable {
 }
 
 enum HealthKitSyncAllRunner {
-    /// Fixed order: Blood pressure -> Sleep -> Workouts (plan §4.4).
-    static let metricOrder: [HealthKitSyncMetric] = [.vitals, .sleep, .workouts]
+    /// Fixed order: Vitals -> Sleep -> Workouts -> Activity.
+    static let metricOrder: [HealthKitSyncMetric] = [.vitals, .sleep, .workouts, .activity]
 
     /// Runs routine sync for the immutable enabled snapshot taken at command
     /// start. Enabled metrics whose initial import is incomplete are skipped —
@@ -537,6 +544,7 @@ extension HealthKitSyncMetric {
     /// Registry scope key for telemetry (never sample values).
     var scopeMetricKey: String {
         switch self {
+        case .activity: return "steps"
         case .vitals: return "blood_pressure"
         case .sleep: return "sleep"
         case .workouts: return "workout"

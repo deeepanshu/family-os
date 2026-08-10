@@ -5,7 +5,7 @@ import {
   MCP_HEALTH_METRIC_FOR_PRODUCT_GROUP,
   mcpHealthMetricsForEnabledGroups
 } from "@family-os/shared";
-import { bloodPressureOp, seedHealthKitReadyGroup, sleepDayOp, beginRun, postOps } from "./healthKitTestHelpers";
+import { bloodPressureOp, seedHealthKitReadyGroup, sleepDayOp, stepsHourOp, beginRun, postOps } from "./healthKitTestHelpers";
 import { SignJWT } from "jose";
 import { createApp } from "../src/app";
 import { HealthMcpReadService } from "../src/mcp/HealthMcpReadService";
@@ -56,7 +56,11 @@ const workoutOp = {
   }
 };
 
-async function seedUserWithHealthData(repo: InMemoryFamilyRepository, subject: string) {
+async function seedUserWithHealthData(
+  repo: InMemoryFamilyRepository,
+  subject: string,
+  options: { readyActivity?: boolean } = {}
+) {
   const api = createApp({
     config: {
       NODE_ENV: "test",
@@ -93,7 +97,7 @@ async function seedUserWithHealthData(repo: InMemoryFamilyRepository, subject: s
     body: JSON.stringify({
       personId: profileId,
       consentVersion: "2026-07-18",
-      enabledGroups: ["sleep", "vitals", "workouts"],
+      enabledGroups: ["activity", "sleep", "vitals", "workouts"],
       healthTimezone: "UTC",
       installationId
     })
@@ -102,6 +106,12 @@ async function seedUserWithHealthData(repo: InMemoryFamilyRepository, subject: s
   await seedHealthKitReadyGroup(api, token, profileId, installationId, "sleep", [
     sleepDayOp("2026-07-16")
   ]);
+
+  if (options.readyActivity !== false) {
+    await seedHealthKitReadyGroup(api, token, profileId, installationId, "activity", [
+      stepsHourOp("2026-07-16T09:00:00.000Z", 1_234)
+    ]);
+  }
 
   await seedHealthKitReadyGroup(api, token, profileId, installationId, "vitals", [
     bloodPressureOp({
@@ -130,25 +140,27 @@ async function serviceFor(repo: InMemoryFamilyRepository, options: { allowedOAut
 }
 
 describe("MCP product allowlist contract", () => {
-  it("exposes exactly blood_pressure, sleep, and workout", () => {
-    expect([...MCP_HEALTH_METRICS].sort()).toEqual(["blood_pressure", "sleep", "workout"]);
+  it("exposes exactly steps, blood_pressure, sleep, and workout", () => {
+    expect([...MCP_HEALTH_METRICS].sort()).toEqual(["blood_pressure", "sleep", "steps", "workout"]);
   });
 
-  it("maps each enabled app toggle to exactly one MCP metric", () => {
+  it("maps each enabled app toggle to its explicit MCP metric", () => {
     expect(MCP_HEALTH_METRIC_FOR_PRODUCT_GROUP).toEqual({
+      activity: "steps",
       vitals: "blood_pressure",
       sleep: "sleep",
       workouts: "workout"
     });
+    expect(mcpHealthMetricsForEnabledGroups(["activity"])).toEqual(["steps"]);
     expect(mcpHealthMetricsForEnabledGroups(["vitals"])).toEqual(["blood_pressure"]);
     expect(mcpHealthMetricsForEnabledGroups(["sleep"])).toEqual(["sleep"]);
     expect(mcpHealthMetricsForEnabledGroups(["workouts"])).toEqual(["workout"]);
     // Broad groups never expand into registry metrics.
-    expect(mcpHealthMetricsForEnabledGroups(["activity", "body", "mobility", "mindfulness_environment", "nutrition"])).toEqual([]);
+    expect(mcpHealthMetricsForEnabledGroups(["body", "mobility", "mindfulness_environment", "nutrition"])).toEqual([]);
   });
 
   it("rejects unknown and previously registry-derived metrics", () => {
-    for (const metric of ["steps", "heart_rate", "blood_glucose", "oxygen_saturation", "export.xml", "steps'; drop table"]) {
+    for (const metric of ["heart_rate", "blood_glucose", "oxygen_saturation", "export.xml", "steps'; drop table"]) {
       try {
         resolveMetricQuery({ healthMetric: metric, rangeDays: 7 });
         throw new Error(`expected ${metric} to be rejected`);
@@ -184,10 +196,36 @@ describe("MCP product allowlist contract", () => {
 });
 
 describe("HealthMcpReadService", () => {
-  it("returns authorized blood pressure, sleep, and workout data and records an audit event", async () => {
+  it("withholds enabled Steps until the Activity import is ready", async () => {
+    const repo = new InMemoryFamilyRepository();
+    const { profileId } = await seedUserWithHealthData(repo, userId, { readyActivity: false });
+    const service = await serviceFor(repo);
+
+    const listed = await service.listAuthorizedProfiles({ userId, oauthClientId });
+    expect(listed.profiles[0]?.availableMetrics).not.toContain("steps");
+    await expect(
+      service.getHealthData(
+        { userId, oauthClientId },
+        { personId: profileId, healthMetric: "steps", rangeDays: 30, timezone: "UTC" }
+      )
+    ).rejects.toMatchObject({ status: 409, code: "healthkit_sync_incomplete" });
+  });
+
+  it("returns authorized steps, blood pressure, sleep, and workout data and records an audit event", async () => {
     const repo = new InMemoryFamilyRepository();
     const { profileId } = await seedUserWithHealthData(repo, userId);
     const service = await serviceFor(repo);
+
+    const steps = await service.getHealthData(
+      { userId, oauthClientId },
+      { personId: profileId, healthMetric: "steps", rangeDays: 30, timezone: "UTC" }
+    );
+    expect(steps).toMatchObject({
+      healthMetric: "steps",
+      viewType: "hourly_count_series",
+      unit: "count",
+      points: [{ hourStartUtc: "2026-07-16T09:00:00.000Z", count: 1_234 }]
+    });
 
     const bp = await service.getHealthData(
       { userId, oauthClientId, correlationId: "corr-1" },
@@ -298,8 +336,8 @@ describe("HealthMcpReadService", () => {
     const listed = await service.listAuthorizedProfiles({ userId, oauthClientId });
     expect(listed.profiles.length).toBeGreaterThanOrEqual(1);
     expect(listed.profiles[0]?.label).toBeTruthy();
-    // Seed enables sleep + vitals + workouts → exactly the three product metrics.
-    expect(listed.profiles[0]?.availableMetrics).toEqual(["blood_pressure", "sleep", "workout"]);
+    // Seed enables Activity + Vitals + Sleep + Workouts, each with its explicit product metric.
+    expect(listed.profiles[0]?.availableMetrics).toEqual(["steps", "blood_pressure", "sleep", "workout"]);
     expect(JSON.stringify(listed)).not.toContain("disclaimer");
     expect(JSON.stringify(listed)).not.toContain("familyId");
     expect(JSON.stringify(listed)).not.toContain("dateOfBirth");

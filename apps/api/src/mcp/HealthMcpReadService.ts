@@ -99,6 +99,13 @@ export class HealthMcpReadService {
         input.personId,
         query.metric
       );
+      if (query.metric === "steps" && freshness.status !== "ready") {
+        throw new HttpError(
+          409,
+          "healthkit_sync_incomplete",
+          "Steps are still importing. Complete Activity Import history in Family OS before querying Steps."
+        );
+      }
       const healthTimezone = freshness.healthTimezone || "UTC";
       // Sleep-day and coverage windows use the profile health timezone; request timezone is presentation-only.
       const rangeTimezone = query.metric === "sleep" ? healthTimezone : presentationTimezone;
@@ -130,6 +137,23 @@ export class HealthMcpReadService {
         timezone: presentationTimezone,
         lastSyncedAt: freshness.lastSuccessfulAt
       };
+
+      if (query.metric === "steps") {
+        const { points, daysWithData } = await this.loadStepHourSeries(
+          caller.userId,
+          input.personId,
+          rangeStart,
+          rangeEnd,
+          presentationTimezone
+        );
+        return {
+          ...base,
+          healthMetric: "steps",
+          viewType: "hourly_count_series",
+          coverage: { ...coverage, daysWithData },
+          points
+        };
+      }
 
       if (query.metric === "sleep") {
         const points = await this.loadDailySleepHours(caller.userId, input.personId, rangeStart, rangeEnd);
@@ -200,7 +224,15 @@ export class HealthMcpReadService {
   private async availableMetricsForProfile(userId: string, personId: string): Promise<McpHealthMetric[]> {
     try {
       const settings = await this.deps.healthKit.getHealthKitSettings(userId, personId);
-      return mcpHealthMetricsForEnabledGroups(settings.enabledGroups);
+      const enabled = mcpHealthMetricsForEnabledGroups(settings.enabledGroups);
+      const readiness = await Promise.all(
+        enabled.map(async (metric) => {
+          if (metric !== "steps") return metric;
+          const freshness = await this.deps.healthKit.getHealthMetricFreshness(userId, personId, metric);
+          return freshness.status === "ready" ? metric : null;
+        })
+      );
+      return readiness.filter((metric): metric is McpHealthMetric => metric !== null);
     } catch (error) {
       if (error instanceof HttpError) {
         // Self-only settings, missing profile, or no HealthKit config → advertise nothing.
@@ -319,6 +351,26 @@ export class HealthMcpReadService {
           pulse: reading.pulse
         };
       })
+    };
+  }
+
+  private async loadStepHourSeries(
+    userId: string,
+    personId: string,
+    rangeStart: string,
+    rangeEnd: string,
+    timezone: string
+  ) {
+    const { start, end } = expandedInstantRange(rangeStart, rangeEnd);
+    const rows = await this.deps.healthKit.listStepHours(userId, personId, start, end);
+    const points = rows
+      .filter((row) => isDateInInclusiveRange(localDateString(new Date(row.hourStartUtc), timezone), rangeStart, rangeEnd))
+      .map((row) => ({ hourStartUtc: row.hourStartUtc, count: row.count }));
+    return {
+      points,
+      daysWithData: countDistinctDaysFromBuckets(
+        points.map((point) => localDateString(new Date(point.hourStartUtc), timezone))
+      )
     };
   }
 

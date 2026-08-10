@@ -12,6 +12,10 @@ import HealthKit
 enum HealthKitBackgroundSync {
     static let taskIdentifier = "com.deepanshujain.familyos.healthkit-sync"
 
+    /// Steps ships foreground-only first. Do not let adding a foreground metric
+    /// widen the existing bounded background sync path.
+    private static let backgroundMetrics: Set<HealthKitSyncMetric> = [.vitals, .sleep, .workouts]
+
     private static let healthStore = HKHealthStore()
 
     /// Mutable observer bookkeeping — `@unchecked Sendable` + lock (never touch from MainActor isolation).
@@ -73,9 +77,9 @@ enum HealthKitBackgroundSync {
         }
         #endif
 
-        let enabled = metrics.intersection(HealthKitSyncMetric.productMetrics)
+        let enabled = metrics.intersection(backgroundMetrics)
         let wantedTypes = Set(backgroundTypes(for: enabled))
-        let allTypes = Set(backgroundTypes(for: HealthKitSyncMetric.productMetrics))
+        let allTypes = Set(backgroundTypes(for: backgroundMetrics))
         let unwantedTypes = allTypes.subtracting(wantedTypes)
 
         // Stop observing / delivering types no longer enabled.
@@ -415,10 +419,10 @@ enum HealthKitBackgroundSync {
         needingInitialImport: Set<String>
     ) -> (eligible: [HealthKitSyncMetric], skipped: [HealthKitSyncMetric]) {
         let eligible = HealthKitSyncAllRunner.metricOrder.filter {
-            enabled.contains($0) && !needingInitialImport.contains($0.rawValue)
+            backgroundMetrics.contains($0) && enabled.contains($0) && !needingInitialImport.contains($0.rawValue)
         }
         let skipped = HealthKitSyncAllRunner.metricOrder.filter {
-            enabled.contains($0) && needingInitialImport.contains($0.rawValue)
+            enabled.contains($0) && (!backgroundMetrics.contains($0) || needingInitialImport.contains($0.rawValue))
         }
         return (eligible, skipped)
     }

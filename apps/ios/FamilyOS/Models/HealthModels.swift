@@ -116,10 +116,10 @@ enum HealthKitSyncMetric: String, Codable, CaseIterable, Identifiable, Sendable 
     static let steps = HealthKitSyncMetric.activity
     static let bloodPressure = HealthKitSyncMetric.vitals
 
-    /// The only groups with an implemented product surface in this release
-    /// (app labels: Blood pressure, Sleep, Workouts). Nonisolated so background
-    /// paths and the run engine can use it without MainActor hops.
-    static let productMetrics: Set<HealthKitSyncMetric> = [.vitals, .sleep, .workouts]
+    /// The groups with an implemented foreground product surface in this release.
+    /// Activity is deliberately Steps-only; background delivery remains separate.
+    /// Nonisolated so the run engine can use it without MainActor hops.
+    static let productMetrics: Set<HealthKitSyncMetric> = [.activity, .vitals, .sleep, .workouts]
 
     var id: String { rawValue }
 

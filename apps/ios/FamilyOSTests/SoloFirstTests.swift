@@ -272,15 +272,23 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertTrue(ids.contains("SleepAnalysis"))
     }
 
-    func testHealthKitImplementedSyncMetricsIncludeVitalsSleepWorkouts() {
+    func testHealthKitImplementedSyncMetricsIncludeActivityVitalsSleepAndWorkouts() {
         XCTAssertEqual(
             HealthKitSyncStateViewModel.implementedSyncMetrics,
-            [.vitals, .sleep, .workouts]
+            [.activity, .vitals, .sleep, .workouts]
         )
-        let all = HealthKitClient.readTypes(for: [.vitals, .sleep, .workouts])
-        XCTAssertTrue(all.count >= 5) // BP sys/dia, HR, sleep, workout
+        let activity = HealthKitClient.readTypes(for: [.activity])
+        let all = HealthKitClient.readTypes(for: [.activity, .vitals, .sleep, .workouts])
+        let stepCount = HKObjectType.quantityType(forIdentifier: .stepCount)
+        XCTAssertEqual(activity.count, 1)
+        if let stepCount {
+            XCTAssertTrue(activity.contains(stepCount))
+        }
+        XCTAssertTrue(all.count >= 6) // steps, BP sys/dia, HR, sleep, workout
         // Single combined set is what one-shot auth uses.
-        XCTAssertEqual(all, HealthKitClient.readTypes(for: [.vitals]).union(
+        XCTAssertEqual(all, HealthKitClient.readTypes(for: [.activity]).union(
+            HealthKitClient.readTypes(for: [.vitals])
+        ).union(
             HealthKitClient.readTypes(for: [.sleep])
         ).union(HealthKitClient.readTypes(for: [.workouts])))
     }

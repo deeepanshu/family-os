@@ -227,6 +227,73 @@ final class HealthKitSyncStoreTests: XCTestCase {
         XCTAssertEqual(object?["totalMinutes"] as? Int, 420)
     }
 
+    func testStepsHourPayloadEnqueueAndEncode() throws {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("healthkit-steps-test-\(UUID().uuidString).sqlite")
+            .path
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let store = try HealthKitSyncStore(path: path)
+        let samples = [
+            HealthKitStepsSync.StepHourSample(
+                hourStartUtc: "2026-08-01T14:00:00.000Z",
+                count: 1_234
+            )
+        ]
+
+        try HealthKitStepsSync.enqueueSamples(samples, into: store)
+
+        let batch = try store.claimBatch(limit: 10)
+        XCTAssertEqual(batch.count, 1)
+        XCTAssertEqual(batch[0].naturalKey, "steps_hour:2026-08-01T14:00:00.000Z")
+        XCTAssertEqual(batch[0].groupKey, "activity")
+        XCTAssertEqual(batch[0].scopeKey, "steps")
+
+        let data = try XCTUnwrap(batch[0].payloadJSON?.data(using: .utf8))
+        let payload = try JSONDecoder().decode(HealthKitOpPayloadWire.self, from: data)
+        guard case let .stepsHour(hourStartUtc, count) = payload else {
+            return XCTFail("Expected steps_hour payload")
+        }
+        XCTAssertEqual(hourStartUtc, "2026-08-01T14:00:00.000Z")
+        XCTAssertEqual(count, 1_234)
+    }
+
+    func testStepsMapsUtcHoursAcrossMidnightAndSkipsZeroBuckets() throws {
+        let firstHour = try XCTUnwrap(HealthKitRunEngine.parseISODate("2026-08-01T23:00:00.000Z"))
+        let midnight = try XCTUnwrap(HealthKitRunEngine.parseISODate("2026-08-02T00:00:00.000Z"))
+        let nextHour = try XCTUnwrap(HealthKitRunEngine.parseISODate("2026-08-02T01:00:00.000Z"))
+
+        let samples = try HealthKitStepsSync.makeStepHourSamples(from: [
+            .init(hourStart: firstHour, count: 120),
+            .init(hourStart: midnight, count: 0),
+            .init(hourStart: nextHour, count: 45)
+        ])
+
+        XCTAssertEqual(samples.map(HealthKitStepsSync.naturalKey(for:)), [
+            "steps_hour:2026-08-01T23:00:00.000Z",
+            "steps_hour:2026-08-02T01:00:00.000Z"
+        ])
+        XCTAssertEqual(samples.map(\.count), [120, 45])
+    }
+
+    func testStepsSkipsInvalidHourlyAggregateWithoutDiscardingOtherHours() throws {
+        let firstHour = try XCTUnwrap(HealthKitRunEngine.parseISODate("2026-08-01T08:00:00.000Z"))
+        let invalidHour = try XCTUnwrap(HealthKitRunEngine.parseISODate("2026-08-01T09:00:00.000Z"))
+        let lastHour = try XCTUnwrap(HealthKitRunEngine.parseISODate("2026-08-01T10:00:00.000Z"))
+
+        let samples = try HealthKitStepsSync.makeStepHourSamples(from: [
+            .init(hourStart: firstHour, count: 30),
+            .init(hourStart: invalidHour, count: .nan),
+            .init(hourStart: lastHour, count: 60)
+        ])
+
+        XCTAssertEqual(samples.map(\.hourStartUtc), [
+            "2026-08-01T08:00:00.000Z",
+            "2026-08-01T10:00:00.000Z"
+        ])
+        XCTAssertEqual(samples.map(\.count), [30, 60])
+    }
+
     func testMarkRejectedUsesOpGroupKey() throws {
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("healthkit-reject-test-\(UUID().uuidString).sqlite")

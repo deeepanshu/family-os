@@ -24,6 +24,9 @@ function entryFor(metric: McpHealthMetric): MetricRegistryEntry {
   if (metric === "sleep") {
     return { metric, unit: "hours", maxRangeDays: DEFAULT_MAX_DAYS, defaultViewType: "daily_duration_series" };
   }
+  if (metric === "steps") {
+    return { metric, unit: definition.unit, maxRangeDays: DEFAULT_MAX_DAYS, defaultViewType: "hourly_count_series" };
+  }
   if (definition.storage === "blood_pressure") {
     return {
       metric,
