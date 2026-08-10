@@ -236,6 +236,12 @@ enum HealthKitBackgroundSync {
     }
 
     /// Lightweight path for app become-active: drain pending ops if config exists (no import).
+    static func foregroundDrainBatchSize(hasPendingActivity: Bool) -> Int {
+        hasPendingActivity
+            ? HealthKitRunEngine.activityInitialImportUploadBatchSize
+            : HealthKitRunEngine.uploadBatchSize
+    }
+
     static func drainIfConfigured() async {
         do {
             let store = try HealthKitSyncStore.shared
@@ -249,13 +255,18 @@ enum HealthKitBackgroundSync {
             }
             let baseURL = loadBaseURL()
             let client = HealthAPIClient()
-            let worker = HealthKitSyncWorker(store: store) { batch in
-                try await client.postHealthKitOpsBatch(
-                    baseURL: baseURL,
-                    accessToken: token,
-                    body: batch
-                )
-            }
+            let hasPendingActivity = try store.pendingCount(group: "activity") > 0
+            let worker = HealthKitSyncWorker(
+                store: store,
+                postBatch: { batch in
+                    try await client.postHealthKitOpsBatch(
+                        baseURL: baseURL,
+                        accessToken: token,
+                        body: batch
+                    )
+                },
+                batchSize: foregroundDrainBatchSize(hasPendingActivity: hasPendingActivity)
+            )
             let applied = try await worker.drain()
             CrashReporting.healthKit(
                 .drainFinished,

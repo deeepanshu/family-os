@@ -44,6 +44,14 @@ final class HealthKitRunEngineTests: XCTestCase {
         )
     }
 
+    func testForegroundDrainUsesConservativeBatchSizeWhenActivityIsPending() {
+        XCTAssertEqual(HealthKitBackgroundSync.foregroundDrainBatchSize(hasPendingActivity: true), 20)
+        XCTAssertEqual(
+            HealthKitBackgroundSync.foregroundDrainBatchSize(hasPendingActivity: false),
+            HealthKitRunEngine.uploadBatchSize
+        )
+    }
+
     func testActivityInitialImportRunsTheAdapterAndCompletes() async throws {
         let recorder = RunRecorder()
         let engine = try makeEngine(
