@@ -139,6 +139,50 @@ final class HealthKitRunEngineTests: XCTestCase {
         XCTAssertNil(recorder.completeCalls[0].manifest)
     }
 
+    func testEmptyBloodPressureSyncLeavesOtherMetricUploadsQueued() async throws {
+        let recorder = RunRecorder()
+        let (engine, store) = try makeEngineAndStore(
+            enabled: [.vitals],
+            needsImport: [],
+            descriptor: descriptor(metric: .vitals, kind: .sync),
+            recorder: recorder,
+            postBatch: { request in
+                recorder.uploadedGroups.append(contentsOf: request.ops.map(\.group))
+                return .init(
+                    results: request.ops.map {
+                        .init(opId: $0.opId, result: "applied", errorCode: nil, errorMessage: nil)
+                    }
+                )
+            }
+        )
+        try store.enqueue(ops: [
+            .init(
+                opId: UUID().uuidString.lowercased(),
+                naturalKey: "steps_hour:2026-08-15T00:00:00.000Z",
+                groupKey: "activity",
+                scopeKey: "steps",
+                op: "upsert",
+                payloadJSON: nil
+            ),
+            .init(
+                opId: UUID().uuidString.lowercased(),
+                naturalKey: "sleep_day:2026-08-15",
+                groupKey: "sleep",
+                scopeKey: "sleep",
+                op: "upsert",
+                payloadJSON: nil
+            )
+        ])
+
+        let result = try await engine.run(.init(metric: .vitals, kind: .sync))
+
+        XCTAssertEqual(result.fetchedCount, 0)
+        XCTAssertEqual(result.appliedCount, 0)
+        XCTAssertEqual(recorder.uploadedGroups, [])
+        XCTAssertEqual(try store.pendingCount(group: "activity"), 1)
+        XCTAssertEqual(try store.pendingCount(group: "sleep"), 1)
+    }
+
     func testEmptyBloodPressureRepairFailsBeforeCompletion() async throws {
         let recorder = RunRecorder()
         let engine = try makeEngine(
@@ -266,6 +310,25 @@ final class HealthKitRunEngineTests: XCTestCase {
         },
         recorder: RunRecorder
     ) throws -> HealthKitRunEngine {
+        try makeEngineAndStore(
+            enabled: enabled,
+            needsImport: needsImport,
+            descriptor: descriptor,
+            fetch: fetch,
+            recorder: recorder
+        ).engine
+    }
+
+    private func makeEngineAndStore(
+        enabled: Set<HealthKitSyncMetric>,
+        needsImport: Set<HealthKitSyncMetric>,
+        descriptor: HealthKitRunDescriptorWire? = nil,
+        fetch: @escaping @Sendable (HealthKitSyncMetric, Date, Date) async throws -> HealthKitMetricFetchResult = { _, _, _ in
+            .init(fetchedCount: 0, presentNaturalKeys: [])
+        },
+        recorder: RunRecorder,
+        postBatch: @escaping @Sendable (HealthKitOpsBatchRequest) async throws -> HealthKitOpsBatchResult = { _ in .init(results: []) }
+    ) throws -> (engine: HealthKitRunEngine, store: HealthKitSyncStore) {
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("healthkit-run-engine-\(UUID().uuidString).sqlite")
         addTeardownBlock { try? FileManager.default.removeItem(at: path) }
@@ -289,7 +352,7 @@ final class HealthKitRunEngineTests: XCTestCase {
                     needsInitialImport: false
                 )
             },
-            postBatch: { _ in .init(results: []) },
+            postBatch: postBatch,
             ensureAuth: { metric in recorder.authorizationCalls.append(metric) },
             fetchAndEnqueue: { metric, from, through in
                 recorder.fetchCalls += 1
@@ -298,7 +361,7 @@ final class HealthKitRunEngineTests: XCTestCase {
             isEnabled: { enabled.contains($0) },
             needsInitialImport: { needsImport.contains($0) }
         )
-        return HealthKitRunEngine(syncStore: store, deps: deps)
+        return (HealthKitRunEngine(syncStore: store, deps: deps), store)
     }
 
     private func descriptor(
@@ -316,6 +379,7 @@ private final class RunRecorder: @unchecked Sendable {
     var authorizationCalls: [HealthKitSyncMetric] = []
     var beginCalls: [HealthKitSyncMetric] = []
     var completeCalls: [(metric: HealthKitSyncMetric, kind: HealthKitRunKind, manifest: [String]?)] = []
+    var uploadedGroups: [String] = []
     var fetchedRange: (Date, Date)?
     var fetchCalls = 0
 }

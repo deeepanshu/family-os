@@ -327,7 +327,7 @@ struct HealthKitRunEngine: HealthKitRunning {
         let applied: Int
         do {
             applied = try await Self.withTimeout(seconds: Self.drainTimeout(for: metric, kind: kind), label: "\(groupKey)_drain") {
-                try await worker.drain()
+                try await worker.drain(group: groupKey)
             }
         } catch {
             CrashReporting.healthKitNonFatal(

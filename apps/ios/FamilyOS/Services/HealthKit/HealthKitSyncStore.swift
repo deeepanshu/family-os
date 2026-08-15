@@ -299,20 +299,35 @@ final class HealthKitSyncStore: @unchecked Sendable {
         }
     }
 
-    /// Claim up to `limit` pending ops for upload (serialized drain).
-    func claimBatch(limit: Int = 50) throws -> [PendingOpRecord] {
+    /// Claim up to `limit` pending ops for upload (serialized drain). Supplying
+    /// a group keeps a foreground metric command from uploading other metrics.
+    func claimBatch(group: String? = nil, limit: Int = 50) throws -> [PendingOpRecord] {
         let now = Date().timeIntervalSince1970
         return try dbQueue.write { db in
-            let rows = try Row.fetchAll(
-                db,
-                sql: """
-                    SELECT * FROM pending_ops
-                    WHERE status = 'pending' AND next_attempt_at <= ?
-                    ORDER BY created_at ASC
-                    LIMIT ?
-                    """,
-                arguments: [now, limit]
-            )
+            let rows: [Row]
+            if let group {
+                rows = try Row.fetchAll(
+                    db,
+                    sql: """
+                        SELECT * FROM pending_ops
+                        WHERE group_key = ? AND status = 'pending' AND next_attempt_at <= ?
+                        ORDER BY created_at ASC
+                        LIMIT ?
+                        """,
+                    arguments: [group, now, limit]
+                )
+            } else {
+                rows = try Row.fetchAll(
+                    db,
+                    sql: """
+                        SELECT * FROM pending_ops
+                        WHERE status = 'pending' AND next_attempt_at <= ?
+                        ORDER BY created_at ASC
+                        LIMIT ?
+                        """,
+                    arguments: [now, limit]
+                )
+            }
             var claimed: [PendingOpRecord] = []
             for row in rows {
                 let opId: String = row["op_id"]
