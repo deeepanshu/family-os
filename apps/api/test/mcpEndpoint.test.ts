@@ -92,7 +92,8 @@ async function seedWithBloodPressure(repo: InMemoryFamilyRepository, subject: st
   await seedHealthKitReadyGroup(api, token, profileId, installationId, "vitals", [
     bloodPressureOp({
       sourceObjectKey: "5e1ed621-4a6c-4e09-969e-31c6f0872c24",
-      measuredAtUtc: "2026-07-15T08:00:00.000Z",
+      // Keep this inside the MCP 30-day window; a fixed July date ages out.
+      measuredAtUtc: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
       systolic: 122,
       diastolic: 79
     })
