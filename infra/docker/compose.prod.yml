@@ -21,6 +21,9 @@ services:
       - ../../.env
     entrypoint: ["/app/scripts/docker-migrate.sh"]
     restart: "no"
+    networks:
+      - default
+      - homelab
 
   health-api:
     <<: *family-os-image
@@ -43,7 +46,10 @@ services:
     networks:
       - default
       - observability
+      - homelab
 
 networks:
   observability:
+    external: true
+  homelab:
     external: true

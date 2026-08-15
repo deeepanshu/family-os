@@ -67,6 +67,22 @@ runtime as a separate container, bound only to Pi loopback port `3002`.
 The Cloudflare Tunnel ingress for `familyos.deepanshujain.me` must route to
 `http://localhost:3002`.
 
+## Database (homelab Postgres)
+
+Application data lives on the shared Pi Postgres (`homelab-postgres` on the
+external Docker network `homelab`). Auth stays on Supabase.
+
+See the `db/` tree in [deeepanshu/homelab](https://github.com/deeepanshu/homelab).
+
+`DATABASE_URL` in `.env` must use the Docker DNS name, not `localhost`:
+
+```text
+DATABASE_URL=postgres://family_os:<password>@homelab-postgres:5432/family_os
+HEALTH_API_SYNC_LOCAL_AUTH_USERS=true
+```
+
+Keep the previous Supabase `DATABASE_URL` in `.env.supabase.bak` for rollback.
+
 ## Observability (OTLP → Grafana)
 
 Production compose attaches both API and MCP to the external Docker network

@@ -30,7 +30,10 @@ services:
     networks:
       - default
       - observability
+      - homelab
 
 networks:
   observability:
+    external: true
+  homelab:
     external: true
