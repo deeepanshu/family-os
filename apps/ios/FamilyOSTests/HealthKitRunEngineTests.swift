@@ -155,7 +155,25 @@ final class HealthKitRunEngineTests: XCTestCase {
                 )
             }
         )
+        // Drain marks claimed ops for backoff and never posts when configuration
+        // is missing, so the unscoped pre-fix path would still pass without this.
+        try store.saveConfiguration(
+            userId: "user",
+            personId: "person",
+            installationId: "install",
+            healthTimezone: "UTC",
+            timezoneVersion: 1,
+            enabledGroups: ["vitals", "activity", "sleep"]
+        )
         try store.enqueue(ops: [
+            .init(
+                opId: UUID().uuidString.lowercased(),
+                naturalKey: "blood_pressure:cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                groupKey: "vitals",
+                scopeKey: "blood_pressure",
+                op: "upsert",
+                payloadJSON: nil
+            ),
             .init(
                 opId: UUID().uuidString.lowercased(),
                 naturalKey: "steps_hour:2026-08-15T00:00:00.000Z",
@@ -177,8 +195,9 @@ final class HealthKitRunEngineTests: XCTestCase {
         let result = try await engine.run(.init(metric: .vitals, kind: .sync))
 
         XCTAssertEqual(result.fetchedCount, 0)
-        XCTAssertEqual(result.appliedCount, 0)
-        XCTAssertEqual(recorder.uploadedGroups, [])
+        XCTAssertEqual(result.appliedCount, 1)
+        XCTAssertEqual(recorder.uploadedGroups, ["vitals"])
+        XCTAssertEqual(try store.pendingCount(group: "vitals"), 0)
         XCTAssertEqual(try store.pendingCount(group: "activity"), 1)
         XCTAssertEqual(try store.pendingCount(group: "sleep"), 1)
     }
