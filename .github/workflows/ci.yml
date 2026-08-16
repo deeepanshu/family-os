@@ -53,18 +53,7 @@ jobs:
         run: npm ci
 
       - name: Start Postgres
-        run: docker compose up -d postgres
-
-      - name: Wait for Postgres
-        run: |
-          for i in $(seq 1 30); do
-            if docker exec family-os-postgres pg_isready -U family_os -d family_os; then
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Postgres did not become ready in time"
-          exit 1
+        run: docker compose up -d --wait postgres
 
       - name: Run local migrations
         run: npm run db:migrate:local
@@ -98,18 +87,7 @@ jobs:
         run: npm ci
 
       - name: Start Postgres
-        run: docker compose up -d postgres
-
-      - name: Wait for Postgres
-        run: |
-          for i in $(seq 1 30); do
-            if docker exec family-os-postgres pg_isready -U family_os -d family_os; then
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Postgres did not become ready in time"
-          exit 1
+        run: docker compose up -d --wait postgres
 
       - name: Check migrations
         run: npm run db:check
