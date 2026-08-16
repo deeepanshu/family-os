@@ -23,6 +23,7 @@ export const familyMemberships = pgTable(
       .references(() => families.id, { onDelete: "cascade" }),
     userId: uuid("user_id").notNull(),
     role: text("role", { enum: ["manager", "member"] }).notNull(),
+    creatorRelationshipLabel: text("creator_relationship_label"),
     status: text("status", { enum: ["active", "invited", "removed"] }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
@@ -33,7 +34,11 @@ export const familyMemberships = pgTable(
       .on(table.userId)
       .where(sql`${table.status} = 'active'`),
     check("family_memberships_role_check", sql`${table.role} in ('manager', 'member')`),
-    check("family_memberships_status_check", sql`${table.status} in ('active', 'invited', 'removed')`)
+    check("family_memberships_status_check", sql`${table.status} in ('active', 'invited', 'removed')`),
+    check(
+      "family_memberships_creator_relationship_label_check",
+      sql`${table.creatorRelationshipLabel} is null or ${table.creatorRelationshipLabel} in ('Father','Mother','Husband','Wife','Partner','Son','Daughter','Brother','Sister','Grandfather','Grandmother','Grandson','Granddaughter')`
+    )
   ]
 );
 
@@ -47,6 +52,7 @@ export const familyInvites = pgTable(
     invitedByUserId: uuid("invited_by_user_id").notNull(),
     email: text("email"),
     tokenHash: text("token_hash").notNull(),
+    shareToken: text("share_token"),
     role: text("role", { enum: ["manager", "member"] }).notNull(),
     status: text("status", { enum: ["pending", "accepted", "revoked", "expired"] }).notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
@@ -57,6 +63,9 @@ export const familyInvites = pgTable(
   },
   (table) => [
     uniqueIndex("family_invites_token_hash_idx").on(table.tokenHash),
+    uniqueIndex("family_invites_one_pending_per_family_idx")
+      .on(table.familyId)
+      .where(sql`${table.status} = 'pending'`),
     check("family_invites_role_check", sql`${table.role} in ('manager', 'member')`),
     check("family_invites_status_check", sql`${table.status} in ('pending', 'accepted', 'revoked', 'expired')`)
   ]

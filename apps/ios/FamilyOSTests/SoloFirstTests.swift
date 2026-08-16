@@ -4,6 +4,12 @@ import XCTest
 
 @MainActor
 final class SoloFirstTests: XCTestCase {
+    func testFamilyOSCustomURLSchemeIsRegistered() {
+        let types = Bundle(for: HealthBootstrapViewModel.self).object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]] ?? []
+        let schemes = types.flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] }
+        XCTAssertTrue(schemes.contains("familyos"))
+    }
+
     func testHandleInviteURLStoresToken() {
         let viewModel = HealthBootstrapViewModel()
         let url = URL(string: "familyos://invite/abc123")!
@@ -16,6 +22,93 @@ final class SoloFirstTests: XCTestCase {
         let url = URL(string: "familyos://open?invite=xyz789")!
         XCTAssertTrue(viewModel.handleInviteURL(url))
         XCTAssertEqual(viewModel.pendingInviteToken, "xyz789")
+    }
+
+    func testHandleHTTPSInviteURLStoresToken() {
+        let viewModel = HealthBootstrapViewModel()
+        let url = URL(string: "https://familyos.example.com/invite/https-token-1")!
+        XCTAssertTrue(viewModel.handleInviteURL(url))
+        XCTAssertEqual(viewModel.pendingInviteToken, "https-token-1")
+    }
+
+    func testApplyBootstrapRestoresLiveInviteURL() {
+        let viewModel = HealthBootstrapViewModel()
+        viewModel.auth.signedInUserId = "user-1"
+        let selfProfile = makeProfile(id: "p1", linkedUserId: "user-1", displayName: "Me", relationshipLabel: "Self")
+        var response = makeBootstrapResponse(
+            familyId: "f1",
+            kind: .family,
+            membershipUserId: "user-1",
+            membershipRole: .manager,
+            profiles: [selfProfile],
+            selfProfile: selfProfile,
+            needsProfileSetup: false
+        )
+        response = BootstrapResponse(
+            family: response.family,
+            membership: response.membership,
+            creatorDisplayName: "Me",
+            liveInvite: LiveInviteSummary(
+                expiresAt: "2026-08-16T12:00:00.000Z",
+                status: .pending,
+                token: "tok",
+                url: "https://familyos.example.com/invite/tok"
+            ),
+            profiles: response.profiles,
+            selfProfile: response.selfProfile,
+            needsProfileSetup: false
+        )
+        viewModel.applyBootstrap(response)
+        XCTAssertEqual(viewModel.family.lastCreatedInviteURL, "https://familyos.example.com/invite/tok")
+        XCTAssertEqual(viewModel.family.lastCreatedInviteToken, "tok")
+        XCTAssertEqual(viewModel.family.creatorDisplayName, "Me")
+    }
+
+    func testCreatorSeesManageFamilyAndMembersSeeLeave() {
+        let viewModel = HealthBootstrapViewModel()
+        viewModel.auth.signedInUserId = "user-1"
+        viewModel.family.signedInUserId = "user-1"
+        viewModel.family.createdByUserId = "user-1"
+        viewModel.family.currentFamilyName = "Jain Family"
+        XCTAssertTrue(viewModel.family.isCreator)
+        XCTAssertTrue(viewModel.family.canManageFamily)
+        XCTAssertFalse(viewModel.family.canLeaveFamily)
+
+        viewModel.auth.signedInUserId = "user-2"
+        viewModel.family.signedInUserId = "user-2"
+        viewModel.family.creatorRelationshipLabel = .father
+        XCTAssertFalse(viewModel.family.isCreator)
+        XCTAssertFalse(viewModel.family.canManageFamily)
+        XCTAssertTrue(viewModel.family.canLeaveFamily)
+    }
+
+    func testLookingAtAnotherMemberIsReadOnly() {
+        let viewModel = HealthBootstrapViewModel()
+        viewModel.auth.signedInUserId = "user-1"
+        let selfProfile = makeProfile(id: "p1", linkedUserId: "user-1", displayName: "Me", relationshipLabel: "Self")
+        let other = makeProfile(id: "p2", linkedUserId: "user-2", displayName: "Riya", relationshipLabel: "Self")
+        viewModel.profiles.profiles = [selfProfile, other]
+        viewModel.profiles.selectedProfileId = other.id
+        viewModel.healthKit.linkedProfileId = selfProfile.id
+        XCTAssertTrue(viewModel.isViewingAnotherMember)
+        XCTAssertFalse(viewModel.canWriteSelectedPersonHealth)
+        viewModel.profiles.selectedProfileId = selfProfile.id
+        XCTAssertFalse(viewModel.isViewingAnotherMember)
+        XCTAssertTrue(viewModel.canWriteSelectedPersonHealth)
+    }
+
+    func testFallsBackToSelfWhenSelectedMemberLeaves() {
+        let viewModel = HealthBootstrapViewModel()
+        viewModel.auth.signedInUserId = "user-1"
+        let selfProfile = makeProfile(id: "p1", linkedUserId: "user-1", displayName: "Me", relationshipLabel: "Self")
+        let other = makeProfile(id: "p2", linkedUserId: "user-2", displayName: "Riya", relationshipLabel: "Self")
+        viewModel.profiles.profiles = [selfProfile, other]
+        viewModel.profiles.selectedProfileId = other.id
+        viewModel.restoreSelectedPersonOrSelf()
+        XCTAssertEqual(viewModel.profiles.selectedProfileId, other.id)
+        viewModel.profiles.profiles = [selfProfile]
+        viewModel.restoreSelectedPersonOrSelf()
+        XCTAssertEqual(viewModel.profiles.selectedProfileId, selfProfile.id)
     }
 
     func testPersonalWorkspaceFlag() {
@@ -372,13 +465,13 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertFalse(viewModel.isError)
     }
 
-    func testStartupAcceptsPendingInviteBeforeBootstrap() async throws {
+    func testStartupKeepsPendingInviteUntilAccept() async throws {
         let viewModel = makeViewModelWithMock([
-            "/invites/invite-token/accept": """
-            {"data":{"family":{"id":"f2","name":"Jain Family","kind":"family"},"membership":{"id":"m2","userId":"user-1","role":"member","status":"active"}}}
+            "/invites/invite-token": """
+            {"data":{"familyName":"Jain Family","creatorDisplayName":"Deepanshu","status":"pending","expiresAt":"2026-08-16T12:00:00.000Z"}}
             """,
             "/bootstrap": """
-            {"data":{"family":{"id":"f2","name":"Jain Family","kind":"family"},"membership":{"id":"m2","userId":"user-1","role":"member","status":"active"},"profiles":[],"selfProfile":null,"needsProfileSetup":true}}
+            {"data":{"family":null,"membership":null,"profiles":[],"selfProfile":null,"needsProfileSetup":true}}
             """
         ])
         viewModel.auth.accessToken = "token"
@@ -387,10 +480,10 @@ final class SoloFirstTests: XCTestCase {
 
         await viewModel.startup()
 
-        XCTAssertNil(viewModel.pendingInviteToken)
+        XCTAssertEqual(viewModel.pendingInviteToken, "invite-token")
+        XCTAssertEqual(viewModel.pendingInvitePreview?.creatorDisplayName, "Deepanshu")
+        XCTAssertTrue(viewModel.shouldShowInviteAccept)
         XCTAssertFalse(viewModel.isStartingUp)
-        XCTAssertEqual(viewModel.family.currentFamilyName, "Jain Family")
-        XCTAssertTrue(viewModel.needsProfileSetup)
     }
 
     func testCreateSelfProfileSetsLinkedProfileIdToSelf() async throws {
@@ -451,11 +544,13 @@ private func makeBootstrapResponse(
     selfProfile: HealthProfile?,
     needsProfileSetup: Bool
 ) -> BootstrapResponse {
-    let family = Family(id: familyId, name: "Test Family", kind: kind)
+    let family = Family(id: familyId, name: "Test Family", kind: kind, createdByUserId: membershipUserId)
     let membership = makeMembership(id: "m1", userId: membershipUserId, role: membershipRole, status: .active)
     return BootstrapResponse(
         family: family,
         membership: membership,
+        creatorDisplayName: nil,
+        liveInvite: nil,
         profiles: profiles,
         selfProfile: selfProfile,
         needsProfileSetup: needsProfileSetup

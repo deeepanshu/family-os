@@ -38,12 +38,32 @@ export type AuthSessionResponse = {
 export type BootstrapResponse = {
   family: Family | null;
   membership: FamilyMembership | null;
+  creatorDisplayName?: string;
+  liveInvite?: LiveInviteSummary;
   profiles: HealthProfile[];
   selfProfile: HealthProfile | null;
   needsProfileSetup: boolean;
 };
 
 export type FamilyRole = "manager" | "member";
+
+export const CREATOR_RELATIONSHIP_LABELS = [
+  "Father",
+  "Mother",
+  "Husband",
+  "Wife",
+  "Partner",
+  "Son",
+  "Daughter",
+  "Brother",
+  "Sister",
+  "Grandfather",
+  "Grandmother",
+  "Grandson",
+  "Granddaughter"
+] as const;
+
+export type CreatorRelationshipLabel = (typeof CREATOR_RELATIONSHIP_LABELS)[number];
 
 export type MembershipStatus = "active" | "invited" | "removed";
 
@@ -64,6 +84,8 @@ export type FamilyMembership = {
   userId: string;
   role: FamilyRole;
   status: MembershipStatus;
+  /** Directed label from this member to the family creator. Absent for the creator. */
+  creatorRelationshipLabel?: CreatorRelationshipLabel;
   createdAt: string;
   updatedAt: string;
 };
@@ -74,9 +96,23 @@ export type FamilyMember = {
   displayName?: string;
 };
 
+export type LiveInviteSummary = {
+  expiresAt: string;
+  status: Extract<FamilyInviteStatus, "pending">;
+  /** Present for the creator only. HTTP layer attaches `url`. */
+  token: string;
+  url?: string;
+};
+
+export type AcceptInviteInput = {
+  relationshipLabel: CreatorRelationshipLabel;
+};
+
 export type CurrentFamilyResponse = {
   family: Family;
   membership: FamilyMembership;
+  creatorDisplayName?: string;
+  liveInvite?: LiveInviteSummary;
 } | null;
 
 export type FamilyInviteStatus = "pending" | "accepted" | "revoked" | "expired";
@@ -84,21 +120,23 @@ export type FamilyInviteStatus = "pending" | "accepted" | "revoked" | "expired";
 export type FamilyInvite = {
   id: string;
   familyId: string;
-  email?: string;
-  role: FamilyRole;
   status: FamilyInviteStatus;
   expiresAt: string;
   createdAt: string;
 };
 
-export type CreateInviteResponse = {
+export type CreatedInvite = {
   invite: FamilyInvite;
   token: string;
 };
 
+export type CreateInviteResponse = CreatedInvite & {
+  url: string;
+};
+
 export type PublicInviteResponse = {
   familyName: string;
-  role: FamilyRole;
+  creatorDisplayName: string;
   status: FamilyInviteStatus;
   expiresAt: string;
 };

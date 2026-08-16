@@ -6,124 +6,115 @@ struct FamilyView: View {
     var body: some View {
         NavigationStack {
             List {
-                if viewModel.family.isPersonalWorkspace {
-                    personalWorkspaceSection
+                if viewModel.family.currentFamilyName == nil {
+                    createFamilySection
+                } else if viewModel.family.canManageFamily {
+                    manageFamilySection
                 } else {
-                    familyWorkspaceSection
-                }
-
-                Section("Health Profiles") {
-                    if viewModel.profiles.profiles.isEmpty {
-                        EmptyRow("No profiles yet.")
-                    } else {
-                        ForEach(viewModel.profiles.profiles) { profile in
-                            Button {
-                                viewModel.profiles.selectedProfileId = profile.id
-                            } label: {
-                                HStack {
-                                    ProfileRow(profile: profile)
-                                    Spacer()
-                                    if viewModel.profiles.selectedProfileId == profile.id {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundStyle(.blue)
-                                    }
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-
-                if viewModel.family.isManager {
-                    Section("Add another health profile") {
-                        TextField("Name", text: $viewModel.profiles.profileName)
-                        TextField("Relationship", text: $viewModel.profiles.profileRelationship)
-                        Button("Save Profile") {
-                            Task { await viewModel.createProfile() }
-                        }
-                        .disabled(viewModel.profiles.profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-
-                    Section("Invite family") {
-                        Button("Create Invite") {
-                            Task { await viewModel.createInvite() }
-                        }
-                        if let token = viewModel.family.lastCreatedInviteToken {
-                            Text(token)
-                                .font(.footnote.monospaced())
-                                .textSelection(.enabled)
-                        }
-
-                        TextField("Invite token", text: $viewModel.family.inviteToken)
-                            .textInputAutocapitalization(.never)
-                        Button("Join Family") {
-                            Task { await viewModel.acceptInvite() }
-                        }
-                    }
-                }
-
-                Section("Connection") {
-                    Button("Refresh Family") {
-                        Task { await viewModel.refreshFamily() }
-                    }
+                    memberFamilySection
                 }
             }
-            .navigationTitle("Family")
+            .navigationTitle(viewModel.family.canManageFamily ? "Manage Family" : "Family")
             .task {
                 await viewModel.loadCurrentFamily()
                 await viewModel.loadProfiles()
+                viewModel.restoreSelectedPersonOrSelf()
             }
         }
     }
 
-    private var personalWorkspaceSection: some View {
-        Section("Family") {
-            Text("You are using Family OS for yourself")
+    private var createFamilySection: some View {
+        Section("Create a family") {
+            Text("You can use Family OS alone. Create a household when you want to invite someone who has the app.")
                 .foregroundStyle(.secondary)
-            if let familyName = viewModel.family.currentFamilyName {
-                LabeledContent("Workspace", value: familyName)
+            TextField("Family name", text: $viewModel.family.familyName)
+            Button("Create Family") {
+                Task { await viewModel.createFamily() }
+            }
+            .disabled(viewModel.family.familyName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+    }
+
+    private var memberFamilySection: some View {
+        Group {
+            Section("Family") {
+                if let familyName = viewModel.family.currentFamilyName {
+                    LabeledContent("Name", value: familyName)
+                }
+                if let creator = viewModel.family.creatorDisplayName ?? creatorNameFromRoster,
+                   let label = viewModel.family.creatorRelationshipLabel {
+                    Text("\(creator) is my \(label.rawValue)")
+                }
+            }
+            rosterSection
+            Section {
+                Button("Leave family", role: .destructive) {
+                    Task { await viewModel.leaveFamily() }
+                }
             }
         }
+    }
+
+    private var manageFamilySection: some View {
+        Group {
+            Section("Family") {
+                if let familyName = viewModel.family.currentFamilyName {
+                    LabeledContent("Name", value: familyName)
+                }
+            }
+            rosterSection
+            Section("Invite") {
+                Button("Create invite link") {
+                    Task { await viewModel.createInvite() }
+                }
+                if let url = viewModel.family.lastCreatedInviteURL ?? viewModel.family.lastCreatedInviteToken {
+                    Text(url)
+                        .font(.footnote.monospaced())
+                        .textSelection(.enabled)
+                    Text("This link expires in one hour and works once.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if viewModel.family.members.count <= 1 {
+                Section {
+                    Button("Delete family", role: .destructive) {
+                        Task { await viewModel.deleteFamily() }
+                    }
+                }
+            }
+        }
+    }
+
+    private var rosterSection: some View {
+        Section("Members") {
+            if viewModel.family.members.isEmpty {
+                EmptyRow("No members yet.")
+            } else {
+                ForEach(viewModel.family.members) { member in
+                    HStack {
+                        Text(memberIdentity(member))
+                        Spacer()
+                        if viewModel.family.canManageFamily,
+                           member.membership.userId != viewModel.auth.signedInUserId {
+                            Button("Remove", role: .destructive) {
+                                Task { await viewModel.removeMember(userId: member.membership.userId) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var creatorNameFromRoster: String? {
+        viewModel.family.members.first { $0.membership.userId == viewModel.family.createdByUserId }?.displayName
     }
 
     private func memberIdentity(_ member: FamilyMember) -> String {
         if let displayName = member.displayName, !displayName.isEmpty {
             return displayName
         }
-        if let email = member.email, !email.isEmpty {
-            return email
-        }
         return "Member"
-    }
-
-    private var familyWorkspaceSection: some View {
-        Group {
-            Section("Family") {
-                if let familyName = viewModel.family.currentFamilyName {
-                    LabeledContent("Name", value: familyName)
-                    LabeledContent("Your role", value: viewModel.family.currentFamilyRole?.displayName ?? "Member")
-                } else {
-                    TextField("Family name", text: $viewModel.family.familyName)
-                    Button("Create Family") {
-                        Task { await viewModel.createFamily() }
-                    }
-                }
-            }
-
-                Section("Members") {
-                    if viewModel.family.members.isEmpty {
-                        EmptyRow("No members yet.")
-                    } else {
-                        ForEach(viewModel.family.members) { member in
-                            HStack {
-                                Text(memberIdentity(member))
-                                Spacer()
-                                Text(member.membership.role.displayName)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-        }
     }
 }

@@ -18,10 +18,19 @@ struct HealthKitSyncView: View {
         NavigationStack {
             Form {
                 Section {
+                    ProfilePicker(viewModel: viewModel)
+                    if viewModel.isViewingAnotherMember {
+                        Text("Looking at \(viewModel.selectedProfile?.displayName ?? "this person"). This is read-only — you cannot run their HealthKit.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section {
                     Toggle(isOn: $viewModel.healthKit.consentGranted) {
                         Text("Upload Apple Health data")
                     }
-                    .disabled(viewModel.selfProfile == nil || healthKit.isBusy)
+                    .disabled(viewModel.selfProfile == nil || healthKit.isBusy || viewModel.isViewingAnotherMember)
                     .accessibilityIdentifier("healthkit.consentToggle")
                     .onChange(of: viewModel.healthKit.consentGranted) { _, granted in
                         if granted {
@@ -243,6 +252,7 @@ struct HealthKitSyncView: View {
 
     private var syncAllDisabled: Bool {
         viewModel.selfProfile == nil
+            || viewModel.isViewingAnotherMember
             || healthKit.isBusy
             || !healthKit.consentGranted
             || healthKit.enabledMetrics

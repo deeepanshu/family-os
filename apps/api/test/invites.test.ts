@@ -52,9 +52,20 @@ async function createInvite(api: ReturnType<typeof app>, token: string) {
       authorization: `Bearer ${token}`,
       "content-type": "application/json"
     },
-    body: JSON.stringify({ email: "member@example.com", role: "member" })
+    body: JSON.stringify({})
   });
   return response;
+}
+
+async function acceptInvite(api: ReturnType<typeof app>, token: string, inviteToken: string) {
+  return api.request(`${HEALTH_API_PREFIX}/invites/${inviteToken}/accept`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ relationshipLabel: "Father" })
+  });
 }
 
 describe("family invites", () => {
@@ -68,12 +79,13 @@ describe("family invites", () => {
     expect(response.status).toBe(201);
     const body = await response.json();
     expect(body.data.invite).toMatchObject({
-      email: "member@example.com",
-      role: "member",
       status: "pending"
     });
     expect(body.data.invite.tokenHash).toBeUndefined();
+    expect(body.data.invite.email).toBeUndefined();
+    expect(body.data.invite.role).toBeUndefined();
     expect(body.data.token).toEqual(expect.any(String));
+    expect(body.data.url).toContain(`/invite/${body.data.token}`);
   });
 
   it("requires an active manager to create invites", async () => {
@@ -83,7 +95,7 @@ describe("family invites", () => {
         authorization: `Bearer ${await jwtFor(strangerId)}`,
         "content-type": "application/json"
       },
-      body: JSON.stringify({ role: "member" })
+      body: JSON.stringify({})
     });
 
     expect(response.status).toBe(403);
@@ -101,7 +113,6 @@ describe("family invites", () => {
     await expect(response.json()).resolves.toMatchObject({
       data: {
         familyName: "Jain Family",
-        role: "member",
         status: "pending"
       }
     });
@@ -114,12 +125,7 @@ describe("family invites", () => {
     await createFamily(api, managerToken);
     const invite = await (await createInvite(api, managerToken)).json();
 
-    const accept = await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${memberToken}`
-      }
-    });
+    const accept = await acceptInvite(api, memberToken, invite.data.token);
 
     expect(accept.status).toBe(200);
     await expect(accept.json()).resolves.toMatchObject({
@@ -154,42 +160,22 @@ describe("family invites", () => {
     const managerToken = await jwtFor(managerId);
     await createFamily(api, managerToken);
     const invite = await (await createInvite(api, managerToken)).json();
-    await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${await jwtFor(memberId, "member@example.com")}`
-      }
-    });
+    await acceptInvite(api, await jwtFor(memberId, "member@example.com"), invite.data.token);
 
-    const response = await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${await jwtFor(strangerId)}`
-      }
-    });
+    const response = await acceptInvite(api, await jwtFor(strangerId), invite.data.token);
 
     expect(response.status).toBe(409);
   });
 
-  it("rejects acceptance when an email-bound invite is claimed by another email", async () => {
+  it("does not lock an invite to an email", async () => {
     const api = app();
     const managerToken = await jwtFor(managerId);
     await createFamily(api, managerToken);
     const invite = await (await createInvite(api, managerToken)).json();
 
-    const response = await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${await jwtFor(memberId, "wrong@example.com")}`
-      }
-    });
+    const response = await acceptInvite(api, await jwtFor(memberId, "wrong@example.com"), invite.data.token);
 
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "invite_email_mismatch"
-      }
-    });
+    expect(response.status).toBe(200);
   });
 
   it("allows only one concurrent accept for a pending invite", async () => {
@@ -199,18 +185,8 @@ describe("family invites", () => {
     const invite = await (await createInvite(api, managerToken)).json();
 
     const responses = await Promise.all([
-      api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${await jwtFor(memberId, "member@example.com")}`
-        }
-      }),
-      api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${await jwtFor(strangerId, "member@example.com")}`
-        }
-      })
+      acceptInvite(api, await jwtFor(memberId, "member@example.com"), invite.data.token),
+      acceptInvite(api, await jwtFor(strangerId, "member@example.com"), invite.data.token)
     ]);
 
     expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);

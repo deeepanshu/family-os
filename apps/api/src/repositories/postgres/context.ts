@@ -24,12 +24,14 @@ export class PostgresRepositoryContext {
         fm.user_id,
         fm.role,
         fm.status,
+        fm.creator_relationship_label,
         fm.created_at as membership_created_at,
         fm.updated_at as membership_updated_at
       from family_memberships fm
       join families f on f.id = fm.family_id
       where fm.user_id = ${userId}
         and fm.status = 'active'
+        and f.kind = 'family'
       limit 1
     `;
     return row ? mapCurrentFamily(row) : null;
@@ -77,10 +79,11 @@ export class PostgresRepositoryContext {
     if (row.linked_user_id === userId) {
       return { personId: row.id as string, familyId: (row.family_id as string | null) ?? null };
     }
-    if (row.family_id) {
-      const current = await this.getCurrentFamily(userId);
-      if (current && current.family.id === row.family_id) {
-        return { personId: row.id as string, familyId: row.family_id as string };
+    if (row.linked_user_id) {
+      const actorFamily = await this.getCurrentFamily(userId);
+      const targetFamily = await this.getCurrentFamily(row.linked_user_id as string);
+      if (actorFamily && targetFamily && actorFamily.family.id === targetFamily.family.id) {
+        return { personId: row.id as string, familyId: actorFamily.family.id };
       }
     }
     throw new HttpError(403, "profile_forbidden", "You do not have access to this health profile.");
@@ -90,6 +93,14 @@ export class PostgresRepositoryContext {
     const current = await this.requireActiveMember(userId);
     if (current.membership.role !== "manager") {
       throw new HttpError(403, "manager_required", message);
+    }
+    return current;
+  }
+
+  async requireCreator(userId: string, message: string): Promise<NonNullable<CurrentFamilyResponse>> {
+    const current = await this.requireActiveMember(userId);
+    if (current.family.createdByUserId !== userId) {
+      throw new HttpError(403, "creator_required", message);
     }
     return current;
   }

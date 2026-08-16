@@ -35,6 +35,19 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Kinstead connects to your Mac’s local Health API during development so health sync can be tested on this network.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.deepanshujain.familyos.invite</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>familyos</string>
+			</array>
+		</dict>
+	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>LSApplicationCategoryType</key>

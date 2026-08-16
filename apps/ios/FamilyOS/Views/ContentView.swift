@@ -14,6 +14,8 @@ struct ContentView: View {
                 startupErrorView
             } else if viewModel.needsProfileSetup {
                 SetUpProfileView(viewModel: viewModel)
+            } else if viewModel.shouldShowInviteAccept {
+                AcceptInviteView(viewModel: viewModel)
             } else {
                 AppTabsView(viewModel: viewModel)
             }
@@ -106,6 +108,46 @@ private struct ActionFeedbackToast: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
         .accessibilityElement(children: .combine)
+    }
+}
+
+struct AcceptInviteView: View {
+    @ObservedObject var viewModel: HealthBootstrapViewModel
+    @State private var selectedLabel = CreatorRelationshipLabel.father
+    @State private var isSubmitting = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Join family") {
+                    if let preview = viewModel.pendingInvitePreview {
+                        Text("\(preview.creatorDisplayName) invited you to \(preview.familyName).")
+                        Picker("\(preview.creatorDisplayName) is my", selection: $selectedLabel) {
+                            ForEach(CreatorRelationshipLabel.allCases) { label in
+                                Text(label.rawValue).tag(label)
+                            }
+                        }
+                    } else {
+                        Text("Loading invite…")
+                    }
+                    Text("Joining lets every member see everything you have already synced, including history, and everything you sync later.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Button("Save") {
+                    isSubmitting = true
+                    Task {
+                        await viewModel.acceptInvite(relationshipLabel: selectedLabel)
+                        isSubmitting = false
+                    }
+                }
+                .disabled(isSubmitting || viewModel.pendingInvitePreview == nil)
+            }
+            .navigationTitle("Join family")
+            .task {
+                await viewModel.loadPendingInvitePreview()
+            }
+        }
     }
 }
 

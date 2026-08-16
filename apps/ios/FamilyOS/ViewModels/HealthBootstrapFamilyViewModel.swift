@@ -4,9 +4,7 @@ extension HealthBootstrapViewModel {
     func loadCurrentFamily() async {
         await request {
             let response = try await client.currentFamily(baseURL: connection.baseURL, accessToken: auth.accessToken)
-            family.currentFamilyName = response?.family.name
-            family.familyKind = response?.family.kind
-            family.currentFamilyRole = response?.membership.role
+            applyFamilyResponse(response)
             guard let response else {
                 return "No active family yet. Create one to continue."
             }
@@ -14,6 +12,24 @@ extension HealthBootstrapViewModel {
         }
         if family.currentFamilyName != nil {
             await loadMembers()
+        }
+        restoreSelectedPersonOrSelf()
+    }
+
+    private func applyFamilyResponse(_ response: FamilyResponse?) {
+        family.signedInUserId = auth.signedInUserId
+        family.currentFamilyName = response?.family.name
+        family.familyKind = response?.family.kind
+        family.currentFamilyRole = response?.membership.role
+        family.createdByUserId = response?.family.createdByUserId
+        family.creatorRelationshipLabel = response?.membership.creatorRelationshipLabel
+        family.creatorDisplayName = response?.creatorDisplayName
+        if let live = response?.liveInvite, live.status == .pending {
+            family.lastCreatedInviteToken = live.token
+            family.lastCreatedInviteURL = live.url
+        } else {
+            family.lastCreatedInviteToken = nil
+            family.lastCreatedInviteURL = nil
         }
     }
 
@@ -47,10 +63,8 @@ extension HealthBootstrapViewModel {
         await request(showsFeedback: true) {
             let trimmedName = family.familyName.trimmingCharacters(in: .whitespacesAndNewlines)
             let response = try await client.createFamily(baseURL: connection.baseURL, accessToken: auth.accessToken, name: trimmedName)
-            family.currentFamilyName = response.family.name
-            family.familyKind = response.family.kind
-            family.currentFamilyRole = response.membership.role
-            return "Created \(response.family.name); you are \(response.membership.role.displayName)."
+            applyFamilyResponse(response)
+            return "Created \(response.family.name)."
         }
     }
 
@@ -58,38 +72,58 @@ extension HealthBootstrapViewModel {
         await request(showsFeedback: true) {
             let response = try await client.createInvite(baseURL: connection.baseURL, accessToken: auth.accessToken)
             family.lastCreatedInviteToken = response.token
-            return "Created invite token: \(response.token)"
+            family.lastCreatedInviteURL = response.url
+            return "Invite link ready. It expires in one hour and works once."
         }
         if family.lastCreatedInviteToken != nil {
             await refreshFamilyAfterInvite()
         }
     }
 
-    func acceptInvite() async {
+    func acceptInvite(relationshipLabel: CreatorRelationshipLabel) async {
         await request(showsFeedback: true) {
+            let token = pendingInviteToken ?? family.inviteToken.trimmingCharacters(in: .whitespacesAndNewlines)
             let response = try await client.acceptInvite(
                 baseURL: connection.baseURL,
                 accessToken: auth.accessToken,
-                token: family.inviteToken.trimmingCharacters(in: .whitespacesAndNewlines)
+                token: token,
+                relationshipLabel: relationshipLabel
             )
-            family.currentFamilyName = response.family.name
-            family.familyKind = response.family.kind
-            family.currentFamilyRole = response.membership.role
-            return "Joined \(response.family.name) as \(response.membership.role.displayName)."
+            applyFamilyResponse(response)
+            pendingInviteToken = nil
+            pendingInvitePreview = nil
+            return "Joined \(response.family.name)."
         }
+        await refreshFamily()
     }
 
-    func acceptInvite(token: String) async {
+    func leaveFamily() async {
         await request(showsFeedback: true) {
-            let response = try await client.acceptInvite(
-                baseURL: connection.baseURL,
-                accessToken: auth.accessToken,
-                token: token
-            )
-            family.currentFamilyName = response.family.name
-            family.familyKind = response.family.kind
-            family.currentFamilyRole = response.membership.role
-            return "Joined \(response.family.name) as \(response.membership.role.displayName)."
+            try await client.leaveFamily(baseURL: connection.baseURL, accessToken: auth.accessToken)
+            family.clear()
+            family.signedInUserId = auth.signedInUserId
+            return "You left the family."
         }
+        await loadProfiles()
+        restoreSelectedPersonOrSelf()
+    }
+
+    func removeMember(userId: String) async {
+        await request(showsFeedback: true) {
+            try await client.removeMember(baseURL: connection.baseURL, accessToken: auth.accessToken, userId: userId)
+            return "Removed family member."
+        }
+        await refreshFamily()
+    }
+
+    func deleteFamily() async {
+        await request(showsFeedback: true) {
+            try await client.deleteFamily(baseURL: connection.baseURL, accessToken: auth.accessToken)
+            family.clear()
+            family.signedInUserId = auth.signedInUserId
+            return "Family deleted."
+        }
+        await loadProfiles()
+        restoreSelectedPersonOrSelf()
     }
 }

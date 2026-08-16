@@ -53,6 +53,7 @@ export type MemoryHealthKitHost = {
   /** Optional; family features only. HealthKit uses Self person. */
   requireActiveMember(userId: string): FamilyCtx;
   getSelfProfile(userId: string): Promise<{ id: string; familyId: string | null } | null>;
+  requireReadablePerson(actorUserId: string, personId: string): { id: string; familyId: string | null };
   audit(input: {
     familyId: string | null;
     actorUserId?: string;
@@ -182,8 +183,8 @@ export class MemoryHealthKitEngine {
   async getHealthKitSettings(actorUserId: string, personId?: string): Promise<HealthKitSettings> {
     const self = await this.requireSelf(actorUserId);
     const target = personId ?? self.id;
-    assertSelfProfileMatch({ selfProfileId: self.id, requestedPersonId: target });
-    return this.buildSettings(self.familyId, target);
+    const profile = target === self.id ? self : this.host.requireReadablePerson(actorUserId, target);
+    return this.buildSettings(profile.familyId, target);
   }
 
   async putHealthKitSettings(actorUserId: string, input: PutHealthKitSettingsInput): Promise<HealthKitSettings> {
@@ -651,7 +652,9 @@ export class MemoryHealthKitEngine {
     if (!target) {
       throw new HttpError(409, "healthkit_self_profile_required", "Create your self profile before using HealthKit sync.");
     }
-    assertSelfProfileMatch({ selfProfileId: selfProfile?.id, requestedPersonId: target });
+    if (selfProfile?.id !== target) {
+      this.host.requireReadablePerson(actorUserId, target);
+    }
     const state = this.syncState.get(`${target}:${group}`);
     return {
       personId: target,
@@ -673,7 +676,10 @@ export class MemoryHealthKitEngine {
     personId: string,
     healthMetric: HealthKitMetricKey
   ): Promise<HealthMetricFreshness> {
-    await this.requireSelf(actorUserId);
+    const self = await this.requireSelf(actorUserId);
+    if (self.id !== personId) {
+      this.host.requireReadablePerson(actorUserId, personId);
+    }
     const group = HEALTHKIT_METRIC_REGISTRY[healthMetric].group;
     const settings = this.profileSettings.get(personId);
     const state = this.syncState.get(`${personId}:${group}`);

@@ -29,7 +29,7 @@ export function assertSelfProfileMatch(input: {
     throw new HttpError(409, "healthkit_self_profile_required", "Create your self profile before using HealthKit sync.");
   }
   if (input.selfProfileId !== input.requestedPersonId) {
-    throw new HttpError(409, "healthkit_self_profile_required", "HealthKit sync can only target your linked Self profile.");
+    throw new HttpError(403, "profile_forbidden", "HealthKit writes can only target your linked Self profile.");
   }
 }
 

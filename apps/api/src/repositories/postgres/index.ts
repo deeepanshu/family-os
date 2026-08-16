@@ -6,7 +6,8 @@ import type {
   BloodPressureReading,
   BootstrapResponse,
   CompleteHealthKitRunInput,
-  CreateInviteResponse,
+  AcceptInviteInput,
+  CreatedInvite,
   CurrentFamilyResponse,
   FamilyMember,
   FamilyMembership,
@@ -96,7 +97,19 @@ export class PostgresFamilyRepository implements FamilyRepository {
     return this.familyStore.listMembers(actorUserId);
   }
 
-  createInvite(input: CreateInviteInput): Promise<CreateInviteResponse> {
+  leaveFamily(actorUserId: string): Promise<void> {
+    return this.familyStore.leaveFamily(actorUserId);
+  }
+
+  removeMember(actorUserId: string, memberUserId: string): Promise<void> {
+    return this.familyStore.removeMember(actorUserId, memberUserId);
+  }
+
+  deleteFamily(actorUserId: string): Promise<void> {
+    return this.familyStore.deleteFamily(actorUserId);
+  }
+
+  createInvite(input: CreateInviteInput): Promise<CreatedInvite> {
     return this.familyStore.createInvite(input);
   }
 
@@ -104,8 +117,8 @@ export class PostgresFamilyRepository implements FamilyRepository {
     return this.familyStore.getInviteByToken(token);
   }
 
-  acceptInvite(token: string, userId: string, userEmail?: string): Promise<CurrentFamilyResponse> {
-    return this.familyStore.acceptInvite(token, userId, userEmail);
+  acceptInvite(token: string, userId: string, input: AcceptInviteInput): Promise<CurrentFamilyResponse> {
+    return this.familyStore.acceptInvite(token, userId, input);
   }
 
   listProfiles(actorUserId: string): Promise<HealthProfile[]> {

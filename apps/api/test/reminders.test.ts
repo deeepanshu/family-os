@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { HEALTH_API_PREFIX } from "@family-os/shared";
 import { createApp } from "../src/app";
 import { InMemoryFamilyRepository } from "../src/repositories/families";
+import { setupHousehold, setupSoloUser } from "./soloSetup";
 
 const jwtSecret = "test-supabase-jwt-secret-with-enough-length";
 const supabaseUrl = "https://project.supabase.co";
@@ -32,11 +33,12 @@ async function jwtFor(subject: string, email = `${subject}@example.com`) {
 async function setup(api: ReturnType<typeof app>) {
   const managerToken = await jwtFor(managerId);
   const memberToken = await jwtFor(memberId, "member@example.com");
-  await api.request(`${HEALTH_API_PREFIX}/families`, { method: "POST", headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" }, body: JSON.stringify({ name: "Jain Family" }) });
-  const invite = await (await api.request(`${HEALTH_API_PREFIX}/invites`, { method: "POST", headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" }, body: JSON.stringify({ email: "member@example.com", role: "member" }) })).json();
-  await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, { method: "POST", headers: { authorization: `Bearer ${memberToken}` } });
-  const profile = await (await api.request(`${HEALTH_API_PREFIX}/people`, { method: "POST", headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" }, body: JSON.stringify({ displayName: "Mom" }) })).json();
-  return { managerToken, memberToken, profileId: profile.data.id };
+  const creator = await setupSoloUser(api, managerToken, "Deepanshu");
+  await setupHousehold(api, managerToken, "Jain Family");
+  await setupSoloUser(api, memberToken, "Riya");
+  const invite = await (await api.request(`${HEALTH_API_PREFIX}/invites`, { method: "POST", headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" }, body: JSON.stringify({}) })).json();
+  await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, { method: "POST", headers: { authorization: `Bearer ${memberToken}`, "content-type": "application/json" }, body: JSON.stringify({ relationshipLabel: "Father" }) });
+  return { managerToken, memberToken, profileId: creator.profileId };
 }
 
 async function createReminder(api: ReturnType<typeof app>, token: string, profileId: string) {
@@ -61,9 +63,9 @@ async function addMember(api: ReturnType<typeof app>, managerToken: string, user
   const invite = await (await api.request(`${HEALTH_API_PREFIX}/invites`, {
     method: "POST",
     headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ email, role: "member" })
+    body: JSON.stringify({})
   })).json();
-  await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+  await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ relationshipLabel: "Brother" }) });
   return token;
 }
 
@@ -131,21 +133,13 @@ describe("reminders", () => {
     const { managerToken, memberToken, profileId } = await setup(api);
     const reminder = await (await createReminder(api, memberToken, profileId)).json();
     const otherManagerToken = await jwtFor(strangerId);
-    await api.request(`${HEALTH_API_PREFIX}/families`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${otherManagerToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ name: "Other Family" })
-    });
-    const otherProfile = await (await api.request(`${HEALTH_API_PREFIX}/people`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${otherManagerToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ displayName: "Other" })
-    })).json();
+    const otherProfile = await setupSoloUser(api, otherManagerToken, "Other");
+    await setupHousehold(api, otherManagerToken, "Other Family");
 
     const subjectUpdate = await api.request(`${HEALTH_API_PREFIX}/reminders/${reminder.data.id}`, {
       method: "PATCH",
       headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ subjectPersonId: otherProfile.data.id })
+      body: JSON.stringify({ subjectPersonId: otherProfile.profileId })
     });
     expect(subjectUpdate.status).toBe(404);
 
