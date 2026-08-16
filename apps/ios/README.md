@@ -150,17 +150,20 @@ the initial number is seeded in App Store Connect, so do not manually change
 `CURRENT_PROJECT_VERSION` for a cloud release. The tag is a source-release
 identifier, not the TestFlight build number.
 
-Create a release only after the intended commit is on `main` and local Release
-checks pass:
+GitHub Actions `.github/workflows/release-app.yml` creates the next
+`release/<marketing-version>-N` tag when iOS changes land on `main`, or when
+you run **Actions → Release App**. Xcode Cloud still starts from the tag, not
+from the branch push.
 
 ```sh
+# Manual fallback if GitHub Actions cannot push tags
 git tag release/<marketing-version>-<release-sequence>
 git push origin release/<marketing-version>-<release-sequence>
 ```
 
 Each retry needs a new tag. Xcode Cloud must complete and Apple must process
-the upload before testers can install it. Use a manual workflow start only to
-recover a missed trigger, selecting the same release tag.
+the upload before testers can install it. A manual Xcode Cloud start is only a
+recovery path and must select the intended release tag.
 
 The current bootstrap screen can call:
 

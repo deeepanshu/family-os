@@ -154,17 +154,22 @@ in App Store Connect and uses the `FamilyOS` scheme:
   build. The initial number is seeded in App Store Connect to avoid colliding
   with manually uploaded builds.
 
-After a verified commit reaches `main`, create and push a release tag. The tag
-name triggers the workflow; it does not set the Apple build number.
+Merging iOS changes to `main` runs `.github/workflows/release-app.yml`, which
+creates the next `release/<marketing-version>-N` tag. That tag starts Xcode
+Cloud; it does not set the Apple build number.
+
+To retry or ship `main` without an iOS path change, run **Actions → Release
+App**. You can pass an explicit `release/...` tag, or leave it blank to use the
+next sequence number.
 
 ```sh
+# Manual fallback if GitHub Actions cannot push tags
 git tag release/0.1.0-9
 git push origin release/0.1.0-9
 ```
 
-Use a new tag for every retry. A manual workflow start is only a recovery path
-and must select the intended release tag. After Xcode Cloud succeeds, wait for
-Apple processing before the build appears in TestFlight.
+Use a new tag for every retry. After Xcode Cloud succeeds, wait for Apple
+processing before the build appears in TestFlight.
 
 Install the repo-managed local git hooks for faster pre-commit and pre-push
 feedback:

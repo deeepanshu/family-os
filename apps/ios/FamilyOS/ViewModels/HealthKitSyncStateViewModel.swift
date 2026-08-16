@@ -6,6 +6,36 @@ struct HealthKitActiveRun: Equatable, Sendable {
     let metric: HealthKitSyncMetric
     let kind: HealthKitRunKind
     var stage: HealthKitRunStage
+
+    var productTitle: String {
+        switch metric {
+        case .vitals: return "Blood pressure"
+        case .sleep: return "Sleep"
+        case .workouts: return "Workouts"
+        case .activity: return "Activity"
+        default: return metric.displayName
+        }
+    }
+
+    var bannerTitle: String {
+        switch kind {
+        case .initialImport:
+            return "Importing \(productTitle)"
+        case .repairImport:
+            return "Re-importing \(productTitle)"
+        case .sync:
+            return "Syncing \(productTitle)"
+        }
+    }
+
+    var bannerDetail: String { stage.displayText }
+}
+
+/// Global progress copy for the pinned banner. In-row captions stay the
+/// primary per-metric surface (plan §5.4).
+struct HealthKitSyncProgressBannerState: Equatable, Sendable {
+    let title: String
+    let detail: String
 }
 
 @MainActor
@@ -73,6 +103,24 @@ final class HealthKitSyncStateViewModel: ObservableObject {
     /// True while a save or any run is active; every conflicting control locks.
     var isBusy: Bool {
         isSavingSettings || activeRun != nil
+    }
+
+    /// Pinned banner copy. Prefer the live run; fall back to settings save so
+    /// the user still sees activity before HealthKit authorization starts.
+    var progressBanner: HealthKitSyncProgressBannerState? {
+        if let activeRun {
+            return HealthKitSyncProgressBannerState(
+                title: activeRun.bannerTitle,
+                detail: activeRun.bannerDetail
+            )
+        }
+        if isSavingSettings {
+            return HealthKitSyncProgressBannerState(
+                title: "Saving HealthKit settings",
+                detail: "Updating your preferences…"
+            )
+        }
+        return nil
     }
 
     func beginRun(metric: HealthKitSyncMetric, kind: HealthKitRunKind) {

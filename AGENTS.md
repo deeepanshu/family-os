@@ -52,4 +52,5 @@ xcrun xctrace list devices
 
 The `FamilyOS` Xcode Cloud workflow starts automatically from tags prefixed
 `release/` (for example, `release/0.1.0-22`). It does not trigger from branch
-pushes. Push a new release tag after the intended commit is on `main`.
+pushes. The `Release App` GitHub Actions workflow on `main` creates the next
+tag when `apps/ios/**` changes, or when you run it from Actions → Release App.
