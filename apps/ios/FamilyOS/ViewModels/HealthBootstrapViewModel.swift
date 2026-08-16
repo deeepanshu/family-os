@@ -254,13 +254,22 @@ final class HealthBootstrapViewModel: ObservableObject {
         guard AccessTokenExpiry.requiresRefresh(auth.accessToken) else {
             return
         }
-        if let token = await HealthSessionRefresher.freshAccessToken(), !token.isEmpty {
-            auth.accessToken = token
-            auth.refreshToken = try? keychain.string(for: DefaultsKey.refreshToken)
-            return
+        guard let refreshToken = auth.refreshToken, !refreshToken.isEmpty else {
+            auth.clear(defaults: defaults, keychain: keychain)
+            throw SupabaseAuthError.requestFailed("Your sign-in session expired. Please sign in again.")
         }
-        auth.clear(defaults: defaults, keychain: keychain)
-        throw SupabaseAuthError.requestFailed("Your sign-in session expired. Please sign in again.")
+
+        do {
+            let session = try await authClient.refreshSession(
+                supabaseURL: connection.supabaseURL,
+                anonKey: connection.supabaseAnonKey,
+                refreshToken: refreshToken
+            )
+            try auth.store(session: session, defaults: defaults, keychain: keychain)
+        } catch {
+            auth.clear(defaults: defaults, keychain: keychain)
+            throw SupabaseAuthError.requestFailed("Your sign-in session expired. Please sign in again.")
+        }
     }
 
     func handleInviteURL(_ url: URL) -> Bool {
