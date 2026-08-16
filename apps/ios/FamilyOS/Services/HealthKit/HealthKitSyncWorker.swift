@@ -19,7 +19,9 @@ actor HealthKitSyncWorker {
     }
 
     @discardableResult
-    func drain() async throws -> Int {
+    /// Drains one metric when `group` is supplied; background recovery drains
+    /// every group by leaving it nil.
+    func drain(group: String? = nil) async throws -> Int {
         guard !isDraining else { return 0 }
         isDraining = true
         defer { isDraining = false }
@@ -27,7 +29,7 @@ actor HealthKitSyncWorker {
         var appliedTotal = 0
         var batchIndex = 0
         while true {
-            let batch = try store.claimBatch(limit: batchSize)
+            let batch = try store.claimBatch(group: group, limit: batchSize)
             guard !batch.isEmpty else { break }
             guard let config = try store.configuration() else {
                 CrashReporting.healthKit(
