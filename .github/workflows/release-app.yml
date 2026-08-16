@@ -1,0 +1,108 @@
+name: Release App
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/ios/**"
+      - ".github/workflows/release-app.yml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Optional release tag (default: next release/<marketing-version>-N)"
+        required: false
+        type: string
+
+concurrency:
+  group: release-app
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Tag Xcode Cloud release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Fetch release tags
+        run: git fetch --tags --force origin
+
+      - name: Create and push release tag
+        id: tag
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "Release App only tags main (ref=${GITHUB_REF})" >&2
+            exit 1
+          fi
+
+          VERSION="$(sed -n 's/.*MARKETING_VERSION = \([0-9][0-9.]*\);.*/\1/p' \
+            apps/ios/FamilyOS.xcodeproj/project.pbxproj | head -n 1)"
+          if [ -z "${VERSION}" ]; then
+            echo "MARKETING_VERSION not found in project.pbxproj" >&2
+            exit 1
+          fi
+
+          existing="$(git tag --points-at "${GITHUB_SHA}" | grep -E '^release/' || true)"
+          if [ -z "${REQUESTED_TAG}" ] && [ -n "${existing}" ]; then
+            tag="$(printf '%s\n' "${existing}" | head -n 1)"
+            echo "Commit ${GITHUB_SHA} is already tagged ${tag}"
+            echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+            echo "created=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if [ -n "${REQUESTED_TAG}" ]; then
+            tag="${REQUESTED_TAG}"
+            if [[ ! "${tag}" =~ ^release/ ]]; then
+              echo "Tag must start with release/ (got ${tag})" >&2
+              exit 1
+            fi
+          else
+            prefix="release/${VERSION}-"
+            last="$(git tag -l "${prefix}*" \
+              | sed "s|^${prefix}||" \
+              | grep -E '^[0-9]+$' \
+              | sort -n \
+              | tail -1 || true)"
+            next="$(( ${last:-0} + 1 ))"
+            tag="${prefix}${next}"
+          fi
+
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "Tag ${tag} already exists" >&2
+            exit 1
+          fi
+
+          git tag "${tag}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${tag}"
+          echo "Pushed ${tag} -> ${GITHUB_SHA}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "created=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Summarize
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          CREATED: ${{ steps.tag.outputs.created }}
+        run: |
+          {
+            echo "## Release App"
+            echo
+            if [ "${CREATED}" = "true" ]; then
+              echo "Pushed \`${TAG}\` at \`${GITHUB_SHA}\`."
+            else
+              echo "Commit already tagged \`${TAG}\`; no new tag pushed."
+            fi
+            echo
+            echo "Xcode Cloud workflow \`Default\` starts from \`release/*\` tags and uploads to TestFlight."
+          } >> "${GITHUB_STEP_SUMMARY}"

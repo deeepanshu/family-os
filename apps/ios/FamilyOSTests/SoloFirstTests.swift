@@ -144,6 +144,33 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertEqual(HealthKitSyncMetric.bloodPressure, HealthKitSyncMetric.vitals)
     }
 
+    func testHealthKitProgressBannerUsesLiveRunCopy() {
+        let healthKit = HealthKitSyncStateViewModel()
+        XCTAssertNil(healthKit.progressBanner)
+
+        healthKit.beginRun(metric: .vitals, kind: .initialImport)
+        XCTAssertEqual(healthKit.progressBanner?.title, "Importing Blood pressure")
+        XCTAssertEqual(healthKit.progressBanner?.detail, HealthKitRunStage.preparing.displayText)
+
+        healthKit.updateActiveRunStage(.reading)
+        XCTAssertEqual(healthKit.progressBanner?.title, "Importing Blood pressure")
+        XCTAssertEqual(healthKit.progressBanner?.detail, HealthKitRunStage.reading.displayText)
+
+        healthKit.endRun(metric: .vitals)
+        XCTAssertNil(healthKit.progressBanner)
+    }
+
+    func testHealthKitProgressBannerShowsSavingBeforeRunStarts() {
+        let healthKit = HealthKitSyncStateViewModel()
+        healthKit.isSavingSettings = true
+        XCTAssertEqual(healthKit.progressBanner?.title, "Saving HealthKit settings")
+        XCTAssertEqual(healthKit.progressBanner?.detail, "Updating your preferences…")
+
+        healthKit.beginRun(metric: .sleep, kind: .sync)
+        XCTAssertEqual(healthKit.progressBanner?.title, "Syncing Sleep")
+        XCTAssertEqual(healthKit.progressBanner?.detail, HealthKitRunStage.preparing.displayText)
+    }
+
     func testConnectionMigratesRetiredPublicAPIURL() {
         let suiteName = "HealthConnectionMigrationTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

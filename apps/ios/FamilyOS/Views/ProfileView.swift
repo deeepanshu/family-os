@@ -24,9 +24,42 @@ struct ProfileView: View {
                 }
             }
             .navigationTitle("HealthKit Sync")
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if let banner = viewModel.healthKit.progressBanner {
+                    HealthKitSyncProgressBanner(title: banner.title, detail: banner.detail)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: viewModel.healthKit.progressBanner)
             .task {
                 await viewModel.loadHealthKitStatus()
             }
         }
+    }
+}
+
+/// Always-visible run feedback. Complements the in-row stage caption and must
+/// not replace it (plan §5.4).
+private struct HealthKitSyncProgressBanner: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ProgressView()
+                .progressViewStyle(.linear)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("healthkit.syncProgress")
+        .accessibilityLabel("\(title). \(detail)")
     }
 }
