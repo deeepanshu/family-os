@@ -14,7 +14,7 @@ Expected local backend target:
 http://localhost:3001
 ```
 
-If using a reverse proxy on the Raspberry Pi, route:
+If using a reverse proxy, route:
 
 ```text
 /health/* -> localhost:3001
@@ -49,7 +49,7 @@ curl -sS -o /dev/null -w "%{http_code}\n" \
 ## Rate limiting (required before horizontal scale)
 
 Family OS MCP tool rate limits (`McpRateLimiter`) are **process-local**. A
-single API process is fine (Raspberry Pi / one container). Running multiple API
+single API process is fine (one container). Running multiple API
 instances multiplies the effective limit.
 
 Before scaling beyond one instance, put a shared limiter in front of MCP:

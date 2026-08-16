@@ -98,7 +98,7 @@ Debug builds use the `local` environment:
 Release builds use the `release` environment:
 
 - Health API: `https://familyos.deepanshujain.me/health/api/v1`
-- Backend database: Supabase Postgres behind the Raspberry Pi API
+- Backend database: Supabase Postgres
 - Auth: Supabase Auth with Sign in with Apple
 
 The app reads these generated Info.plist keys:

@@ -1,6 +1,6 @@
 # systemd
 
-Use this directory for Raspberry Pi service files if the backend is deployed without Docker.
+Use this directory for host service files if the backend is deployed without Docker.
 
 Expected service behavior:
 

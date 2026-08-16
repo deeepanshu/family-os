@@ -11,7 +11,7 @@ iOS-only family management app. Health is the first facet.
 - Drizzle.
 - Supabase Storage.
 - APNs notifications.
-- Raspberry Pi backend hosting through Cloudflare Tunnel.
+- Production API at `https://familyos.deepanshujain.me` (Cloudflare Tunnel).
 
 ## API
 
@@ -35,8 +35,8 @@ The iOS app has two build-time environments:
   at the local Bun API from the iOS simulator. The local API uses Docker
   Postgres through `DATABASE_URL`.
 - `release` - Release builds. Uses
-  `https://familyos.deepanshujain.me/health/api/v1`, which points at the Raspberry
-  Pi-hosted API. Release database storage is Supabase Postgres.
+  `https://familyos.deepanshujain.me/health/api/v1`. Release database storage is
+  Supabase Postgres.
 
 Both environments use Supabase Auth for real Sign in with Apple. The local
 backend can bypass Supabase only for smoke tests when

@@ -1,6 +1,6 @@
 # Docker
 
-Production Raspberry Pi deployment runs the Health API with Docker Compose and
+Production deployment runs the Health API with Docker Compose and
 loads secrets from the repo-local ignored `.env` file.
 
 Images are published by GitHub Actions to:
@@ -10,15 +10,15 @@ ghcr.io/deeepanshu/family-os-health-api:<git-sha>
 ghcr.io/deeepanshu/family-os-health-api:main
 ```
 
-The Pi deploys via **rpi-manager** (`POST /hooks/deploy/family-os`), which sets
+The homelab manager deploys via `POST /hooks/deploy/family-os`, which sets
 `IMAGE_TAG` and runs:
 
 1. `docker compose pull`
 2. **migrate** (one-shot `migrate` service — no-op if nothing pending)
 3. `docker compose up -d` for API + MCP
 
-No image **build** on the Pi. Migrations use `DATABASE_URL` from `.env`
-(e.g. Supabase) inside the same release image as the API.
+No image **build** on the host. Migrations use `DATABASE_URL` from `.env`
+inside the same release image as the API.
 
 ### Manual migrate (same image tag as the running app)
 
@@ -35,7 +35,7 @@ mount:
 APNS_PRIVATE_KEY_PATH=/run/secrets/family-os/AuthKey_ZG4ATXBAJW.p8
 ```
 
-### Manual deploy on the Pi
+### Manual deploy
 
 ```sh
 cd <repo>
@@ -53,7 +53,7 @@ export IMAGE_TAG=local
 docker compose --env-file .env -f infra/docker/compose.prod.yml up -d --build
 ```
 
-Smoke test on the Pi:
+Smoke test:
 
 ```sh
 curl http://localhost:3001/health/api/v1/healthcheck
@@ -62,14 +62,14 @@ curl http://localhost:3001/health/api/v1/healthcheck
 ## Dedicated MCP process
 
 Keep the iOS Health API on port `3001`. The MCP/OAuth surface runs the same API
-runtime as a separate container, bound only to Pi loopback port `3002`.
+runtime as a separate container, bound only to loopback port `3002`.
 
 The Cloudflare Tunnel ingress for `familyos.deepanshujain.me` must route to
 `http://localhost:3002`.
 
 ## Database (homelab Postgres)
 
-Application data lives on the shared Pi Postgres (`homelab-postgres` on the
+Application data lives on the shared Postgres (`homelab-postgres` on the
 external Docker network `homelab`). Auth stays on Supabase.
 
 See the `db/` tree in [deeepanshu/homelab](https://github.com/deeepanshu/homelab).
