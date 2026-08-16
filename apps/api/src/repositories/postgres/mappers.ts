@@ -31,6 +31,7 @@ export function mapCurrentFamily(row: Row): CurrentFamilyResponse {
       userId: row.user_id,
       role: row.role,
       status: row.status,
+      creatorRelationshipLabel: row.creator_relationship_label ?? undefined,
       createdAt: toIso(row.membership_created_at),
       updatedAt: toIso(row.membership_updated_at)
     }
@@ -55,6 +56,7 @@ export function mapMembership(row: Row): FamilyMembership {
     userId: row.user_id,
     role: row.role,
     status: row.status,
+    creatorRelationshipLabel: row.creator_relationship_label ?? undefined,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at)
   };
@@ -64,8 +66,6 @@ export function mapInvite(row: Row): FamilyInvite {
   return {
     id: row.id,
     familyId: row.family_id,
-    email: row.email ?? undefined,
-    role: row.role,
     status: row.status,
     expiresAt: toIso(row.expires_at),
     createdAt: toIso(row.created_at)

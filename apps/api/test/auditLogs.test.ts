@@ -51,7 +51,8 @@ async function setup(api: ReturnType<typeof app>) {
   ).json();
   await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {
     method: "POST",
-    headers: { authorization: `Bearer ${memberToken}` }
+    headers: { authorization: `Bearer ${memberToken}`, "content-type": "application/json" },
+    body: JSON.stringify({ relationshipLabel: "Father" })
   });
   return { managerToken, memberToken };
 }
@@ -61,10 +62,10 @@ describe("audit logs", () => {
     const api = app();
     const { managerToken, memberToken } = await setup(api);
     const profile = await (
-      await api.request(`${HEALTH_API_PREFIX}/people`, {
+      await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
         method: "POST",
         headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
-        body: JSON.stringify({ displayName: "Mom" })
+        body: JSON.stringify({ displayName: "Deepanshu" })
       })
     ).json();
     await api.request(`${HEALTH_API_PREFIX}/reminders`, {
@@ -99,7 +100,6 @@ describe("audit logs", () => {
         "family.created",
         "invite.created",
         "invite.accepted",
-        "profile.created",
         "reminder.created",
         "device.registered"
       ])

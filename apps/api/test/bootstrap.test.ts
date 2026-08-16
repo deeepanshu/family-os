@@ -186,7 +186,8 @@ describe("solo-first bootstrap", () => {
     })).json();
     await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {
       method: "POST",
-      headers: { authorization: `Bearer ${memberToken}` }
+      headers: { authorization: `Bearer ${memberToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ relationshipLabel: "Father" })
     });
 
     const response = await api.request(`${HEALTH_API_PREFIX}/people`, {
@@ -258,7 +259,8 @@ describe("solo-first bootstrap", () => {
 
     const accept = await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {
       method: "POST",
-      headers: { authorization: `Bearer ${memberToken}` }
+      headers: { authorization: `Bearer ${memberToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ relationshipLabel: "Father" })
     });
 
     expect(accept.status).toBe(200);
@@ -301,7 +303,8 @@ describe("solo-first bootstrap", () => {
     })).json();
     await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {
       method: "POST",
-      headers: { authorization: `Bearer ${secondToken}` }
+      headers: { authorization: `Bearer ${secondToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ relationshipLabel: "Father" })
     });
 
     await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
@@ -333,7 +336,8 @@ describe("solo-first bootstrap", () => {
 
     const response = await api.request(`${HEALTH_API_PREFIX}/invites/${secondInvite.data.token}/accept`, {
       method: "POST",
-      headers: { authorization: `Bearer ${thirdToken}` }
+      headers: { authorization: `Bearer ${thirdToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ relationshipLabel: "Father" })
     });
 
     expect(response.status).toBe(409);
@@ -373,7 +377,8 @@ describe("solo-first bootstrap", () => {
 
     const accept = await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {
       method: "POST",
-      headers: { authorization: `Bearer ${secondToken}` }
+      headers: { authorization: `Bearer ${secondToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ relationshipLabel: "Father" })
     });
 
     expect(accept.status).toBe(200);
@@ -449,7 +454,8 @@ describe("solo-first bootstrap", () => {
 
     const response = await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {
       method: "POST",
-      headers: { authorization: `Bearer ${secondToken}` }
+      headers: { authorization: `Bearer ${secondToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ relationshipLabel: "Father" })
     });
 
     expect(response.status).toBe(200);
@@ -494,7 +500,8 @@ describe("solo-first bootstrap", () => {
     // Reminders require a family in legacy model; solo may skip — only assert invite still works.
     const response = await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {
       method: "POST",
-      headers: { authorization: `Bearer ${secondToken}` }
+      headers: { authorization: `Bearer ${secondToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ relationshipLabel: "Father" })
     });
 
     expect(response.status).toBe(200);

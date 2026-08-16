@@ -5,7 +5,7 @@ import { HEALTH_API_PREFIX } from "@family-os/shared";
 import { createApp } from "../src/app";
 import { PostgresFamilyRepository } from "../src/repositories/postgres";
 import { beginRun, completeRun, seedHealthKitReadyGroup } from "./healthKitTestHelpers";
-import { setupSoloUser } from "./soloSetup";
+import { setupHousehold, setupSoloUser } from "./soloSetup";
 
 const databaseUrl = process.env.DATABASE_URL ?? "postgres://family_os:family_os@localhost:5432/family_os";
 const jwtSecret = "test-supabase-jwt-secret-with-enough-length";
@@ -187,7 +187,8 @@ describe("Postgres repository wiring", () => {
 
     const accept = await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {
       method: "POST",
-      headers: { authorization: `Bearer ${memberToken}` }
+      headers: { authorization: `Bearer ${memberToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ relationshipLabel: "Father" })
     });
     expect(accept.status).toBe(200);
 
@@ -236,6 +237,63 @@ describe("Postgres repository wiring", () => {
       10
     );
     expect(readings).toMatchObject([{ value: 104, personId: profile.data.id, source: "healthkit" }]);
+  });
+
+  it("enforces one pending invite and unique active membership", async () => {
+    const api = app();
+    const creatorToken = await jwtFor(managerId, "manager@example.com");
+    const joinerToken = await jwtFor(memberId, "member@example.com");
+    await setupSoloUser(api, creatorToken, "Deepanshu");
+    await setupHousehold(api, creatorToken, "Jain Family");
+
+    const first = await (
+      await api.request(`${HEALTH_API_PREFIX}/invites`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${creatorToken}`, "content-type": "application/json" },
+        body: JSON.stringify({})
+      })
+    ).json();
+    const second = await (
+      await api.request(`${HEALTH_API_PREFIX}/invites`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${creatorToken}`, "content-type": "application/json" },
+        body: JSON.stringify({})
+      })
+    ).json();
+    const firstPreview = await (
+      await api.request(`${HEALTH_API_PREFIX}/invites/${first.data.token}`)
+    ).json();
+    expect(firstPreview.data.status).toBe("revoked");
+
+    await setupSoloUser(api, joinerToken, "Riya");
+    const accept = await api.request(`${HEALTH_API_PREFIX}/invites/${second.data.token}/accept`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${joinerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ relationshipLabel: "Father" })
+    });
+    expect(accept.status).toBe(200);
+
+    const secondFamily = await api.request(`${HEALTH_API_PREFIX}/families`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${joinerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Second" })
+    });
+    expect(secondFamily.status).toBe(409);
+
+    const live = await (
+      await api.request(`${HEALTH_API_PREFIX}/invites`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${creatorToken}`, "content-type": "application/json" },
+        body: JSON.stringify({})
+      })
+    ).json();
+    const removed = await api.request(`${HEALTH_API_PREFIX}/families/members/${memberId}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${creatorToken}` }
+    });
+    expect(removed.status).toBe(204);
+    const afterKick = await (await api.request(`${HEALTH_API_PREFIX}/invites/${live.data.token}`)).json();
+    expect(afterKick.data.status).toBe("revoked");
   });
 
   it("preserves completed coverage when a routine sync completes", async () => {

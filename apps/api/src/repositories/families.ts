@@ -69,8 +69,6 @@ export type CreateFamilyInput = {
 
 export type CreateInviteInput = {
   actorUserId: string;
-  email?: string;
-  role: FamilyRole;
 };
 
 export type CreateProfileInput = {
@@ -206,7 +204,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       resourceId: family.id
     });
 
-    return { family, membership };
+    return this.currentFamilyPayload(family, membership);
   }
 
   async getCurrentFamily(userId: string): Promise<CurrentFamilyResponse> {
@@ -222,7 +220,28 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       return null;
     }
 
-    return { family, membership };
+    return this.currentFamilyPayload(family, membership);
+  }
+
+  private currentFamilyPayload(family: Family, membership: FamilyMembership): NonNullable<CurrentFamilyResponse> {
+    const creatorSelf = [...this.profiles.values()].find(
+      (profile) =>
+        profile.linkedUserId === family.createdByUserId &&
+        profile.relationshipLabel === "Self" &&
+        profile.status === "active"
+    );
+    const live =
+      membership.userId === family.createdByUserId
+        ? [...this.invites.values()].find(
+            (invite) => invite.familyId === family.id && currentInviteStatus(invite) === "pending"
+          )
+        : undefined;
+    return {
+      family,
+      membership,
+      creatorDisplayName: creatorSelf?.displayName,
+      liveInvite: live ? { expiresAt: live.expiresAt, status: "pending" } : undefined
+    };
   }
 
   async listMembers(actorUserId: string): Promise<FamilyMember[]> {
@@ -242,6 +261,83 @@ export class InMemoryFamilyRepository implements FamilyRepository {
           displayName: selfProfile?.displayName
         };
       });
+  }
+
+  async leaveFamily(actorUserId: string): Promise<void> {
+    const current = this.requireActiveMember(actorUserId);
+    if (current.family.createdByUserId === actorUserId) {
+      throw new HttpError(403, "creator_cannot_leave", "The family creator cannot leave. Remove other members and delete the family.");
+    }
+    this.deactivateMembership(current.family.id, actorUserId);
+    this.detachSelf(actorUserId);
+  }
+
+  async removeMember(actorUserId: string, memberUserId: string): Promise<void> {
+    const current = this.requireActiveMember(actorUserId);
+    if (current.family.createdByUserId !== actorUserId) {
+      throw new HttpError(403, "creator_required", "Only the family creator can remove a member.");
+    }
+    if (memberUserId === actorUserId) {
+      throw new HttpError(400, "cannot_remove_self", "The creator cannot remove themselves.");
+    }
+    const target = [...this.memberships.values()].find(
+      (candidate) =>
+        candidate.familyId === current.family.id &&
+        candidate.userId === memberUserId &&
+        candidate.status === "active"
+    );
+    if (!target) {
+      throw new HttpError(404, "member_not_found", "Family member was not found.");
+    }
+    this.deactivateMembership(current.family.id, memberUserId);
+    this.detachSelf(memberUserId);
+    this.revokePendingInvites(current.family.id);
+  }
+
+  async deleteFamily(actorUserId: string): Promise<void> {
+    const current = this.requireActiveMember(actorUserId);
+    if (current.family.createdByUserId !== actorUserId) {
+      throw new HttpError(403, "creator_required", "Only the family creator can delete the family.");
+    }
+    const others = [...this.memberships.values()].filter(
+      (candidate) =>
+        candidate.familyId === current.family.id &&
+        candidate.status === "active" &&
+        candidate.userId !== actorUserId
+    );
+    if (others.length > 0) {
+      throw new HttpError(409, "family_not_empty", "Remove every other member before deleting the family.");
+    }
+    this.deactivateMembership(current.family.id, actorUserId);
+    this.detachSelf(actorUserId);
+    this.revokePendingInvites(current.family.id);
+    this.families.delete(current.family.id);
+  }
+
+  private deactivateMembership(familyId: string, userId: string) {
+    const now = new Date().toISOString();
+    for (const [id, membership] of this.memberships) {
+      if (membership.familyId === familyId && membership.userId === userId && membership.status === "active") {
+        this.memberships.set(id, { ...membership, status: "removed", updatedAt: now });
+      }
+    }
+  }
+
+  private detachSelf(userId: string) {
+    const now = new Date().toISOString();
+    for (const [id, profile] of this.profiles) {
+      if (profile.linkedUserId === userId && profile.relationshipLabel === "Self" && profile.status === "active") {
+        this.profiles.set(id, { ...profile, familyId: null, updatedAt: now });
+      }
+    }
+  }
+
+  private revokePendingInvites(familyId: string) {
+    for (const [id, invite] of this.invites) {
+      if (invite.familyId === familyId && invite.status === "pending") {
+        this.invites.set(id, { ...invite, status: "revoked" });
+      }
+    }
   }
 
   async bootstrap(userId: string): Promise<BootstrapResponse> {
@@ -269,10 +365,11 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       return existing;
     }
 
+    const current = this.getCurrentFamilySync(actorUserId);
     const now = new Date().toISOString();
     const profile: HealthProfile = {
       id: crypto.randomUUID(),
-      familyId: null,
+      familyId: current?.family.id ?? null,
       linkedUserId: actorUserId,
       displayName,
       relationshipLabel: "Self",
@@ -304,23 +401,23 @@ export class InMemoryFamilyRepository implements FamilyRepository {
 
   async createInvite(input: CreateInviteInput): Promise<CreateInviteResponse> {
     const current = this.getCurrentFamilySync(input.actorUserId);
-    if (!current || current.membership.role !== "manager") {
-      throw new HttpError(403, "manager_required", "Only family managers can create invites.");
+    if (!current || current.family.createdByUserId !== input.actorUserId) {
+      throw new HttpError(403, "creator_required", "Only the family creator can create invites.");
     }
 
-    if (current.family.kind === "personal") {
-      this.families.set(current.family.id, { ...current.family, kind: "family", updatedAt: new Date().toISOString() });
+    const now = new Date();
+    for (const [id, existing] of this.invites) {
+      if (existing.familyId === current.family.id && existing.status === "pending") {
+        this.invites.set(id, { ...existing, status: "revoked" });
+      }
     }
 
     const token = crypto.randomUUID().replaceAll("-", "");
-    const now = new Date();
     const invite: FamilyInvite & { tokenHash: string } = {
       id: crypto.randomUUID(),
       familyId: current.family.id,
-      email: input.email,
-      role: input.role,
       status: "pending",
-      expiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      expiresAt: new Date(now.getTime() + 60 * 60 * 1000).toISOString(),
       createdAt: now.toISOString(),
       tokenHash: hashToken(token)
     };
@@ -330,11 +427,10 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       actorUserId: input.actorUserId,
       action: "invite.created",
       resourceType: "invite",
-      resourceId: invite.id,
-      metadata: { role: input.role }
+      resourceId: invite.id
     });
 
-    return { invite: toPublicInviteRecord(invite), token };
+    return { invite: toPublicInviteRecord(invite), token, url: "" };
   }
 
   async getInviteByToken(token: string): Promise<PublicInviteResponse> {
@@ -343,37 +439,48 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     if (!family) {
       throw new HttpError(404, "invite_not_found", "Invite was not found.");
     }
+    const creatorSelf = [...this.profiles.values()].find(
+      (profile) =>
+        profile.linkedUserId === family.createdByUserId &&
+        profile.relationshipLabel === "Self" &&
+        profile.status === "active"
+    );
     return {
       familyName: family.name,
-      role: invite.role,
+      creatorDisplayName: creatorSelf?.displayName ?? "Family member",
       status: currentInviteStatus(invite),
       expiresAt: invite.expiresAt
     };
   }
 
-  async acceptInvite(token: string, userId: string, userEmail?: string): Promise<CurrentFamilyResponse> {
+  async acceptInvite(
+    token: string,
+    userId: string,
+    input: { relationshipLabel: import("@family-os/shared").CreatorRelationshipLabel }
+  ): Promise<CurrentFamilyResponse> {
     const invite = this.findInvite(token);
     const status = currentInviteStatus(invite);
+    if (status === "expired") {
+      throw new HttpError(409, "invite_expired", "Invite has expired.");
+    }
+    if (status === "accepted") {
+      throw new HttpError(409, "invite_already_used", "Invite has already been used.");
+    }
     if (status !== "pending") {
       throw new HttpError(409, "invite_not_pending", "Invite is not pending.");
     }
-    if (invite.email && invite.email.toLowerCase() !== userEmail?.toLowerCase()) {
-      throw new HttpError(403, "invite_email_mismatch", "Invite is assigned to a different email.");
+
+    const family = this.families.get(invite.familyId);
+    if (!family) {
+      throw new HttpError(404, "invite_not_found", "Invite was not found.");
+    }
+    if (family.createdByUserId === userId) {
+      throw new HttpError(409, "invite_own_family", "You cannot join your own family invite.");
     }
 
     const existingCurrent = this.getCurrentFamilySync(userId);
     if (existingCurrent) {
-      if (existingCurrent.family.kind === "family") {
-        throw new HttpError(409, "family_already_exists", "User already has an active family.");
-      }
-      this.assertSafePersonalSwitch(existingCurrent.family.id, userId);
-      const membership = [...this.memberships.values()].find(
-        (candidate) => candidate.userId === userId && candidate.status === "active"
-      );
-      if (membership) {
-        membership.status = "removed";
-        membership.updatedAt = new Date().toISOString();
-      }
+      throw new HttpError(409, "family_already_exists", "User already has an active family.");
     }
 
     invite.status = "accepted";
@@ -382,59 +489,34 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       id: crypto.randomUUID(),
       familyId: invite.familyId,
       userId,
-      role: invite.role,
+      role: "member",
       status: "active",
+      creatorRelationshipLabel: input.relationshipLabel,
       createdAt: now,
       updatedAt: now
     };
     this.memberships.set(membership.id, membership);
+
+    for (const [id, profile] of this.profiles) {
+      if (
+        profile.linkedUserId === userId &&
+        profile.relationshipLabel === "Self" &&
+        profile.status === "active" &&
+        profile.familyId == null
+      ) {
+        this.profiles.set(id, { ...profile, familyId: invite.familyId, updatedAt: now });
+      }
+    }
     this.audit({
       familyId: invite.familyId,
       actorUserId: userId,
       action: "invite.accepted",
       resourceType: "invite",
       resourceId: invite.id,
-      metadata: { membershipId: membership.id }
+      metadata: { membershipId: membership.id, relationshipLabel: input.relationshipLabel }
     });
 
-    const family = this.families.get(invite.familyId);
-    if (!family) {
-      throw new HttpError(404, "invite_not_found", "Invite was not found.");
-    }
-
     return { family, membership };
-  }
-
-  private assertSafePersonalSwitch(familyId: string, userId: string) {
-    const activeMemberships = [...this.memberships.values()].filter(
-      (candidate) => candidate.familyId === familyId && candidate.status === "active"
-    );
-    if (activeMemberships.length !== 1 || activeMemberships[0]?.userId !== userId) {
-      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has more than one active member.");
-    }
-
-    const hasReminders = [...this.reminders.values()].some(
-      (reminder) => reminder.familyId === familyId && !reminder.deletedAt
-    );
-    if (hasReminders) {
-      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has reminders.");
-    }
-
-    const hasBloodPressure = [...this.bloodPressureReadings.values()].some(
-      (reading) => reading.familyId === familyId && !reading.deletedAt
-    );
-    if (hasBloodPressure) {
-      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has blood pressure readings.");
-    }
-    const hasSteps = [...this.healthKit.stepHours.values()].some((row) => row.familyId === familyId);
-    if (hasSteps) {
-      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has HealthKit step data.");
-    }
-    const hasSleep = [...this.healthKit.sleepDays.values()].some((row) => row.familyId === familyId);
-    if (hasSleep) {
-      throw new HttpError(409, "unsafe_workspace_switch", "Workspace has HealthKit sleep data.");
-    }
-
   }
 
   private findInvite(token: string) {
@@ -458,43 +540,11 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   }
 
   async getProfile(actorUserId: string, profileId: string): Promise<HealthProfile> {
-    const profile = this.profiles.get(profileId);
-    if (!profile || profile.status !== "active") {
-      throw new HttpError(404, "profile_not_found", "Health profile was not found.");
-    }
-    // Solo-first: owner of Self may read their profile without a household.
-    if (profile.linkedUserId === actorUserId) {
-      return profile;
-    }
-    const current = this.getCurrentFamilySync(actorUserId);
-    if (current && profile.familyId === current.family.id) {
-      return profile;
-    }
-    throw new HttpError(403, "profile_forbidden", "You do not have access to this health profile.");
+    return this.requireReadablePerson(actorUserId, profileId);
   }
 
-  async createProfile(input: CreateProfileInput): Promise<HealthProfile> {
-    const current = this.requireManager(input.actorUserId);
-    const now = new Date().toISOString();
-    const profile: HealthProfile = {
-      id: crypto.randomUUID(),
-      familyId: current.family.id,
-      displayName: input.displayName,
-      relationshipLabel: input.relationshipLabel,
-      dateOfBirth: input.dateOfBirth,
-      status: "active",
-      createdAt: now,
-      updatedAt: now
-    };
-    this.profiles.set(profile.id, profile);
-    this.audit({
-      familyId: current.family.id,
-      actorUserId: input.actorUserId,
-      action: "profile.created",
-      resourceType: "profile",
-      resourceId: profile.id
-    });
-    return profile;
+  async createProfile(_input: CreateProfileInput): Promise<HealthProfile> {
+    throw new HttpError(403, "ghost_profiles_unsupported", "Family members must join with their own app.");
   }
 
   async updateProfile(actorUserId: string, profileId: string, input: UpdateProfileInput): Promise<HealthProfile> {
@@ -542,14 +592,11 @@ export class InMemoryFamilyRepository implements FamilyRepository {
 
   async listBloodPressure(actorUserId: string, personId?: string, limit = 50): Promise<BloodPressureReading[]> {
     const self = await this.getSelfProfile(actorUserId);
-    if (!self) {
+    const target = personId ?? self?.id;
+    if (!target) {
       throw new HttpError(400, "self_profile_required", "Create your profile before continuing.");
     }
-    const target = personId ?? self.id;
-    if (target !== self.id) {
-      // Solo-first: only own Self unless later family access is wired.
-      throw new HttpError(403, "profile_forbidden", "You do not have access to this health profile.");
-    }
+    await this.requireReadablePerson(actorUserId, target);
     return [...this.bloodPressureReadings.values()]
       .filter((reading) => !reading.deletedAt && reading.source === "healthkit")
       .filter((reading) => reading.personId === target)
@@ -559,15 +606,31 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   }
 
   async getBloodPressure(actorUserId: string, readingId: string): Promise<BloodPressureReading> {
-    const self = await this.getSelfProfile(actorUserId);
-    if (!self) {
-      throw new HttpError(400, "self_profile_required", "Create your profile before continuing.");
-    }
     const reading = this.bloodPressureReadings.get(readingId);
-    if (!reading || reading.personId !== self.id || reading.deletedAt || reading.source !== "healthkit") {
+    if (!reading || reading.deletedAt || reading.source !== "healthkit") {
       throw new HttpError(404, "bp_reading_not_found", "Blood pressure reading was not found.");
     }
+    await this.requireReadablePerson(actorUserId, reading.personId);
     return stripDeleted(reading);
+  }
+
+  private requireReadablePerson(actorUserId: string, personId: string): HealthProfile {
+    const profile = this.profiles.get(personId);
+    if (!profile || profile.status !== "active") {
+      throw new HttpError(404, "profile_not_found", "Health profile was not found.");
+    }
+    if (profile.linkedUserId === actorUserId) {
+      return profile;
+    }
+    if (!profile.linkedUserId) {
+      throw new HttpError(403, "profile_forbidden", "You do not have access to this health profile.");
+    }
+    const actorFamily = this.getCurrentFamilySync(actorUserId);
+    const targetFamily = this.getCurrentFamilySync(profile.linkedUserId);
+    if (actorFamily && targetFamily && actorFamily.family.id === targetFamily.family.id) {
+      return profile;
+    }
+    throw new HttpError(403, "profile_forbidden", "You do not have access to this health profile.");
   }
 
   async getHealthKitSettings(actorUserId: string, personId?: string): Promise<HealthKitSettings> {
@@ -1092,8 +1155,6 @@ function toPublicInviteRecord(invite: FamilyInvite): FamilyInvite {
   return {
     id: invite.id,
     familyId: invite.familyId,
-    email: invite.email,
-    role: invite.role,
     status: invite.status,
     expiresAt: invite.expiresAt,
     createdAt: invite.createdAt

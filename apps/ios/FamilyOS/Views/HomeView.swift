@@ -12,6 +12,7 @@ struct HomeView: View {
                             .font(.largeTitle.bold())
                         Text(homeSubtitle)
                             .foregroundStyle(.secondary)
+                        ProfilePicker(viewModel: viewModel)
                     }
 
                     Text("Health readings are imported from Apple Health when HealthKit sync is enabled.")

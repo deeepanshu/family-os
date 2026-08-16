@@ -96,6 +96,18 @@ export class PostgresFamilyRepository implements FamilyRepository {
     return this.familyStore.listMembers(actorUserId);
   }
 
+  leaveFamily(actorUserId: string): Promise<void> {
+    return this.familyStore.leaveFamily(actorUserId);
+  }
+
+  removeMember(actorUserId: string, memberUserId: string): Promise<void> {
+    return this.familyStore.removeMember(actorUserId, memberUserId);
+  }
+
+  deleteFamily(actorUserId: string): Promise<void> {
+    return this.familyStore.deleteFamily(actorUserId);
+  }
+
   createInvite(input: CreateInviteInput): Promise<CreateInviteResponse> {
     return this.familyStore.createInvite(input);
   }
@@ -104,8 +116,12 @@ export class PostgresFamilyRepository implements FamilyRepository {
     return this.familyStore.getInviteByToken(token);
   }
 
-  acceptInvite(token: string, userId: string, userEmail?: string): Promise<CurrentFamilyResponse> {
-    return this.familyStore.acceptInvite(token, userId, userEmail);
+  acceptInvite(
+    token: string,
+    userId: string,
+    input: { relationshipLabel: import("@family-os/shared").CreatorRelationshipLabel }
+  ): Promise<CurrentFamilyResponse> {
+    return this.familyStore.acceptInvite(token, userId, input);
   }
 
   listProfiles(actorUserId: string): Promise<HealthProfile[]> {

@@ -4,6 +4,7 @@ extension HealthBootstrapViewModel {
     func loadProfiles() async {
         await request {
             profiles.profiles = try await client.listProfiles(baseURL: connection.baseURL, accessToken: auth.accessToken)
+            restoreSelectedPersonOrSelf()
             return "Loaded \(profiles.profiles.count) health profiles."
         }
     }

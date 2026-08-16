@@ -32,6 +32,7 @@ struct Family: Decodable {
     let id: String
     let name: String
     let kind: FamilyKind
+    let createdByUserId: String?
 }
 
 enum FamilyKind: String, Decodable {
@@ -44,6 +45,7 @@ struct FamilyMembership: Decodable, Identifiable {
     let userId: String
     let role: FamilyRole
     let status: MembershipStatus
+    let creatorRelationshipLabel: String?
 }
 
 struct FamilyMember: Decodable, Identifiable {
@@ -76,6 +78,32 @@ enum MembershipStatus: String, Codable {
 
 struct CreateInviteResponse: Decodable {
     let token: String
+    let url: String?
+}
+
+struct PublicInvitePreview: Decodable {
+    let familyName: String
+    let creatorDisplayName: String
+    let status: String
+    let expiresAt: String
+}
+
+enum CreatorRelationshipLabel: String, CaseIterable, Identifiable {
+    case father = "Father"
+    case mother = "Mother"
+    case husband = "Husband"
+    case wife = "Wife"
+    case partner = "Partner"
+    case son = "Son"
+    case daughter = "Daughter"
+    case brother = "Brother"
+    case sister = "Sister"
+    case grandfather = "Grandfather"
+    case grandmother = "Grandmother"
+    case grandson = "Grandson"
+    case granddaughter = "Granddaughter"
+
+    var id: String { rawValue }
 }
 
 struct HealthProfile: Decodable, Identifiable {

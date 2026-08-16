@@ -1,29 +1,38 @@
+import { CREATOR_RELATIONSHIP_LABELS } from "@family-os/shared";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
 import { requireAuth, type AppVariables } from "../auth";
+import type { AppConfig } from "../config";
+import { mcpPublicOrigin } from "../mcp/publicUrl";
 import type { InviteStore } from "../repositories/contracts";
 
-const createInviteSchema = z.object({
-  email: z.string().email().optional(),
-  role: z.enum(["manager", "member"]).default("member")
-});
+const createInviteSchema = z.object({}).passthrough();
 
 const tokenSchema = z.object({
   token: z.string().min(16).max(256)
 });
 
-export function createInviteRoutes(repository: InviteStore) {
+const acceptInviteSchema = z.object({
+  relationshipLabel: z.enum(CREATOR_RELATIONSHIP_LABELS)
+});
+
+export function inviteShareUrl(origin: string, token: string): string {
+  return `${origin.replace(/\/$/, "")}/invite/${token}`;
+}
+
+export function createInviteRoutes(repository: InviteStore, config: AppConfig) {
   const invites = new Hono<{ Variables: AppVariables }>();
 
   invites.post("/", requireAuth(), zValidator("json", createInviteSchema), async (c) => {
     const user = c.get("user");
-    const body = c.req.valid("json");
-    const data = await repository.createInvite({
-      actorUserId: user.id,
-      email: body.email,
-      role: body.role
+    const created = await repository.createInvite({
+      actorUserId: user.id
     });
+    const data = {
+      ...created,
+      url: inviteShareUrl(mcpPublicOrigin(config), created.token)
+    };
     return c.json({ data }, 201);
   });
 
@@ -33,12 +42,19 @@ export function createInviteRoutes(repository: InviteStore) {
     return c.json({ data });
   });
 
-  invites.post("/:token/accept", requireAuth(), zValidator("param", tokenSchema), async (c) => {
-    const user = c.get("user");
-    const { token } = c.req.valid("param");
-    const data = await repository.acceptInvite(token, user.id, user.email);
-    return c.json({ data });
-  });
+  invites.post(
+    "/:token/accept",
+    requireAuth(),
+    zValidator("param", tokenSchema),
+    zValidator("json", acceptInviteSchema),
+    async (c) => {
+      const user = c.get("user");
+      const { token } = c.req.valid("param");
+      const { relationshipLabel } = c.req.valid("json");
+      const data = await repository.acceptInvite(token, user.id, { relationshipLabel });
+      return c.json({ data });
+    }
+  );
 
   return invites;
 }

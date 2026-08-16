@@ -100,11 +100,24 @@ struct HealthAPIClient {
             path: "invites",
             baseURL: baseURL,
             accessToken: accessToken,
-            body: CreateInviteRequest(role: .member)
+            body: EmptyRequest()
         )
     }
 
-    func acceptInvite(baseURL: String, accessToken: String, token: String) async throws -> FamilyResponse {
+    func previewInvite(baseURL: String, token: String) async throws -> PublicInvitePreview {
+        guard !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw HealthAPIError.invalidURL
+        }
+        let encodedToken = token.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? token
+        return try await get(path: "invites/\(encodedToken)", baseURL: baseURL, accessToken: nil)
+    }
+
+    func acceptInvite(
+        baseURL: String,
+        accessToken: String,
+        token: String,
+        relationshipLabel: String
+    ) async throws -> FamilyResponse {
         guard !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw HealthAPIError.invalidURL
         }
@@ -113,8 +126,20 @@ struct HealthAPIClient {
             path: "invites/\(encodedToken)/accept",
             baseURL: baseURL,
             accessToken: accessToken,
-            body: EmptyRequest()
+            body: AcceptInviteRequest(relationshipLabel: relationshipLabel)
         )
+    }
+
+    func leaveFamily(baseURL: String, accessToken: String) async throws {
+        try await postEmpty(path: "families/leave", baseURL: baseURL, accessToken: accessToken)
+    }
+
+    func removeMember(baseURL: String, accessToken: String, userId: String) async throws {
+        try await delete(path: "families/members/\(userId)", baseURL: baseURL, accessToken: accessToken)
+    }
+
+    func deleteFamily(baseURL: String, accessToken: String) async throws {
+        try await delete(path: "families/current", baseURL: baseURL, accessToken: accessToken)
     }
 
     func listProfiles(baseURL: String, accessToken: String) async throws -> [HealthProfile] {
@@ -353,6 +378,35 @@ struct HealthAPIClient {
         return try await decodeEnvelope(T.self, from: request)
     }
 
+    private func postEmpty(path: String, baseURL: String, accessToken: String) async throws {
+        try await sendEmpty(method: "POST", path: path, baseURL: baseURL, accessToken: accessToken)
+    }
+
+    private func delete(path: String, baseURL: String, accessToken: String) async throws {
+        try await sendEmpty(method: "DELETE", path: path, baseURL: baseURL, accessToken: accessToken)
+    }
+
+    private func sendEmpty(method: String, path: String, baseURL: String, accessToken: String) async throws {
+        guard !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw HealthAPIError.missingToken
+        }
+        guard let url = endpointURL(baseURL: baseURL, path: path) else {
+            throw HealthAPIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "accept")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "authorization")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw HealthAPIError.badStatus(-1, nil, code: nil)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let error = try? JSONDecoder().decode(APIErrorEnvelope.self, from: data)
+            throw HealthAPIError.badStatus(http.statusCode, error?.error.message, code: error?.error.code)
+        }
+    }
+
     private func get<T: Decodable>(path: String, baseURL: String, accessToken: String?) async throws -> T {
         guard let url = endpointURL(baseURL: baseURL, path: path) else {
             throw HealthAPIError.invalidURL
@@ -415,8 +469,8 @@ private struct CreateFamilyRequest: Encodable {
     let name: String
 }
 
-private struct CreateInviteRequest: Encodable {
-    let role: FamilyRole
+private struct AcceptInviteRequest: Encodable {
+    let relationshipLabel: String
 }
 
 private struct CreateProfileRequest: Encodable {

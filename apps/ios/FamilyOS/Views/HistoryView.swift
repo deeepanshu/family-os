@@ -8,6 +8,11 @@ struct HistoryView: View {
             List {
                 Section {
                     ProfilePicker(viewModel: viewModel)
+                    if viewModel.isViewingAnotherMember {
+                        Text("Looking at \(viewModel.selectedProfile?.displayName ?? "this person"). History is read-only.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                     Button("Refresh") {
                         Task { await refreshHistory(showsFeedback: true) }
                     }

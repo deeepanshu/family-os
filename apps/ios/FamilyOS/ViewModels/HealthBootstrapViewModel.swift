@@ -16,6 +16,7 @@ final class HealthBootstrapViewModel: ObservableObject {
     @Published var isStartingUp = false
     @Published var needsProfileSetup = false
     @Published var startupError: Error?
+    @Published var pendingInvitePreview: PublicInvitePreview?
 
     let client: HealthAPIClient
     let healthKitClient: HealthKitClient
@@ -95,6 +96,38 @@ final class HealthBootstrapViewModel: ObservableObject {
         profiles.hasSelectedProfile
     }
 
+    var isViewingAnotherMember: Bool {
+        guard let selected = selectedProfile else { return false }
+        if let selfProfile, selected.id == selfProfile.id {
+            return false
+        }
+        if let signedIn = auth.signedInUserId, selected.linkedUserId == signedIn {
+            return false
+        }
+        return selected.linkedUserId != nil && selected.linkedUserId != auth.signedInUserId
+    }
+
+    var canWriteSelectedPersonHealth: Bool {
+        !isViewingAnotherMember
+    }
+
+    var shouldShowInviteAccept: Bool {
+        pendingInviteToken != nil && family.currentFamilyName == nil && hasAccessToken
+    }
+
+    func restoreSelectedPersonOrSelf() {
+        if let selectedId = Optional(profiles.selectedProfileId),
+           !selectedId.isEmpty,
+           profiles.profiles.contains(where: { $0.id == selectedId }) {
+            return
+        }
+        if let selfProfile {
+            profiles.selectedProfileId = selfProfile.id
+        } else {
+            profiles.selectedProfileId = profiles.profiles.first?.id ?? ""
+        }
+    }
+
     func saveConnectionSettings() {
         connection.save(to: defaults)
         statusMessage = "Saved connection settings."
@@ -108,6 +141,7 @@ final class HealthBootstrapViewModel: ObservableObject {
         readings.clear()
         healthKit.clear()
         pendingInviteToken = nil
+        pendingInvitePreview = nil
         needsProfileSetup = false
         startupError = nil
         statusMessage = "Signed out."
@@ -157,13 +191,9 @@ final class HealthBootstrapViewModel: ObservableObject {
 
         do {
             try await refreshSessionIfNeeded()
-            if let token = pendingInviteToken {
-                _ = try await client.acceptInvite(baseURL: connection.baseURL, accessToken: auth.accessToken, token: token)
-                pendingInviteToken = nil
-            }
-
             let bootstrap = try await client.bootstrap(baseURL: connection.baseURL, accessToken: auth.accessToken)
             applyBootstrap(bootstrap)
+            await loadPendingInvitePreview()
         } catch {
             startupError = error
             statusMessage = error.localizedDescription
@@ -194,16 +224,32 @@ final class HealthBootstrapViewModel: ObservableObject {
         }
     }
 
+    func loadPendingInvitePreview() async {
+        guard let token = pendingInviteToken, !token.isEmpty else {
+            pendingInvitePreview = nil
+            return
+        }
+        do {
+            pendingInvitePreview = try await client.previewInvite(baseURL: connection.baseURL, token: token)
+        } catch {
+            pendingInvitePreview = nil
+        }
+    }
+
     func applyBootstrap(_ response: BootstrapResponse) {
+        family.signedInUserId = auth.signedInUserId
         family.currentFamilyName = response.family?.name
         family.familyKind = response.family?.kind
         family.currentFamilyRole = response.membership?.role
+        family.createdByUserId = response.family?.createdByUserId
+        family.creatorRelationshipLabel = response.membership?.creatorRelationshipLabel
         profiles.profiles = response.profiles
         if let selfProfile = response.selfProfile {
             profiles.selectedProfileId = selfProfile.id
         } else if profiles.profiles.count == 1 {
             profiles.selectedProfileId = profiles.profiles[0].id
         }
+        restoreSelectedPersonOrSelf()
         needsProfileSetup = response.needsProfileSetup
         healthKit.linkedProfileId = response.selfProfile?.id
     }
@@ -281,6 +327,7 @@ final class HealthBootstrapViewModel: ObservableObject {
             let token = components.host == "invite" ? pathComponents.first : pathComponents.dropFirst().first
             guard let token, !token.isEmpty else { return false }
             pendingInviteToken = token
+            pendingInvitePreview = nil
             return true
         }
         if let queryToken = components.queryItems?.first(where: { $0.name == "invite" })?.value, !queryToken.isEmpty {

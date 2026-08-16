@@ -60,12 +60,19 @@ export interface FamilyStore {
   getCurrentFamily(userId: string): Promise<CurrentFamilyResponse>;
   bootstrap(userId: string): Promise<BootstrapResponse>;
   listMembers(actorUserId: string): Promise<FamilyMember[]>;
+  leaveFamily(actorUserId: string): Promise<void>;
+  removeMember(actorUserId: string, memberUserId: string): Promise<void>;
+  deleteFamily(actorUserId: string): Promise<void>;
 }
 
 export interface InviteStore {
   createInvite(input: CreateInviteInput): Promise<CreateInviteResponse>;
   getInviteByToken(token: string): Promise<PublicInviteResponse>;
-  acceptInvite(token: string, userId: string, userEmail?: string): Promise<CurrentFamilyResponse>;
+  acceptInvite(
+    token: string,
+    userId: string,
+    input: { relationshipLabel: import("@family-os/shared").CreatorRelationshipLabel }
+  ): Promise<CurrentFamilyResponse>;
 }
 
 export interface ProfileStore {

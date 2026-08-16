@@ -8,6 +8,10 @@ const createFamilySchema = z.object({
   name: z.string().trim().min(1).max(120)
 });
 
+const memberParam = z.object({
+  userId: z.string().uuid()
+});
+
 export function createFamilyRoutes(repository: FamilyStore) {
   const families = new Hono<{ Variables: AppVariables }>();
 
@@ -30,10 +34,25 @@ export function createFamilyRoutes(repository: FamilyStore) {
     return c.json({ data });
   });
 
+  families.delete("/current", async (c) => {
+    await repository.deleteFamily(c.get("user").id);
+    return c.body(null, 204);
+  });
+
   families.get("/members", async (c) => {
     const user = c.get("user");
     const data = await repository.listMembers(user.id);
     return c.json({ data });
+  });
+
+  families.delete("/members/:userId", zValidator("param", memberParam), async (c) => {
+    await repository.removeMember(c.get("user").id, c.req.valid("param").userId);
+    return c.body(null, 204);
+  });
+
+  families.post("/leave", async (c) => {
+    await repository.leaveFamily(c.get("user").id);
+    return c.body(null, 204);
   });
 
   return families;

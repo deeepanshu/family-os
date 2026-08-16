@@ -6,6 +6,7 @@ import { requireAuth, type AppVariables } from "./auth";
 import type { FamilyRepository } from "./repositories/families";
 import { createFamilyRoutes } from "./routes/families";
 import { createInviteRoutes } from "./routes/invites";
+import { createInviteLandingRoutes } from "./routes/inviteLanding";
 import { createPeopleRoutes } from "./routes/people";
 import { createBloodPressureRoutes } from "./routes/bloodPressure";
 import { createHealthKitRoutes } from "./routes/healthKit";
@@ -100,7 +101,7 @@ export function createApp(options: AppOptions = {}) {
   health.route("/bootstrap", createBootstrapRoutes(repositories.families));
   health.route("/me", createMeRoutes(repositories.profiles));
   health.route("/families", createFamilyRoutes(repositories.families));
-  health.route("/invites", createInviteRoutes(repositories.invites));
+  health.route("/invites", createInviteRoutes(repositories.invites, config));
   health.route("/people", createPeopleRoutes(repositories.profiles));
   health.route("/readings/blood-pressure", createBloodPressureRoutes(repositories.readings));
   health.route("/healthkit", createHealthKitRoutes(repositories.healthKit));
@@ -113,6 +114,7 @@ export function createApp(options: AppOptions = {}) {
   app.route("/", createMcpWellKnownRoutes(config));
   app.route(mcpPublicPath(config), createMcpRoutes({ config, repositories }));
   app.route(mcpOAuthPath(config), createOAuthConsentRoutes({ config, mcpConnections: repositories.mcpConnections }));
+  app.route("/invite", createInviteLandingRoutes(repositories.invites));
   app.route(HEALTH_API_PREFIX, health);
 
   app.notFound((c) =>
