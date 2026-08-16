@@ -1,21 +1,23 @@
 # HealthKit (iOS)
 
-**Status: correctness-first rewrite — milestone 3 (BP + sleep + workouts, FG + shared BG).**
+**Status:** correctness-first rewrite — BP + sleep + workouts + foreground steps; background incremental sync for BP / sleep / workouts.
 
-## Architecture (boring on purpose)
+Source of truth for this slice: `docs/HEALTHKIT_BACKGROUND_SYNC_RELIABILITY_PLAN.md`
+
+## Architecture
 
 ```
-HealthKit samples (BP / sleepAnalysis / HKWorkout)
+HealthKit samples (BP / sleepAnalysis / HKWorkout / step hours)
   → natural-key ops
   → SQLite pending_ops
   → HealthKitSyncWorker POST /healthkit/ops:batch
   → Postgres UPSERT by natural key
-  → POST /groups/{vitals|sleep|workouts}/ready
+  → POST runs/complete
 ```
 
-Shared orchestration: `HealthKitSyncCoordinator` (start-import → auth → fetch+enqueue → drain → ready).
+Shared orchestration: `HealthKitRunEngine` (begin → auth → fetch+enqueue → drain → complete).
 
-Background: `HealthKitBackgroundSync` (observers + `enableBackgroundDelivery` + BGTask drain/reimport).
+Background: `HealthKitBackgroundSync` (observers + `enableBackgroundDelivery` + `BGProcessingTask` + `BGAppRefreshTask`).
 **Not** `@MainActor` — registration lives on `NotificationAppDelegate`.
 
 ## Components
@@ -25,21 +27,30 @@ Background: `HealthKitBackgroundSync` (observers + `enableBackgroundDelivery` + 
 | `HealthKitInstallationId.swift` | Keychain installation UUID |
 | `HealthKitSyncStore.swift` | Single GRDB DB (`pending_ops`, config, group_state) |
 | `HealthKitSyncWorker.swift` | Serialized drain of pending ops only |
-| `HealthKitBloodPressureSync.swift` | 90-day BP query + enqueue |
-| `HealthKitSleepDaySync.swift` | 90-day sleep day totals + enqueue |
-| `HealthKitWorkoutSync.swift` | 90-day all-type workouts (fat summary + events + activities) |
-| `HealthKitSyncCoordinator.swift` | Multi-group FG/BG import+drain+ready |
-| `HealthKitBackgroundSync.swift` | BGTask + observers + become-active drain |
+| `HealthKitBloodPressureSync.swift` | BP query + enqueue |
+| `HealthKitSleepDaySync.swift` | Sleep day totals + enqueue |
+| `HealthKitWorkoutSync.swift` | All-type workouts (fat summary + events + activities) |
+| `HealthKitStepsSync.swift` | UTC hourly steps (foreground first) |
+| `HealthKitRunEngine.swift` | One run module + process-wide gate |
+| `HealthKitBackgroundSync.swift` | BG tasks + observers + become-active incremental |
 | `../Clients/HealthKitClient.swift` | Availability + multi-group authorization |
+
+## Background policy
+
+- Incremental `kind: sync` only. Never import, never repair, never delete.
+- Allowlist: vitals (BP), sleep, workouts. Activity/steps stay foreground-only.
+- Observer ack first, then at most one metric, ~25s, `waitSeconds: 0`. If the app is active, observers only schedule.
+- Opening the app runs `runBoundedSync(reason: "become_active")` then leftover drain.
+- Session refresh is `HealthSessionRefresher` (Keychain). Background refresh failure does not sign the user out.
+- Heart rate is not observed until vitals uploads it.
+- Opt-in lock-screen notification after a non-empty observer / processing / refresh sync.
 
 ## Current scope
 
-- Foreground **Sync now** for **vitals (BP)**, **sleep**, and **workouts** when enabled
-- Shared coordinator for all implemented groups
+- Foreground Import / Sync / Repair for vitals (BP), sleep, workouts, and activity (steps)
 - Local queue until server ACK
 - Idempotent `op_id` + natural-key upsert
-- Group ready gate (sleep/workouts may ready with 0 samples; BP still errors on empty)
-- Background delivery + BG processing task (soft-fail; token from Keychain)
+- Background delivery + processing + app-refresh (soft-fail)
 
 ## Workouts (locked)
 

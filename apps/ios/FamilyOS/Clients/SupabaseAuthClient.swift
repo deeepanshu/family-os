@@ -184,3 +184,109 @@ extension JSONDecoder {
         return decoder
     }
 }
+
+/// Keychain-backed session refresh that background HealthKit can call without
+/// hopping to a `@MainActor` view model. Refresh failure never signs the user out.
+enum HealthSessionRefresher: Sendable {
+    /// Returns a usable access token, or nil if the caller should skip.
+    /// `force` ignores local JWT expiry so a 401 can still recover.
+    static func freshAccessToken(force: Bool = false) async -> String? {
+        await HealthSessionRefreshGate.shared.freshAccessToken(force: force)
+    }
+
+    /// One 401 retry after a forced refresh. Other errors propagate unchanged.
+    static func withFreshHealthToken<T: Sendable>(
+        perform: @Sendable (String) async throws -> T
+    ) async throws -> T {
+        guard let token = await freshAccessToken() else {
+            throw HealthAPIError.missingToken
+        }
+        do {
+            return try await perform(token)
+        } catch let error as HealthAPIError {
+            guard isUnauthorized(error) else { throw error }
+            guard let retry = await freshAccessToken(force: true) else { throw error }
+            return try await perform(retry)
+        }
+    }
+
+    static func isUnauthorized(_ error: HealthAPIError) -> Bool {
+        if case .badStatus(let status, _, _) = error {
+            return status == 401
+        }
+        return false
+    }
+
+    fileprivate static func loadOrRefresh(force: Bool) async -> String? {
+        let keychain = KeychainStore()
+        let access = (try? keychain.string(for: DefaultsKey.accessToken)) ?? ""
+        guard !access.isEmpty else {
+            CrashReporting.log("healthkit_bg_sync_skip_no_token")
+            return nil
+        }
+        if !force, !AccessTokenExpiry.requiresRefresh(access) {
+            return access
+        }
+
+        let refresh = (try? keychain.string(for: DefaultsKey.refreshToken)) ?? ""
+        guard !refresh.isEmpty else {
+            CrashReporting.log("healthkit_bg_sync_skip_no_refresh_token")
+            return nil
+        }
+
+        let defaults = UserDefaults.standard
+        let supabaseURL = nonEmpty(defaults.string(forKey: DefaultsKey.supabaseURL))
+            ?? AppEnvironment.current.supabaseURL
+        let anonKey = nonEmpty(defaults.string(forKey: DefaultsKey.supabaseAnonKey))
+            ?? AppEnvironment.current.supabaseAnonKey
+        guard !supabaseURL.isEmpty, !anonKey.isEmpty else {
+            CrashReporting.log("healthkit_bg_sync_skip_no_supabase_config")
+            return nil
+        }
+
+        do {
+            let session = try await SupabaseAuthClient().refreshSession(
+                supabaseURL: supabaseURL,
+                anonKey: anonKey,
+                refreshToken: refresh
+            )
+            try keychain.set(session.accessToken, for: DefaultsKey.accessToken)
+            if let nextRefresh = session.refreshToken, !nextRefresh.isEmpty {
+                try keychain.set(nextRefresh, for: DefaultsKey.refreshToken)
+            }
+            return session.accessToken
+        } catch {
+            CrashReporting.healthKitNonFatal(
+                .syncFailed,
+                stage: .syncFailed,
+                message: "healthkit_bg_token_refresh_failed",
+                underlying: error
+            )
+            return nil
+        }
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+actor HealthSessionRefreshGate {
+    static let shared = HealthSessionRefreshGate()
+
+    private var inFlight: Task<String?, Never>?
+
+    func freshAccessToken(force: Bool) async -> String? {
+        if let inFlight {
+            return await inFlight.value
+        }
+        let task = Task {
+            await HealthSessionRefresher.loadOrRefresh(force: force)
+        }
+        inFlight = task
+        let value = await task.value
+        inFlight = nil
+        return value
+    }
+}

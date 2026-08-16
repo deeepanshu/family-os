@@ -11,6 +11,7 @@ struct FamilyOSApp: App {
         WindowGroup {
             ContentView(viewModel: viewModel)
                 .onAppear {
+                    HealthKitBackgroundSync.setSceneActive(true)
                     if let pending = NotificationAppDelegate.pendingNotificationUserInfo {
                         NotificationAppDelegate.pendingNotificationUserInfo = nil
                         viewModel.handleNotification(userInfo: pending)
@@ -29,9 +30,12 @@ struct FamilyOSApp: App {
                     _ = viewModel.handleInviteURL(url)
                 }
                 .onChange(of: scenePhase) { _, phase in
+                    HealthKitBackgroundSync.setSceneActive(phase == .active)
                     if phase == .active {
                         HealthKitBackgroundSync.scheduleBackgroundSync()
+                        HealthKitBackgroundSync.scheduleAppRefresh()
                         Task {
+                            await HealthKitBackgroundSync.runBoundedSync(reason: "become_active")
                             await HealthKitBackgroundSync.drainIfConfigured()
                         }
                     }
@@ -52,6 +56,7 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, @preconcur
         // Nonisolated BG registration — never own handlers on a @MainActor coordinator.
         HealthKitBackgroundSync.registerBackgroundTask()
         HealthKitBackgroundSync.scheduleBackgroundSync()
+        HealthKitBackgroundSync.scheduleAppRefresh()
         // Rebuild observers/delivery from the saved enabled set (plan §6.7).
         Task {
             await HealthKitBackgroundSync.reconcileFromLocalStore()

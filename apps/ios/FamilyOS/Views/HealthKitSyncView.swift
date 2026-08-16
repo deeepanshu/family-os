@@ -52,6 +52,10 @@ struct HealthKitSyncView: View {
                         .accessibilityIdentifier("healthkit.timezoneConfirm")
                 }
 
+                Toggle("Notify when background sync uploads", isOn: backgroundAlertsBinding)
+                    .disabled(healthKit.isBusy)
+                    .accessibilityIdentifier("healthkit.backgroundSyncAlerts")
+
                 Button(action: { Task { await viewModel.syncAllEnabledHealthMetrics() } }) {
                     HStack {
                         if healthKit.activeRun != nil {
@@ -248,6 +252,15 @@ struct HealthKitSyncView: View {
         case .workouts: return "Workouts"
         default: return metric.displayName
         }
+    }
+
+    private var backgroundAlertsBinding: Binding<Bool> {
+        Binding(
+            get: { healthKit.backgroundSyncAlertsEnabled },
+            set: { enabled in
+                Task { await healthKit.setBackgroundSyncAlertsEnabled(enabled) }
+            }
+        )
     }
 
     private func binding(for metric: HealthKitSyncMetric) -> Binding<Bool> {

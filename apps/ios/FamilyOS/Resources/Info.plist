@@ -59,6 +59,7 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.deepanshujain.familyos.healthkit-sync</string>
+		<string>com.deepanshujain.familyos.healthkit-refresh</string>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>

@@ -342,4 +342,5 @@ enum DefaultsKey {
     static let userId = "familyOS.userId"
     static let userEmail = "familyOS.userEmail"
     static let pendingInviteToken = "familyOS.pendingInviteToken"
+    static let healthkitBackgroundSyncAlerts = "familyOS.healthkitBackgroundSyncAlerts"
 }

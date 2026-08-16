@@ -1,6 +1,8 @@
 import BackgroundTasks
 import Foundation
 import HealthKit
+import UIKit
+import UserNotifications
 
 /// Background HealthKit pipeline (nonisolated — never MainActor-owned).
 ///
@@ -11,6 +13,8 @@ import HealthKit
 /// Fail soft: never crash; log stages via CrashReporting only.
 enum HealthKitBackgroundSync {
     static let taskIdentifier = "com.deepanshujain.familyos.healthkit-sync"
+    static let refreshTaskIdentifier = "com.deepanshujain.familyos.healthkit-refresh"
+    static let observerWallTimeoutSeconds: TimeInterval = 25
 
     /// Steps ships foreground-only first. Do not let adding a foreground metric
     /// widen the existing bounded background sync path.
@@ -36,6 +40,38 @@ enum HealthKitBackgroundSync {
 
     private static let observerState = ObserverState()
 
+    /// Scene-phase mirror so observers never read `UIApplication` (MainActor).
+    private final class SceneState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var isActive = false
+
+        func setActive(_ active: Bool) {
+            lock.lock()
+            isActive = active
+            lock.unlock()
+        }
+
+        var active: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return isActive
+        }
+    }
+
+    private static let sceneState = SceneState()
+
+    static func setSceneActive(_ active: Bool) {
+        sceneState.setActive(active)
+    }
+
+    static func sceneIsActive() -> Bool {
+        sceneState.active
+    }
+
+    static func currentApplicationState() -> UIApplication.State {
+        sceneState.active ? .active : .background
+    }
+
     // MARK: - Launch
 
     /// Call from `application(_:didFinishLaunchingWithOptions:)` — must be nonisolated.
@@ -47,6 +83,14 @@ enum HealthKitBackgroundSync {
                 return
             }
             handleProcessingTask(processing)
+        }
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: refreshTaskIdentifier, using: nil) { task in
+            guard let refresh = task as? BGAppRefreshTask else {
+                CrashReporting.log("healthkit_bg_unexpected_refresh_type")
+                task.setTaskCompleted(success: false)
+                return
+            }
+            handleRefreshTask(refresh)
         }
         CrashReporting.log("healthkit_bg_task_registered")
     }
@@ -60,6 +104,17 @@ enum HealthKitBackgroundSync {
             CrashReporting.log("healthkit_bg_task_scheduled")
         } catch {
             CrashReporting.log("healthkit_bg_task_schedule_failed \(error.localizedDescription)")
+        }
+    }
+
+    nonisolated static func scheduleAppRefresh() {
+        let request = BGAppRefreshTaskRequest(identifier: refreshTaskIdentifier)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            CrashReporting.log("healthkit_bg_refresh_scheduled")
+        } catch {
+            CrashReporting.log("healthkit_bg_refresh_schedule_failed \(error.localizedDescription)")
         }
     }
 
@@ -90,6 +145,15 @@ enum HealthKitBackgroundSync {
                 }
             }
             CrashReporting.log("healthkit_bg_delivery_disabled type=\(type.identifier)")
+        }
+
+        // Heart rate was previously observed under vitals but is not uploaded yet.
+        if let hr = HKObjectType.quantityType(forIdentifier: .heartRate) {
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                healthStore.disableBackgroundDelivery(for: hr) { _, _ in
+                    cont.resume()
+                }
+            }
         }
 
         for type in wantedTypes {
@@ -125,6 +189,7 @@ enum HealthKitBackgroundSync {
         startObservers(for: Array(wantedTypes))
         if !wantedTypes.isEmpty {
             scheduleBackgroundSync()
+            scheduleAppRefresh()
         }
     }
 
@@ -164,9 +229,6 @@ enum HealthKitBackgroundSync {
             if let dia = HKObjectType.quantityType(forIdentifier: .bloodPressureDiastolic) {
                 types.append(dia)
             }
-            if let hr = HKObjectType.quantityType(forIdentifier: .heartRate) {
-                types.append(hr)
-            }
         }
         if metrics.contains(.workouts) {
             types.append(HKObjectType.workoutType())
@@ -186,13 +248,23 @@ enum HealthKitBackgroundSync {
                     return
                 }
                 CrashReporting.log("healthkit_observer_fired type=\(type.identifier)")
-                // Acknowledge delivery promptly. Do NOT start a full multi-metric
-                // runBoundedSync here: that holds the process-wide run gate and
-                // races user Import/Sync (SQLITE + "run already in progress",
-                // and leaves server status stuck on `syncing` / Interrupted).
-                // Background work is scheduled for a later BG processing wake.
+                let appState = currentApplicationState()
+                var enabled: Set<HealthKitSyncMetric> = []
+                var needing: Set<String> = []
+                if let store = try? HealthKitSyncStore.shared, let config = try? store.configuration() {
+                    enabled = decodeEnabledGroups(config.enabledGroupsJSON)
+                    needing = (try? store.groupsNeedingInitialImport()) ?? []
+                }
+                let action = observerWakeAction(
+                    sampleType: type,
+                    applicationState: appState,
+                    enabled: enabled,
+                    needingInitialImport: needing
+                )
+                CrashReporting.log("healthkit_observer_action \(describe(action)) type=\(type.identifier)")
+                // Acknowledge delivery before any engine work so Apple is not held.
                 completionHandler()
-                scheduleBackgroundSync()
+                handleObserverAction(action)
             }
             healthStore.execute(query)
             built.append(query)
@@ -200,10 +272,88 @@ enum HealthKitBackgroundSync {
         observerState.replaceAll(with: built, stoppingOn: healthStore)
     }
 
+    // MARK: - Observer policy
+
+    enum ObserverWakeAction: Equatable {
+        case ignore
+        case scheduleOnly
+        case runMetricThenSchedule(HealthKitSyncMetric)
+    }
+
+    /// Pure policy seam: one changed sample type maps to at most one incremental
+    /// metric, and never starts work while the user is in the foreground.
+    static func observerWakeAction(
+        sampleType: HKSampleType,
+        applicationState: UIApplication.State,
+        enabled: Set<HealthKitSyncMetric>,
+        needingInitialImport: Set<String>
+    ) -> ObserverWakeAction {
+        guard let metric = metric(for: sampleType), backgroundMetrics.contains(metric) else {
+            return .ignore
+        }
+        guard enabled.contains(metric) else {
+            return .scheduleOnly
+        }
+        if needingInitialImport.contains(metric.rawValue) {
+            return .scheduleOnly
+        }
+        if applicationState == .active {
+            return .scheduleOnly
+        }
+        return .runMetricThenSchedule(metric)
+    }
+
+    static func metric(for sampleType: HKSampleType) -> HealthKitSyncMetric? {
+        if let sleep = HKObjectType.categoryType(forIdentifier: .sleepAnalysis), sampleType == sleep {
+            return .sleep
+        }
+        if let sys = HKObjectType.quantityType(forIdentifier: .bloodPressureSystolic), sampleType == sys {
+            return .vitals
+        }
+        if let dia = HKObjectType.quantityType(forIdentifier: .bloodPressureDiastolic), sampleType == dia {
+            return .vitals
+        }
+        if sampleType == HKObjectType.workoutType() {
+            return .workouts
+        }
+        return nil
+    }
+
+    private static func describe(_ action: ObserverWakeAction) -> String {
+        switch action {
+        case .ignore:
+            return "ignore"
+        case .scheduleOnly:
+            return "schedule_only"
+        case .runMetricThenSchedule(let metric):
+            return "run:\(metric.rawValue)"
+        }
+    }
+
+    private static func handleObserverAction(_ action: ObserverWakeAction) {
+        switch action {
+        case .ignore:
+            return
+        case .scheduleOnly:
+            scheduleBackgroundSync()
+            scheduleAppRefresh()
+        case .runMetricThenSchedule(let metric):
+            scheduleBackgroundSync()
+            scheduleAppRefresh()
+            Task {
+                await runBoundedSync(
+                    reason: "observer",
+                    metrics: [metric],
+                    wallTimeoutSeconds: observerWallTimeoutSeconds
+                )
+            }
+        }
+    }
+
     // MARK: - BG task + foreground drain
 
-    /// Holds BGProcessingTask for cross-isolation completion (Apple's type is not Sendable).
-    private final class BGTaskHandle: @unchecked Sendable {
+    /// Holds Apple BG task objects for cross-isolation completion (they are not Sendable).
+    private final class BGProcessingHandle: @unchecked Sendable {
         let task: BGProcessingTask
         private let lock = NSLock()
         private var didComplete = false
@@ -221,9 +371,28 @@ enum HealthKitBackgroundSync {
         }
     }
 
+    private final class BGRefreshHandle: @unchecked Sendable {
+        let task: BGAppRefreshTask
+        private let lock = NSLock()
+        private var didComplete = false
+
+        init(_ task: BGAppRefreshTask) {
+            self.task = task
+        }
+
+        func complete(success: Bool) {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !didComplete else { return }
+            didComplete = true
+            task.setTaskCompleted(success: success)
+        }
+    }
+
     private static func handleProcessingTask(_ task: BGProcessingTask) {
-        scheduleBackgroundSync() // chain next opportunity
-        let handle = BGTaskHandle(task)
+        scheduleBackgroundSync()
+        scheduleAppRefresh()
+        let handle = BGProcessingHandle(task)
         task.expirationHandler = {
             handle.complete(success: false)
             CrashReporting.log("healthkit_bg_task_expired")
@@ -235,7 +404,21 @@ enum HealthKitBackgroundSync {
         }
     }
 
-    /// Lightweight path for app become-active: drain pending ops if config exists (no import).
+    private static func handleRefreshTask(_ task: BGAppRefreshTask) {
+        scheduleAppRefresh()
+        let handle = BGRefreshHandle(task)
+        task.expirationHandler = {
+            handle.complete(success: false)
+            CrashReporting.log("healthkit_bg_refresh_expired")
+        }
+        Task {
+            await runBoundedSync(reason: "bg_refresh")
+            handle.complete(success: true)
+            CrashReporting.log("healthkit_bg_refresh_completed")
+        }
+    }
+
+    /// Lightweight path for leftover outbox (including activity) after incremental sync.
     static func foregroundDrainBatchSize(hasPendingActivity: Bool) -> Int {
         hasPendingActivity
             ? HealthKitRunEngine.activityInitialImportUploadBatchSize
@@ -249,7 +432,7 @@ enum HealthKitBackgroundSync {
                 CrashReporting.log("healthkit_fg_drain_skip_no_config")
                 return
             }
-            guard let token = try? loadAccessToken(), !token.isEmpty else {
+            guard let token = await HealthSessionRefresher.freshAccessToken(), !token.isEmpty else {
                 CrashReporting.log("healthkit_fg_drain_skip_no_token")
                 return
             }
@@ -259,11 +442,13 @@ enum HealthKitBackgroundSync {
             let worker = HealthKitSyncWorker(
                 store: store,
                 postBatch: { batch in
-                    try await client.postHealthKitOpsBatch(
-                        baseURL: baseURL,
-                        accessToken: token,
-                        body: batch
-                    )
+                    try await HealthSessionRefresher.withFreshHealthToken { accessToken in
+                        try await client.postHealthKitOpsBatch(
+                            baseURL: baseURL,
+                            accessToken: accessToken,
+                            body: batch
+                        )
+                    }
                 },
                 batchSize: foregroundDrainBatchSize(hasPendingActivity: hasPendingActivity)
             )
@@ -285,7 +470,11 @@ enum HealthKitBackgroundSync {
     /// Incremental routine sync for each saved enabled group whose initial
     /// import is complete. Never imports history, never deletes, never shows
     /// authorization UI, and serializes through the shared run gate.
-    static func runBoundedSync(reason: String) async {
+    static func runBoundedSync(
+        reason: String,
+        metrics: Set<HealthKitSyncMetric>? = nil,
+        wallTimeoutSeconds: TimeInterval? = nil
+    ) async {
         CrashReporting.healthKit(.syncStarted, extra: ["reason": reason, "mode": "background"])
         do {
             let store = try HealthKitSyncStore.shared
@@ -293,14 +482,16 @@ enum HealthKitBackgroundSync {
                 CrashReporting.log("healthkit_bg_sync_skip_no_config")
                 return
             }
-            guard let token = try? loadAccessToken(), !token.isEmpty else {
+            guard await HealthSessionRefresher.freshAccessToken() != nil else {
                 CrashReporting.log("healthkit_bg_sync_skip_no_token")
                 return
             }
 
             let enabled = decodeEnabledGroups(config.enabledGroupsJSON)
                 .intersection(HealthKitSyncMetric.productMetrics)
-            guard !enabled.isEmpty else {
+            let requested = metrics ?? enabled
+            let scoped = enabled.intersection(requested)
+            guard !scoped.isEmpty else {
                 CrashReporting.log("healthkit_bg_sync_skip_no_groups")
                 return
             }
@@ -309,7 +500,7 @@ enum HealthKitBackgroundSync {
             // never turns into a hidden history import (plan §6.7).
             let needingImport = try store.groupsNeedingInitialImport()
             let eligibility = incrementalEligibility(
-                enabled: enabled,
+                enabled: scoped,
                 needingInitialImport: needingImport
             )
             let eligible = eligibility.eligible
@@ -326,7 +517,6 @@ enum HealthKitBackgroundSync {
 
             let baseURL = loadBaseURL()
             let client = HealthAPIClient()
-            let accessToken = token
             let personId = config.personId
             let installationId = config.installationId
             let timezoneVersion = config.timezoneVersion
@@ -334,36 +524,42 @@ enum HealthKitBackgroundSync {
 
             let deps = HealthKitRunDependencies(
                 beginRun: { metric, kind in
-                    try await client.beginHealthKitRun(
-                        baseURL: baseURL,
-                        accessToken: accessToken,
-                        group: metric.rawValue,
-                        installationId: installationId,
-                        personId: personId,
-                        timezoneVersion: timezoneVersion,
-                        kind: kind.rawValue
-                    )
+                    try await HealthSessionRefresher.withFreshHealthToken { accessToken in
+                        try await client.beginHealthKitRun(
+                            baseURL: baseURL,
+                            accessToken: accessToken,
+                            group: metric.rawValue,
+                            installationId: installationId,
+                            personId: personId,
+                            timezoneVersion: timezoneVersion,
+                            kind: kind.rawValue
+                        )
+                    }
                 },
                 completeRun: { metric, kind, descriptor, presentNaturalKeys in
-                    try await client.completeHealthKitRun(
-                        baseURL: baseURL,
-                        accessToken: accessToken,
-                        group: metric.rawValue,
-                        installationId: installationId,
-                        personId: personId,
-                        timezoneVersion: timezoneVersion,
-                        kind: kind.rawValue,
-                        rangeStartAt: descriptor.rangeStartAt,
-                        rangeEndAt: descriptor.rangeEndAt,
-                        presentNaturalKeys: presentNaturalKeys
-                    )
+                    try await HealthSessionRefresher.withFreshHealthToken { accessToken in
+                        try await client.completeHealthKitRun(
+                            baseURL: baseURL,
+                            accessToken: accessToken,
+                            group: metric.rawValue,
+                            installationId: installationId,
+                            personId: personId,
+                            timezoneVersion: timezoneVersion,
+                            kind: kind.rawValue,
+                            rangeStartAt: descriptor.rangeStartAt,
+                            rangeEndAt: descriptor.rangeEndAt,
+                            presentNaturalKeys: presentNaturalKeys
+                        )
+                    }
                 },
                 postBatch: { batch in
-                    try await client.postHealthKitOpsBatch(
-                        baseURL: baseURL,
-                        accessToken: accessToken,
-                        body: batch
-                    )
+                    try await HealthSessionRefresher.withFreshHealthToken { accessToken in
+                        try await client.postHealthKitOpsBatch(
+                            baseURL: baseURL,
+                            accessToken: accessToken,
+                            body: batch
+                        )
+                    }
                 },
                 // A background wake must never request authorization: HealthKit
                 // may present its system permission UI. A user-triggered command
@@ -382,24 +578,43 @@ enum HealthKitBackgroundSync {
             do {
                 // Never wait: if the user holds the gate, skip quietly.
                 try await HealthKitRunGate.shared.withExclusiveRun(waitSeconds: 0) {
-                    for metric in eligible {
-                        do {
-                            _ = try await engine.run(HealthKitRunRequest(metric: metric, kind: .sync))
-                        } catch {
-                            // One metric's failure never stops later eligible metrics.
-                            CrashReporting.healthKitNonFatal(
-                                .syncFailed,
-                                stage: .syncFailed,
-                                message: "bg_metric_sync_failed_continue",
-                                group: metric.rawValue,
-                                metric: metric.scopeMetricKey,
-                                underlying: error
-                            )
+                    let work: @Sendable () async throws -> Void = {
+                        for metric in eligible {
+                            do {
+                                let result = try await engine.run(HealthKitRunRequest(metric: metric, kind: .sync))
+                                HealthKitBackgroundSyncAlert.notifyIfNeeded(
+                                    metric: metric,
+                                    appliedCount: result.appliedCount,
+                                    reason: reason
+                                )
+                            } catch {
+                                // One metric's failure never stops later eligible metrics.
+                                CrashReporting.healthKitNonFatal(
+                                    .syncFailed,
+                                    stage: .syncFailed,
+                                    message: "bg_metric_sync_failed_continue",
+                                    group: metric.rawValue,
+                                    metric: metric.scopeMetricKey,
+                                    underlying: error
+                                )
+                            }
                         }
+                    }
+                    if let wallTimeoutSeconds {
+                        try await HealthKitRunEngine.withTimeout(
+                            seconds: wallTimeoutSeconds,
+                            label: "\(reason)_wall",
+                            operation: work
+                        )
+                    } else {
+                        try await work()
                     }
                 }
             } catch HealthKitRunError.runInProgress {
                 CrashReporting.log("healthkit_bg_sync_skip_run_in_progress")
+                return
+            } catch {
+                CrashReporting.log("healthkit_observer_sync_timeout \(error.localizedDescription)")
                 return
             }
             CrashReporting.healthKit(.syncCompleted, extra: ["reason": reason, "mode": "background"])
@@ -438,10 +653,6 @@ enum HealthKitBackgroundSync {
         return (eligible, skipped)
     }
 
-    private static func loadAccessToken() throws -> String? {
-        try KeychainStore().string(for: DefaultsKey.accessToken)
-    }
-
     private static func loadBaseURL() -> String {
         if let saved = UserDefaults.standard.string(forKey: DefaultsKey.baseURL)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -449,5 +660,55 @@ enum HealthKitBackgroundSync {
             return saved
         }
         return AppEnvironment.current.apiBaseURL
+    }
+}
+
+enum HealthKitBackgroundSyncAlert {
+    static func shouldNotify(
+        reason: String,
+        appliedCount: Int,
+        alertsEnabled: Bool,
+        applicationState: UIApplication.State
+    ) -> Bool {
+        guard alertsEnabled else { return false }
+        guard appliedCount > 0 else { return false }
+        guard applicationState != .active else { return false }
+        switch reason {
+        case "observer", "bg_task", "bg_refresh":
+            return true
+        default:
+            return false
+        }
+    }
+
+    static func notifyIfNeeded(metric: HealthKitSyncMetric, appliedCount: Int, reason: String) {
+        let state = HealthKitBackgroundSync.currentApplicationState()
+        let enabled = UserDefaults.standard.bool(forKey: DefaultsKey.healthkitBackgroundSyncAlerts)
+        guard shouldNotify(
+            reason: reason,
+            appliedCount: appliedCount,
+            alertsEnabled: enabled,
+            applicationState: state
+        ) else {
+            CrashReporting.log("healthkit_bg_alert_skipped reason=\(reason) applied=\(appliedCount)")
+            return
+        }
+
+        let content = UNMutableNotificationContent()
+        content.title = "\(metric.displayName) synced"
+        content.body = appliedCount == 1 ? "1 reading uploaded" : "\(appliedCount) readings uploaded"
+        content.sound = .default
+        let request = UNNotificationRequest(
+            identifier: "healthkit-bg-sync.\(metric.rawValue)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                CrashReporting.log("healthkit_bg_alert_failed \(error.localizedDescription)")
+            } else {
+                CrashReporting.log("healthkit_bg_alert_posted metric=\(metric.rawValue) applied=\(appliedCount)")
+            }
+        }
     }
 }

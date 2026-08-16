@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 
 /// A locally active run for one metric (plan §5.3: only local activity renders
 /// as active progress).
@@ -54,7 +55,9 @@ final class HealthKitSyncStateViewModel: ObservableObject {
 
     @Published var enabledMetrics: Set<HealthKitSyncMetric> = []
     @Published var confirmTimezoneChange = false
-    @Published var backgroundSyncAlertsEnabled = false
+    @Published var backgroundSyncAlertsEnabled = UserDefaults.standard.bool(
+        forKey: DefaultsKey.healthkitBackgroundSyncAlerts
+    )
 
     /// Shared busy state (plan §5.5): lives in the observable feature model so
     /// every conflicting control can lock while a save or run is in flight.
@@ -74,7 +77,9 @@ final class HealthKitSyncStateViewModel: ObservableObject {
         selectedTimezone = TimeZone.current.identifier
         enabledMetrics = []
         confirmTimezoneChange = false
-        backgroundSyncAlertsEnabled = false
+        backgroundSyncAlertsEnabled = UserDefaults.standard.bool(
+            forKey: DefaultsKey.healthkitBackgroundSyncAlerts
+        )
         isSavingSettings = false
         activeRun = nil
         sessionErrors = [:]
@@ -154,7 +159,24 @@ final class HealthKitSyncStateViewModel: ObservableObject {
 
     @discardableResult
     func setBackgroundSyncAlertsEnabled(_ enabled: Bool) async -> Bool {
-        backgroundSyncAlertsEnabled = false
-        return false
+        if enabled {
+            let granted = await requestNotificationAuthorization()
+            guard granted else {
+                backgroundSyncAlertsEnabled = false
+                UserDefaults.standard.set(false, forKey: DefaultsKey.healthkitBackgroundSyncAlerts)
+                return false
+            }
+        }
+        backgroundSyncAlertsEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: DefaultsKey.healthkitBackgroundSyncAlerts)
+        return enabled
+    }
+
+    private func requestNotificationAuthorization() async -> Bool {
+        await withCheckedContinuation { continuation in
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
+                continuation.resume(returning: granted)
+            }
+        }
     }
 }
