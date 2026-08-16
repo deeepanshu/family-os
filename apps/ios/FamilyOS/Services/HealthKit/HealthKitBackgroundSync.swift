@@ -40,6 +40,26 @@ enum HealthKitBackgroundSync {
 
     private static let observerState = ObserverState()
 
+    /// Scene-phase mirror so observers never read `UIApplication` (MainActor).
+    private static let sceneLock = NSLock()
+    private static var sceneIsActiveFlag = false
+
+    static func setSceneActive(_ active: Bool) {
+        sceneLock.lock()
+        sceneIsActiveFlag = active
+        sceneLock.unlock()
+    }
+
+    static func sceneIsActive() -> Bool {
+        sceneLock.lock()
+        defer { sceneLock.unlock() }
+        return sceneIsActiveFlag
+    }
+
+    static func currentApplicationState() -> UIApplication.State {
+        sceneIsActive() ? .active : .background
+    }
+
     // MARK: - Launch
 
     /// Call from `application(_:didFinishLaunchingWithOptions:)` — must be nonisolated.
@@ -315,15 +335,6 @@ enum HealthKitBackgroundSync {
                     wallTimeoutSeconds: observerWallTimeoutSeconds
                 )
             }
-        }
-    }
-
-    static func currentApplicationState() -> UIApplication.State {
-        if Thread.isMainThread {
-            return UIApplication.shared.applicationState
-        }
-        return DispatchQueue.main.sync {
-            UIApplication.shared.applicationState
         }
     }
 

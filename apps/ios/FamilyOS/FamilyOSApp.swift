@@ -11,6 +11,7 @@ struct FamilyOSApp: App {
         WindowGroup {
             ContentView(viewModel: viewModel)
                 .onAppear {
+                    HealthKitBackgroundSync.setSceneActive(true)
                     if let pending = NotificationAppDelegate.pendingNotificationUserInfo {
                         NotificationAppDelegate.pendingNotificationUserInfo = nil
                         viewModel.handleNotification(userInfo: pending)
@@ -29,6 +30,7 @@ struct FamilyOSApp: App {
                     _ = viewModel.handleInviteURL(url)
                 }
                 .onChange(of: scenePhase) { _, phase in
+                    HealthKitBackgroundSync.setSceneActive(phase == .active)
                     if phase == .active {
                         HealthKitBackgroundSync.scheduleBackgroundSync()
                         HealthKitBackgroundSync.scheduleAppRefresh()
