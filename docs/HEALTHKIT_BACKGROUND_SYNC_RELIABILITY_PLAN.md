@@ -470,42 +470,14 @@ None that block PR 1–2. Product can later decide:
 
 ## PR Plan
 
-### PR 1 — Nonisolated session refresh + 401 retry
+Shipping as **one PR** (requested): session refresh, drop HR delivery, observer/refresh/become-active incremental sync, opt-in completion alerts, and docs.
 
-- **Title:** `fix(ios): refresh HealthKit session off the main actor`
-- **Files:** new `HealthSessionRefresher.swift`; `HealthBootstrapViewModel.refreshSessionIfNeeded`; `HealthKitBackgroundSync.loadAccessToken` / `runBoundedSync` / `drainIfConfigured`; tests.
+- **Title:** `feat(ios): make HealthKit background sync actually run`
+- **Files:** `HealthKitBackgroundSync.swift`; `SupabaseAuthClient.swift` (`HealthSessionRefresher`); `FamilyOSApp.swift`; `Info.plist`; `HealthBootstrapViewModel.swift`; `HealthKitSyncStateViewModel.swift`; `HealthKitSyncView.swift`; HealthKit README; this plan; `HealthKitRunEngineTests.swift`.
 - **Depends on:** nothing.
-- **Change:** One Keychain-backed refresher. Background loads a fresh token before begin/drain. Closures retry once on 401. Refresh failure does not sign the user out.
+- **Change:** Refresh tokens off the main actor with one 401 retry; run a short single-metric incremental sync on observer wakes when the app is not active; incremental sync on become-active; register `BGAppRefreshTask`; stop observing heart rate; opt-in lock-screen notification after a non-empty background upload.
 
-### PR 2 — Stop heart-rate background delivery
-
-- **Title:** `fix(ios): stop observing heart rate until vitals uploads it`
-- **Files:** `HealthKitBackgroundSync.backgroundTypes`; tests for `backgroundTypes` / wake mapping if exposed.
-- **Depends on:** none (can land before or after PR 1).
-- **Change:** Remove HR from the observer/delivery set so existing installs disable it on next reconcile.
-
-### PR 3 — Observer wake, become-active incremental, app refresh
-
-- **Title:** `feat(ios): run incremental HealthKit sync on observer and refresh wakes`
-- **Files:** `HealthKitBackgroundSync.swift`; `FamilyOSApp.swift`; `Info.plist`; tests for `observerWakeAction` and metric-filtered `runBoundedSync`.
-- **Depends on:** PR 1 (otherwise the new wakes still 401). PR 2 preferred first so HR does not trigger empty BP syncs.
-- **Change:** Single-metric observer work after ack; become-active calls `runBoundedSync` then leftover drain; register/schedule `BGAppRefreshTask`.
-
-### PR 4 — Opt-in lock-screen completion alerts
-
-- **Title:** `feat(ios): notify when background HealthKit sync uploads`
-- **Files:** new `HealthKitBackgroundSyncAlert` helper; `HealthKitSyncStateViewModel.setBackgroundSyncAlertsEnabled`; HealthKit settings toggle UI if it is not already visible; `HealthKitBackgroundSync.runBoundedSync` after each metric result; unit tests for `shouldNotify`.
-- **Depends on:** PR 3 (otherwise there is almost nothing to notify about on a locked phone).
-- **Change:** Persist the existing toggle. Request notification permission on enable. After observer / processing / refresh `sync` with `appliedCount > 0`, post one local notification (`{displayName} synced` / `{n} reading(s) uploaded`). No start notification. No notify on become-active or empty runs.
-
-### PR 5 — Docs only
-
-- **Title:** `docs: record HealthKit background sync reliability policy`
-- **Files:** `apps/ios/FamilyOS/Services/HealthKit/README.md`; `docs/HEALTHKIT_SYNC_AND_MCP_PRODUCT_PLAN.md` §9; this document stays the slice source of truth.
-- **Depends on:** PR 3 merged; PR 4 if you want the alert policy in-tree at the same time.
-- **Change:** Remove coordinator fiction; mark product-plan Phase 5 complete; point remaining work here.
-
-### Explicitly not in this stack
+### Explicitly not in this PR
 
 - Heart-rate daily upload.
 - Steps background delivery.

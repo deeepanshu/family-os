@@ -1,3 +1,5 @@
+import HealthKit
+import UIKit
 import XCTest
 @testable import FamilyOS
 
@@ -318,6 +320,101 @@ final class HealthKitRunEngineTests: XCTestCase {
 
         XCTAssertEqual(eligibility.eligible, [.vitals, .workouts])
         XCTAssertEqual(eligibility.skipped, [.sleep, .activity])
+    }
+
+    func testObserverWakeRunsSingleImportedMetricWhenBackgrounded() {
+        guard let workout = Optional(HKObjectType.workoutType()) else {
+            return XCTFail("Missing workout type")
+        }
+        let action = HealthKitBackgroundSync.observerWakeAction(
+            sampleType: workout,
+            applicationState: .background,
+            enabled: [.workouts, .sleep],
+            needingInitialImport: []
+        )
+        XCTAssertEqual(action, .runMetricThenSchedule(.workouts))
+    }
+
+    func testObserverWakeSchedulesOnlyWhenAppIsActive() {
+        let action = HealthKitBackgroundSync.observerWakeAction(
+            sampleType: HKObjectType.workoutType(),
+            applicationState: .active,
+            enabled: [.workouts],
+            needingInitialImport: []
+        )
+        XCTAssertEqual(action, .scheduleOnly)
+    }
+
+    func testObserverWakeSchedulesOnlyWhenImportIsStillRequired() {
+        let action = HealthKitBackgroundSync.observerWakeAction(
+            sampleType: HKObjectType.workoutType(),
+            applicationState: .background,
+            enabled: [.workouts],
+            needingInitialImport: [HealthKitSyncMetric.workouts.rawValue]
+        )
+        XCTAssertEqual(action, .scheduleOnly)
+    }
+
+    func testObserverWakeIgnoresHeartRate() {
+        guard let hr = HKQuantityType.quantityType(forIdentifier: .heartRate) else {
+            return XCTFail("Missing heart rate type")
+        }
+        let action = HealthKitBackgroundSync.observerWakeAction(
+            sampleType: hr,
+            applicationState: .background,
+            enabled: [.vitals],
+            needingInitialImport: []
+        )
+        XCTAssertEqual(action, .ignore)
+    }
+
+    func testBackgroundAlertPolicyIsCompletionOnly() {
+        XCTAssertTrue(
+            HealthKitBackgroundSyncAlert.shouldNotify(
+                reason: "observer",
+                appliedCount: 2,
+                alertsEnabled: true,
+                applicationState: .background
+            )
+        )
+        XCTAssertFalse(
+            HealthKitBackgroundSyncAlert.shouldNotify(
+                reason: "observer",
+                appliedCount: 0,
+                alertsEnabled: true,
+                applicationState: .background
+            )
+        )
+        XCTAssertFalse(
+            HealthKitBackgroundSyncAlert.shouldNotify(
+                reason: "become_active",
+                appliedCount: 3,
+                alertsEnabled: true,
+                applicationState: .active
+            )
+        )
+        XCTAssertFalse(
+            HealthKitBackgroundSyncAlert.shouldNotify(
+                reason: "bg_task",
+                appliedCount: 1,
+                alertsEnabled: false,
+                applicationState: .background
+            )
+        )
+        XCTAssertTrue(
+            HealthKitBackgroundSyncAlert.shouldNotify(
+                reason: "bg_refresh",
+                appliedCount: 1,
+                alertsEnabled: true,
+                applicationState: .inactive
+            )
+        )
+    }
+
+    func testUnauthorizedMatcher() {
+        XCTAssertTrue(HealthSessionRefresher.isUnauthorized(.badStatus(401, "expired", code: "unauthorized")))
+        XCTAssertFalse(HealthSessionRefresher.isUnauthorized(.badStatus(500, "boom", code: "sync_failed")))
+        XCTAssertFalse(HealthSessionRefresher.isUnauthorized(.missingToken))
     }
 
     private func makeEngine(

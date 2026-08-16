@@ -450,6 +450,7 @@ extension HealthBootstrapViewModel {
         guard !succeeded.isEmpty else { return }
         await HealthKitBackgroundSync.reconcileDeliveryAndObservers(for: enabledSnapshot)
         HealthKitBackgroundSync.scheduleBackgroundSync()
+        HealthKitBackgroundSync.scheduleAppRefresh()
     }
 
     // MARK: - Local persistence
