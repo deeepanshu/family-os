@@ -52,6 +52,7 @@ export const familyInvites = pgTable(
     invitedByUserId: uuid("invited_by_user_id").notNull(),
     email: text("email"),
     tokenHash: text("token_hash").notNull(),
+    shareToken: text("share_token"),
     role: text("role", { enum: ["manager", "member"] }).notNull(),
     status: text("status", { enum: ["pending", "accepted", "revoked", "expired"] }).notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),

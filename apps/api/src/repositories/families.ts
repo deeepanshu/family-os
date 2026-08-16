@@ -6,6 +6,7 @@ import type {
   BloodPressureReading,
   BootstrapResponse,
   CompleteHealthKitRunInput,
+  AcceptInviteInput,
   CreatedInvite,
   CurrentFamilyResponse,
   Family,
@@ -134,7 +135,7 @@ export interface FamilyRepository
 export class InMemoryFamilyRepository implements FamilyRepository {
   private readonly families = new Map<string, Family>();
   private readonly memberships = new Map<string, FamilyMembership>();
-  private readonly invites = new Map<string, FamilyInvite & { tokenHash: string }>();
+  private readonly invites = new Map<string, FamilyInvite & { tokenHash: string; token: string }>();
   private readonly profiles = new Map<string, HealthProfile>();
   private readonly bloodPressureReadings = new Map<
     string,
@@ -170,7 +171,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     const family: Family = {
       id: crypto.randomUUID(),
       name: input.name,
-      kind: input.kind ?? "family",
+      kind: "family",
       createdByUserId: input.userId,
       createdAt: now,
       updatedAt: now
@@ -220,7 +221,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     }
 
     const family = this.families.get(membership.familyId);
-    if (!family) {
+    if (!family || family.kind === "personal") {
       return null;
     }
 
@@ -244,7 +245,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       family,
       membership,
       creatorDisplayName: creatorSelf?.displayName,
-      liveInvite: live ? { expiresAt: live.expiresAt, status: "pending" } : undefined
+      liveInvite: live ? { expiresAt: live.expiresAt, status: "pending", token: live.token } : undefined
     };
   }
 
@@ -357,6 +358,8 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     return {
       family: current?.family ?? null,
       membership: current?.membership ?? null,
+      creatorDisplayName: current?.creatorDisplayName,
+      liveInvite: current?.liveInvite,
       profiles,
       selfProfile,
       needsProfileSetup: selfProfile === null
@@ -417,13 +420,14 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     }
 
     const token = crypto.randomUUID().replaceAll("-", "");
-    const invite: FamilyInvite & { tokenHash: string } = {
+    const invite: FamilyInvite & { tokenHash: string; token: string } = {
       id: crypto.randomUUID(),
       familyId: current.family.id,
       status: "pending",
       expiresAt: new Date(now.getTime() + 60 * 60 * 1000).toISOString(),
       createdAt: now.toISOString(),
-      tokenHash: hashToken(token)
+      tokenHash: hashToken(token),
+      token
     };
     this.invites.set(invite.id, invite);
     this.audit({
@@ -457,11 +461,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     };
   }
 
-  async acceptInvite(
-    token: string,
-    userId: string,
-    input: { relationshipLabel: import("@family-os/shared").CreatorRelationshipLabel }
-  ): Promise<CurrentFamilyResponse> {
+  async acceptInvite(token: string, userId: string, input: AcceptInviteInput): Promise<CurrentFamilyResponse> {
     const invite = this.findInvite(token);
     const status = currentInviteStatus(invite);
     if (status === "expired") {
@@ -1089,11 +1089,11 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     }
 
     const family = this.families.get(membership.familyId);
-    if (!family) {
+    if (!family || family.kind === "personal") {
       return null;
     }
 
-    return { family, membership };
+    return this.currentFamilyPayload(family, membership);
   }
 
   private audit(input: AuditInput) {

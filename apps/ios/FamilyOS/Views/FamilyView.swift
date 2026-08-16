@@ -43,7 +43,7 @@ struct FamilyView: View {
                 }
                 if let creator = viewModel.family.creatorDisplayName ?? creatorNameFromRoster,
                    let label = viewModel.family.creatorRelationshipLabel {
-                    Text("\(creator) is my \(label)")
+                    Text("\(creator) is my \(label.rawValue)")
                 }
             }
             rosterSection

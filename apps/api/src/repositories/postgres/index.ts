@@ -6,6 +6,7 @@ import type {
   BloodPressureReading,
   BootstrapResponse,
   CompleteHealthKitRunInput,
+  AcceptInviteInput,
   CreatedInvite,
   CurrentFamilyResponse,
   FamilyMember,
@@ -116,11 +117,7 @@ export class PostgresFamilyRepository implements FamilyRepository {
     return this.familyStore.getInviteByToken(token);
   }
 
-  acceptInvite(
-    token: string,
-    userId: string,
-    input: { relationshipLabel: import("@family-os/shared").CreatorRelationshipLabel }
-  ): Promise<CurrentFamilyResponse> {
+  acceptInvite(token: string, userId: string, input: AcceptInviteInput): Promise<CurrentFamilyResponse> {
     return this.familyStore.acceptInvite(token, userId, input);
   }
 

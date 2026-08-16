@@ -46,7 +46,7 @@ async function setup(api: ReturnType<typeof app>) {
     await api.request(`${HEALTH_API_PREFIX}/invites`, {
       method: "POST",
       headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ email: "member@example.com", role: "member" })
+      body: JSON.stringify({})
     })
   ).json();
   await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {

@@ -31,6 +31,7 @@ export class PostgresRepositoryContext {
       join families f on f.id = fm.family_id
       where fm.user_id = ${userId}
         and fm.status = 'active'
+        and f.kind = 'family'
       limit 1
     `;
     return row ? mapCurrentFamily(row) : null;

@@ -1,8 +1,11 @@
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
+import type { AppConfig } from "../config";
 import { requireAuth, type AppVariables } from "../auth";
+import { mcpPublicOrigin } from "../mcp/publicUrl";
 import type { FamilyStore } from "../repositories/contracts";
+import { attachHouseholdUrls } from "./inviteUrls";
 
 const createFamilySchema = z.object({
   name: z.string().trim().min(1).max(120)
@@ -12,7 +15,7 @@ const memberParam = z.object({
   userId: z.string().uuid()
 });
 
-export function createFamilyRoutes(repository: FamilyStore) {
+export function createFamilyRoutes(repository: FamilyStore, config: AppConfig) {
   const families = new Hono<{ Variables: AppVariables }>();
 
   families.use("*", requireAuth());
@@ -25,12 +28,12 @@ export function createFamilyRoutes(repository: FamilyStore) {
       userId: user.id
     });
 
-    return c.json({ data }, 201);
+    return c.json({ data: attachHouseholdUrls(data, mcpPublicOrigin(config)) }, 201);
   });
 
   families.get("/current", async (c) => {
     const user = c.get("user");
-    const data = await repository.getCurrentFamily(user.id);
+    const data = attachHouseholdUrls(await repository.getCurrentFamily(user.id), mcpPublicOrigin(config));
     return c.json({ data });
   });
 

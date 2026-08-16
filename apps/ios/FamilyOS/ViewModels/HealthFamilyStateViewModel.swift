@@ -12,7 +12,7 @@ final class HealthFamilyViewModel: ObservableObject {
     @Published var createdByUserId: String?
     @Published var signedInUserId: String?
     @Published var creatorDisplayName: String?
-    @Published var creatorRelationshipLabel: String?
+    @Published var creatorRelationshipLabel: CreatorRelationshipLabel?
     @Published var members: [FamilyMember] = []
 
     var isPersonalWorkspace: Bool {

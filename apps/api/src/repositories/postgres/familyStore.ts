@@ -1,7 +1,8 @@
-import type { BootstrapResponse, CreatedInvite, CurrentFamilyResponse, FamilyMember, FamilyMembership, HealthProfile, PublicInviteResponse } from "@family-os/shared";
+import type { AcceptInviteInput, BootstrapResponse, CreatedInvite, CurrentFamilyResponse, FamilyMember, FamilyMembership, HealthProfile, PublicInviteResponse } from "@family-os/shared";
 import { HttpError } from "../../errors";
 import type { CreateFamilyInput, CreateInviteInput, CreateProfileInput, UpdateProfileInput } from "../families";
 import { currentInviteStatus, hashToken, PostgresRepositoryContext } from "./context";
+import { toIso } from "./dateUtils";
 import { mapFamily, mapInvite, mapMembership, mapProfile } from "./mappers";
 import { requireRow } from "./types";
 
@@ -14,12 +15,25 @@ export class PostgresFamilyStore {
       throw new HttpError(409, "family_already_exists", "User already has an active family.");
     }
 
-    // Household is opt-in; default kind is shared "family" (not a fake personal workspace).
-    const kind = input.kind ?? "family";
     return this.context.sql.begin(async (tx: any) => {
+      await tx`
+        update family_memberships fm
+        set status = 'removed', updated_at = now()
+        from families f
+        where fm.family_id = f.id
+          and f.kind = 'personal'
+          and fm.user_id = ${input.userId}
+          and fm.status = 'active'
+      `;
+      await tx`
+        update people
+        set family_id = null, updated_at = now()
+        where linked_user_id = ${input.userId}
+          and family_id in (select id from families where kind = 'personal')
+      `;
       const [family] = await tx`
         insert into families (name, kind, created_by_user_id)
-        values (${input.name}, ${kind}, ${input.userId})
+        values (${input.name}, 'family', ${input.userId})
         returning *
       `;
       const createdFamily = requireRow(family, "Failed to create family.");
@@ -51,12 +65,19 @@ export class PostgresFamilyStore {
         tx
       );
 
-      return { family: mapFamily(createdFamily), membership: mapMembership(createdMembership) };
+      return this.withHouseholdExtras({
+        family: mapFamily(createdFamily),
+        membership: mapMembership(createdMembership)
+      });
     });
   }
 
-  getCurrentFamily(userId: string): Promise<CurrentFamilyResponse> {
-    return this.context.getCurrentFamily(userId);
+  async getCurrentFamily(userId: string): Promise<CurrentFamilyResponse> {
+    const current = await this.context.getCurrentFamily(userId);
+    if (!current) {
+      return null;
+    }
+    return this.withHouseholdExtras(current);
   }
 
   async listMembers(actorUserId: string): Promise<FamilyMember[]> {
@@ -160,7 +181,7 @@ export class PostgresFamilyStore {
   private async revokePendingInvites(tx: any, familyId: string) {
     await tx`
       update family_invites
-      set status = 'revoked', updated_at = now()
+      set status = 'revoked', share_token = null, updated_at = now()
       where family_id = ${familyId}
         and status = 'pending'
     `;
@@ -169,7 +190,7 @@ export class PostgresFamilyStore {
   async bootstrap(userId: string): Promise<BootstrapResponse> {
     await this.context.syncAuthUser(userId);
     // Solo-first: do not auto-create a family. Household is opt-in via createFamily later.
-    const current = await this.context.getCurrentFamily(userId);
+    const current = await this.getCurrentFamily(userId);
     const selfProfile = await this.getSelfProfile(userId);
     const profiles = selfProfile
       ? current
@@ -180,9 +201,52 @@ export class PostgresFamilyStore {
     return {
       family: current?.family ?? null,
       membership: current?.membership ?? null,
+      creatorDisplayName: current?.creatorDisplayName,
+      liveInvite: current?.liveInvite,
       profiles,
       selfProfile,
       needsProfileSetup: selfProfile === null
+    };
+  }
+
+  private async withHouseholdExtras(
+    current: NonNullable<CurrentFamilyResponse>
+  ): Promise<NonNullable<CurrentFamilyResponse>> {
+    const [creator] = await this.context.sql`
+      select display_name
+      from people
+      where linked_user_id = ${current.family.createdByUserId}
+        and relationship_label = 'Self'
+        and status = 'active'
+      limit 1
+    `;
+    let liveInvite: NonNullable<CurrentFamilyResponse>["liveInvite"];
+    if (current.family.createdByUserId === current.membership.userId) {
+      const [invite] = await this.context.sql`
+        select share_token, expires_at, status
+        from family_invites
+        where family_id = ${current.family.id}
+          and status = 'pending'
+        limit 1
+      `;
+      if (invite?.share_token && currentInviteStatus({
+        id: "live",
+        familyId: current.family.id,
+        status: invite.status,
+        expiresAt: toIso(invite.expires_at),
+        createdAt: current.family.createdAt
+      }) === "pending") {
+        liveInvite = {
+          expiresAt: toIso(invite.expires_at),
+          status: "pending",
+          token: invite.share_token
+        };
+      }
+    }
+    return {
+      ...current,
+      creatorDisplayName: creator?.display_name ?? current.creatorDisplayName,
+      liveInvite
     };
   }
 
@@ -228,14 +292,14 @@ export class PostgresFamilyStore {
     return this.context.sql.begin(async (tx: any) => {
       await tx`
         update family_invites
-        set status = 'revoked', updated_at = now()
+        set status = 'revoked', share_token = null, updated_at = now()
         where family_id = ${current.family.id}
           and status = 'pending'
       `;
 
       const token = crypto.randomUUID().replaceAll("-", "");
       const [invite] = await tx`
-        insert into family_invites (family_id, invited_by_user_id, email, token_hash, role, status, expires_at)
+        insert into family_invites (family_id, invited_by_user_id, email, token_hash, role, status, expires_at, share_token)
         values (
           ${current.family.id},
           ${input.actorUserId},
@@ -243,7 +307,8 @@ export class PostgresFamilyStore {
           ${hashToken(token)},
           'member',
           'pending',
-          now() + interval '1 hour'
+          now() + interval '1 hour',
+          ${token}
         )
         returning *
       `;
@@ -286,11 +351,7 @@ export class PostgresFamilyStore {
     };
   }
 
-  async acceptInvite(
-    token: string,
-    userId: string,
-    input: { relationshipLabel: import("@family-os/shared").CreatorRelationshipLabel }
-  ): Promise<CurrentFamilyResponse> {
+  async acceptInvite(token: string, userId: string, input: AcceptInviteInput): Promise<CurrentFamilyResponse> {
     await this.context.syncAuthUser(userId);
     return this.context.sql.begin(async (tx: any) => {
       const [inviteRow] = await tx`
@@ -323,10 +384,12 @@ export class PostgresFamilyStore {
       }
 
       const [existingMembership] = await tx`
-        select *
-        from family_memberships
-        where user_id = ${userId}
-          and status = 'active'
+        select fm.*
+        from family_memberships fm
+        join families f on f.id = fm.family_id
+        where fm.user_id = ${userId}
+          and fm.status = 'active'
+          and f.kind = 'family'
         for update
       `;
       if (existingMembership) {
@@ -335,7 +398,7 @@ export class PostgresFamilyStore {
 
       await tx`
         update family_invites
-        set status = 'accepted', accepted_by_user_id = ${userId}, accepted_at = now()
+        set status = 'accepted', share_token = null, accepted_by_user_id = ${userId}, accepted_at = now()
         where id = ${invite.id}
       `;
       const [membership] = await tx`
@@ -366,7 +429,10 @@ export class PostgresFamilyStore {
         tx
       );
 
-      return { family: mapFamily(acceptedFamily), membership: mapMembership(createdMembership) };
+      return this.withHouseholdExtras({
+        family: mapFamily(acceptedFamily),
+        membership: mapMembership(createdMembership)
+      });
     });
   }
 

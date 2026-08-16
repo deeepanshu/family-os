@@ -63,7 +63,7 @@ async function addMember(api: ReturnType<typeof app>, managerToken: string, user
   const invite = await (await api.request(`${HEALTH_API_PREFIX}/invites`, {
     method: "POST",
     headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ email, role: "member" })
+    body: JSON.stringify({})
   })).json();
   await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ relationshipLabel: "Brother" }) });
   return token;

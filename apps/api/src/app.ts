@@ -98,9 +98,9 @@ export function createApp(options: AppOptions = {}) {
     return c.json({ data: body });
   });
 
-  health.route("/bootstrap", createBootstrapRoutes(repositories.families));
+  health.route("/bootstrap", createBootstrapRoutes(repositories.families, config));
   health.route("/me", createMeRoutes(repositories.profiles));
-  health.route("/families", createFamilyRoutes(repositories.families));
+  health.route("/families", createFamilyRoutes(repositories.families, config));
   health.route("/invites", createInviteRoutes(repositories.invites, config));
   health.route("/people", createPeopleRoutes(repositories.profiles));
   health.route("/readings/blood-pressure", createBloodPressureRoutes(repositories.readings));

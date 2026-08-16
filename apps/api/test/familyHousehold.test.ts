@@ -113,6 +113,62 @@ describe("household invites", () => {
     expect(expiresAt).toBeLessThanOrEqual(Date.now() + 61 * 60 * 1000);
   });
 
+  it("rejects extra fields on invite mint", async () => {
+    const api = app();
+    const token = await jwtFor(creatorId);
+    await createFamily(api, token);
+    const response = await api.request(`${HEALTH_API_PREFIX}/invites`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ email: "x@example.com", role: "member" })
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it("returns creator identity and a copyable live invite on current family and bootstrap", async () => {
+    const api = app();
+    const token = await jwtFor(creatorId);
+    await setupSoloUser(api, token, "Deepanshu");
+    await setupHousehold(api, token, "Jain Family");
+    const minted = await mintInvite(api, token);
+
+    const current = await api.request(`${HEALTH_API_PREFIX}/families/current`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    expect(current.status).toBe(200);
+    await expect(current.json()).resolves.toMatchObject({
+      data: {
+        family: { name: "Jain Family" },
+        creatorDisplayName: "Deepanshu",
+        liveInvite: {
+          status: "pending",
+          token: minted.data.token,
+          url: `https://familyos.example.com/invite/${minted.data.token}`
+        }
+      }
+    });
+
+    const bootstrap = await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    expect(bootstrap.status).toBe(200);
+    await expect(bootstrap.json()).resolves.toMatchObject({
+      data: {
+        family: { name: "Jain Family" },
+        creatorDisplayName: "Deepanshu",
+        liveInvite: {
+          status: "pending",
+          token: minted.data.token,
+          url: `https://familyos.example.com/invite/${minted.data.token}`
+        }
+      }
+    });
+  });
+
   it("revokes the unused live invite when the creator mints a new one", async () => {
     const api = app();
     const token = await jwtFor(creatorId);

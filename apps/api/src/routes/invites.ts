@@ -6,8 +6,9 @@ import { requireAuth, type AppVariables } from "../auth";
 import type { AppConfig } from "../config";
 import { mcpPublicOrigin } from "../mcp/publicUrl";
 import type { InviteStore } from "../repositories/contracts";
+import { inviteShareUrl } from "./inviteUrls";
 
-const createInviteSchema = z.object({}).passthrough();
+const createInviteSchema = z.object({}).strict();
 
 const tokenSchema = z.object({
   token: z.string().min(16).max(256)
@@ -16,10 +17,6 @@ const tokenSchema = z.object({
 const acceptInviteSchema = z.object({
   relationshipLabel: z.enum(CREATOR_RELATIONSHIP_LABELS)
 });
-
-export function inviteShareUrl(origin: string, token: string): string {
-  return `${origin.replace(/\/$/, "")}/invite/${token}`;
-}
 
 export function createInviteRoutes(repository: InviteStore, config: AppConfig) {
   const invites = new Hono<{ Variables: AppVariables }>();

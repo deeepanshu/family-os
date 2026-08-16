@@ -38,6 +38,8 @@ export type AuthSessionResponse = {
 export type BootstrapResponse = {
   family: Family | null;
   membership: FamilyMembership | null;
+  creatorDisplayName?: string;
+  liveInvite?: LiveInviteSummary;
   profiles: HealthProfile[];
   selfProfile: HealthProfile | null;
   needsProfileSetup: boolean;
@@ -97,6 +99,13 @@ export type FamilyMember = {
 export type LiveInviteSummary = {
   expiresAt: string;
   status: Extract<FamilyInviteStatus, "pending">;
+  /** Present for the creator only. HTTP layer attaches `url`. */
+  token: string;
+  url?: string;
+};
+
+export type AcceptInviteInput = {
+  relationshipLabel: CreatorRelationshipLabel;
 };
 
 export type CurrentFamilyResponse = {

@@ -31,6 +31,39 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertEqual(viewModel.pendingInviteToken, "https-token-1")
     }
 
+    func testApplyBootstrapRestoresLiveInviteURL() {
+        let viewModel = HealthBootstrapViewModel()
+        viewModel.auth.signedInUserId = "user-1"
+        let selfProfile = makeProfile(id: "p1", linkedUserId: "user-1", displayName: "Me", relationshipLabel: "Self")
+        var response = makeBootstrapResponse(
+            familyId: "f1",
+            kind: .family,
+            membershipUserId: "user-1",
+            membershipRole: .manager,
+            profiles: [selfProfile],
+            selfProfile: selfProfile,
+            needsProfileSetup: false
+        )
+        response = BootstrapResponse(
+            family: response.family,
+            membership: response.membership,
+            creatorDisplayName: "Me",
+            liveInvite: LiveInviteSummary(
+                expiresAt: "2026-08-16T12:00:00.000Z",
+                status: .pending,
+                token: "tok",
+                url: "https://familyos.example.com/invite/tok"
+            ),
+            profiles: response.profiles,
+            selfProfile: response.selfProfile,
+            needsProfileSetup: false
+        )
+        viewModel.applyBootstrap(response)
+        XCTAssertEqual(viewModel.family.lastCreatedInviteURL, "https://familyos.example.com/invite/tok")
+        XCTAssertEqual(viewModel.family.lastCreatedInviteToken, "tok")
+        XCTAssertEqual(viewModel.family.creatorDisplayName, "Me")
+    }
+
     func testCreatorSeesManageFamilyAndMembersSeeLeave() {
         let viewModel = HealthBootstrapViewModel()
         viewModel.auth.signedInUserId = "user-1"
@@ -43,7 +76,7 @@ final class SoloFirstTests: XCTestCase {
 
         viewModel.auth.signedInUserId = "user-2"
         viewModel.family.signedInUserId = "user-2"
-        viewModel.family.creatorRelationshipLabel = "Father"
+        viewModel.family.creatorRelationshipLabel = .father
         XCTAssertFalse(viewModel.family.isCreator)
         XCTAssertFalse(viewModel.family.canManageFamily)
         XCTAssertTrue(viewModel.family.canLeaveFamily)
@@ -516,6 +549,8 @@ private func makeBootstrapResponse(
     return BootstrapResponse(
         family: family,
         membership: membership,
+        creatorDisplayName: nil,
+        liveInvite: nil,
         profiles: profiles,
         selfProfile: selfProfile,
         needsProfileSetup: needsProfileSetup

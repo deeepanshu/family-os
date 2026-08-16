@@ -23,6 +23,14 @@ extension HealthBootstrapViewModel {
         family.currentFamilyRole = response?.membership.role
         family.createdByUserId = response?.family.createdByUserId
         family.creatorRelationshipLabel = response?.membership.creatorRelationshipLabel
+        family.creatorDisplayName = response?.creatorDisplayName
+        if let live = response?.liveInvite, live.status == .pending {
+            family.lastCreatedInviteToken = live.token
+            family.lastCreatedInviteURL = live.url
+        } else {
+            family.lastCreatedInviteToken = nil
+            family.lastCreatedInviteURL = nil
+        }
     }
 
     func loadMembers() async {

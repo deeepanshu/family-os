@@ -95,7 +95,7 @@ describe("family invites", () => {
         authorization: `Bearer ${await jwtFor(strangerId)}`,
         "content-type": "application/json"
       },
-      body: JSON.stringify({ role: "member" })
+      body: JSON.stringify({})
     });
 
     expect(response.status).toBe(403);
