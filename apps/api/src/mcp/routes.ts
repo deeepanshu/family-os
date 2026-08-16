@@ -40,6 +40,23 @@ export function createMcpWellKnownRoutes(config: AppConfig) {
     return c.json(buildProtectedResourceMetadata(config));
   });
 
+  routes.get("/.well-known/apple-app-site-association", (c) => {
+    return c.json(
+      {
+        applinks: {
+          details: [
+            {
+              appIDs: ["LG9UP2KBHV.com.deepanshujain.familyos"],
+              components: [{ "/": "/invite/*" }]
+            }
+          ]
+        }
+      },
+      200,
+      { "content-type": "application/json" }
+    );
+  });
+
   return routes;
 }
 

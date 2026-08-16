@@ -296,6 +296,68 @@ describe("Postgres repository wiring", () => {
     expect(afterKick.data.status).toBe("revoked");
   });
 
+  it("deletes the household row without deleting the creator's health", async () => {
+    const api = app();
+    const creatorToken = await jwtFor(managerId, "manager@example.com");
+    const creator = await setupSoloUser(api, creatorToken, "Deepanshu");
+    const created = await (
+      await api.request(`${HEALTH_API_PREFIX}/families`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${creatorToken}`, "content-type": "application/json" },
+        body: JSON.stringify({ name: "Jain Family" })
+      })
+    ).json();
+    const familyId = created.data.family.id as string;
+    const installationId = "00000000-0000-4000-8000-000000009020";
+    await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${creatorToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        personId: creator.profileId,
+        consentVersion: "1",
+        enabledGroups: ["vitals"],
+        healthTimezone: "UTC",
+        installationId
+      })
+    });
+    await seedHealthKitReadyGroup(api, creatorToken, creator.profileId, installationId, "vitals", [
+      {
+        opId: crypto.randomUUID(),
+        naturalKey: "blood_pressure:00000000-0000-4000-8000-000000009021",
+        group: "vitals",
+        scopeKey: "blood_pressure",
+        op: "upsert",
+        payload: {
+          kind: "blood_pressure",
+          sourceObjectKey: "00000000-0000-4000-8000-000000009021",
+          measuredAtUtc: "2026-06-21T10:00:00.000Z",
+          systolic: 118,
+          diastolic: 76
+        }
+      }
+    ]);
+
+    const deleted = await api.request(`${HEALTH_API_PREFIX}/families/current`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${creatorToken}` }
+    });
+    expect(deleted.status).toBe(204);
+
+    const leftover = await sql`select id from families where id = ${familyId}`;
+    expect(leftover).toHaveLength(0);
+    const samples = await sql`
+      select systolic from health_blood_pressure_readings
+      where person_id = ${creator.profileId}
+    `;
+    expect(samples).toHaveLength(1);
+    expect(Number(samples[0]?.systolic)).toBe(118);
+
+    const current = await api.request(`${HEALTH_API_PREFIX}/families/current`, {
+      headers: { authorization: `Bearer ${creatorToken}` }
+    });
+    await expect(current.json()).resolves.toEqual({ data: null });
+  });
+
   it("preserves completed coverage when a routine sync completes", async () => {
     const api = app();
     const token = await jwtFor(managerId, "manager@example.com");

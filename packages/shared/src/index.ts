@@ -116,9 +116,12 @@ export type FamilyInvite = {
   createdAt: string;
 };
 
-export type CreateInviteResponse = {
+export type CreatedInvite = {
   invite: FamilyInvite;
   token: string;
+};
+
+export type CreateInviteResponse = CreatedInvite & {
   url: string;
 };
 

@@ -116,7 +116,7 @@ struct HealthAPIClient {
         baseURL: String,
         accessToken: String,
         token: String,
-        relationshipLabel: String
+        relationshipLabel: CreatorRelationshipLabel
     ) async throws -> FamilyResponse {
         guard !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw HealthAPIError.invalidURL
@@ -470,7 +470,7 @@ private struct CreateFamilyRequest: Encodable {
 }
 
 private struct AcceptInviteRequest: Encodable {
-    let relationshipLabel: String
+    let relationshipLabel: CreatorRelationshipLabel
 }
 
 private struct CreateProfileRequest: Encodable {

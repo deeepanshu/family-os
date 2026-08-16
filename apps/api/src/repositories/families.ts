@@ -6,7 +6,7 @@ import type {
   BloodPressureReading,
   BootstrapResponse,
   CompleteHealthKitRunInput,
-  CreateInviteResponse,
+  CreatedInvite,
   CurrentFamilyResponse,
   Family,
   FamilyInvite,
@@ -151,6 +151,10 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     this.healthKit = new MemoryHealthKitEngine({
       requireActiveMember: (userId) => this.requireActiveMember(userId),
       getSelfProfile: (userId) => this.getSelfProfile(userId),
+      requireReadablePerson: (actorUserId, personId) => {
+        const profile = this.requireReadablePerson(actorUserId, personId);
+        return { id: profile.id, familyId: profile.familyId };
+      },
       audit: (input) => this.audit(input),
       bloodPressureReadings: this.bloodPressureReadings
     });
@@ -399,7 +403,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     );
   }
 
-  async createInvite(input: CreateInviteInput): Promise<CreateInviteResponse> {
+  async createInvite(input: CreateInviteInput): Promise<CreatedInvite> {
     const current = this.getCurrentFamilySync(input.actorUserId);
     if (!current || current.family.createdByUserId !== input.actorUserId) {
       throw new HttpError(403, "creator_required", "Only the family creator can create invites.");
@@ -430,7 +434,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       resourceId: invite.id
     });
 
-    return { invite: toPublicInviteRecord(invite), token, url: "" };
+    return { invite: toPublicInviteRecord(invite), token };
   }
 
   async getInviteByToken(token: string): Promise<PublicInviteResponse> {
@@ -531,8 +535,17 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   async listProfiles(actorUserId: string): Promise<HealthProfile[]> {
     const current = await this.getCurrentFamily(actorUserId);
     if (current) {
+      const memberIds = new Set(
+        [...this.memberships.values()]
+          .filter((membership) => membership.familyId === current.family.id && membership.status === "active")
+          .map((membership) => membership.userId)
+      );
       return [...this.profiles.values()].filter(
-        (profile) => profile.familyId === current.family.id && profile.status === "active"
+        (profile) =>
+          profile.status === "active" &&
+          profile.relationshipLabel === "Self" &&
+          profile.linkedUserId !== undefined &&
+          memberIds.has(profile.linkedUserId)
       );
     }
     const self = await this.getSelfProfile(actorUserId);
@@ -548,20 +561,24 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   }
 
   async updateProfile(actorUserId: string, profileId: string, input: UpdateProfileInput): Promise<HealthProfile> {
-    const current = this.requireManager(actorUserId);
     const profile = this.profiles.get(profileId);
-    if (!profile || profile.familyId !== current.family.id) {
+    if (!profile || profile.status !== "active") {
       throw new HttpError(404, "profile_not_found", "Health profile was not found.");
+    }
+    if (profile.linkedUserId !== actorUserId || profile.relationshipLabel !== "Self") {
+      throw new HttpError(403, "profile_forbidden", "You can only change your own Self profile.");
     }
 
     const updated: HealthProfile = {
       ...profile,
       ...defined(input),
+      relationshipLabel: "Self",
+      linkedUserId: actorUserId,
       updatedAt: new Date().toISOString()
     };
     this.profiles.set(profileId, updated);
     this.audit({
-      familyId: current.family.id,
+      familyId: profile.familyId,
       actorUserId,
       action: input.status === "inactive" ? "profile.deleted" : "profile.updated",
       resourceType: "profile",

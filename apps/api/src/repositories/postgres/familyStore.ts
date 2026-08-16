@@ -1,4 +1,4 @@
-import type { BootstrapResponse, CreateInviteResponse, CurrentFamilyResponse, FamilyMember, FamilyMembership, HealthProfile, PublicInviteResponse } from "@family-os/shared";
+import type { BootstrapResponse, CreatedInvite, CurrentFamilyResponse, FamilyMember, FamilyMembership, HealthProfile, PublicInviteResponse } from "@family-os/shared";
 import { HttpError } from "../../errors";
 import type { CreateFamilyInput, CreateInviteInput, CreateProfileInput, UpdateProfileInput } from "../families";
 import { currentInviteStatus, hashToken, PostgresRepositoryContext } from "./context";
@@ -133,6 +133,7 @@ export class PostgresFamilyStore {
       await this.deactivateMembership(tx, current.family.id, actorUserId);
       await this.detachSelf(tx, actorUserId);
       await this.revokePendingInvites(tx, current.family.id);
+      await tx`delete from families where id = ${current.family.id}`;
     });
   }
 
@@ -221,7 +222,7 @@ export class PostgresFamilyStore {
     return profile ? mapProfile(profile) : null;
   }
 
-  async createInvite(input: CreateInviteInput): Promise<CreateInviteResponse> {
+  async createInvite(input: CreateInviteInput): Promise<CreatedInvite> {
     const current = await this.context.requireCreator(input.actorUserId, "Only the family creator can create invites.");
 
     return this.context.sql.begin(async (tx: any) => {
@@ -257,7 +258,7 @@ export class PostgresFamilyStore {
         },
         tx
       );
-      return { invite: mapInvite(createdInvite), token, url: "" };
+      return { invite: mapInvite(createdInvite), token };
     });
   }
 
@@ -373,15 +374,19 @@ export class PostgresFamilyStore {
     const current = await this.context.getCurrentFamily(actorUserId);
     if (current) {
       const rows = await this.context.sql`
-        select *
-        from people
-        where family_id = ${current.family.id}
-          and status = 'active'
-        order by created_at asc
+        select p.*
+        from people p
+        join family_memberships fm
+          on fm.user_id = p.linked_user_id
+          and fm.family_id = ${current.family.id}
+          and fm.status = 'active'
+        where p.status = 'active'
+          and p.relationship_label = 'Self'
+          and p.linked_user_id is not null
+        order by p.created_at asc
       `;
       return rows.map(mapProfile);
     }
-    // Solo: only the caller's Self person.
     const self = await this.getSelfProfile(actorUserId);
     return self ? [self] : [];
   }
@@ -406,23 +411,36 @@ export class PostgresFamilyStore {
   }
 
   async updateProfile(actorUserId: string, profileId: string, input: UpdateProfileInput): Promise<HealthProfile> {
-    const current = await this.context.requireManager(actorUserId, "Only family managers can manage health profiles.");
+    const [existing] = await this.context.sql`
+      select *
+      from people
+      where id = ${profileId}
+        and status = 'active'
+    `;
+    if (!existing) {
+      throw new HttpError(404, "profile_not_found", "Health profile was not found.");
+    }
+    if (existing.linked_user_id !== actorUserId || existing.relationship_label !== "Self") {
+      throw new HttpError(403, "profile_forbidden", "You can only change your own Self profile.");
+    }
     const [profile] = await this.context.sql`
       update people
       set
         display_name = coalesce(${input.displayName ?? null}, display_name),
-        relationship_label = coalesce(${input.relationshipLabel ?? null}, relationship_label),
         date_of_birth = coalesce(${input.dateOfBirth ?? null}, date_of_birth),
-        status = coalesce(${input.status ?? null}, status)
+        status = coalesce(${input.status ?? null}, status),
+        relationship_label = 'Self',
+        updated_at = now()
       where id = ${profileId}
-        and family_id = ${current.family.id}
+        and linked_user_id = ${actorUserId}
+        and relationship_label = 'Self'
       returning *
     `;
     if (!profile) {
       throw new HttpError(404, "profile_not_found", "Health profile was not found.");
     }
     await this.context.audit({
-      familyId: current.family.id,
+      familyId: profile.family_id ?? null,
       actorUserId,
       action: input.status === "inactive" ? "profile.deleted" : "profile.updated",
       resourceType: "profile",

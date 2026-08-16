@@ -6,7 +6,7 @@ import type {
   BloodPressureReading,
   BootstrapResponse,
   CompleteHealthKitRunInput,
-  CreateInviteResponse,
+  CreatedInvite,
   CurrentFamilyResponse,
   FamilyMember,
   FamilyMembership,
@@ -108,7 +108,7 @@ export class PostgresFamilyRepository implements FamilyRepository {
     return this.familyStore.deleteFamily(actorUserId);
   }
 
-  createInvite(input: CreateInviteInput): Promise<CreateInviteResponse> {
+  createInvite(input: CreateInviteInput): Promise<CreatedInvite> {
     return this.familyStore.createInvite(input);
   }
 

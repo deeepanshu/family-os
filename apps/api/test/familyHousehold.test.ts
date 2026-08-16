@@ -548,6 +548,15 @@ describe("household health visibility", () => {
     });
     expect(write.status).toBe(403);
 
+    const settings = await api.request(
+      `${HEALTH_API_PREFIX}/healthkit/settings?personId=${creator.profileId}`,
+      { headers: { authorization: `Bearer ${joinerToken}` } }
+    );
+    expect(settings.status).toBe(200);
+    await expect(settings.json()).resolves.toMatchObject({
+      data: { personId: creator.profileId, enabledGroups: ["vitals"] }
+    });
+
     expect(
       (
         await api.request(`${HEALTH_API_PREFIX}/families/leave`, {
@@ -561,5 +570,54 @@ describe("household health visibility", () => {
       { headers: { authorization: `Bearer ${joinerToken}` } }
     );
     expect(afterLeave.status).toBe(403);
+  });
+
+  it("forbids mutating another member's Self profile", async () => {
+    const api = app();
+    const creatorToken = await jwtFor(creatorId);
+    const joinerToken = await jwtFor(joinerId);
+    const creator = await setupSoloUser(api, creatorToken, "Deepanshu");
+    await setupHousehold(api, creatorToken);
+    const joiner = await setupSoloUser(api, joinerToken, "Riya");
+    const minted = await mintInvite(api, creatorToken);
+    expect((await acceptInvite(api, joinerToken, minted.data.token)).status).toBe(200);
+
+    const creatorPatch = await api.request(`${HEALTH_API_PREFIX}/people/${joiner.profileId}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${creatorToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "Renamed" })
+    });
+    expect(creatorPatch.status).toBe(403);
+
+    const creatorDelete = await api.request(`${HEALTH_API_PREFIX}/people/${joiner.profileId}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${creatorToken}` }
+    });
+    expect(creatorDelete.status).toBe(403);
+
+    const ownPatch = await api.request(`${HEALTH_API_PREFIX}/people/${creator.profileId}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${creatorToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "Deep" })
+    });
+    expect(ownPatch.status).toBe(200);
+    await expect(ownPatch.json()).resolves.toMatchObject({
+      data: { displayName: "Deep", relationshipLabel: "Self" }
+    });
+  });
+});
+
+describe("invite landing and app links", () => {
+  it("publishes an Apple App Site Association that opens /invite links", async () => {
+    const response = await app().request("/.well-known/apple-app-site-association");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    const body = await response.json();
+    expect(body.applinks.details).toEqual([
+      expect.objectContaining({
+        appIDs: ["LG9UP2KBHV.com.deepanshujain.familyos"],
+        components: [expect.objectContaining({ "/": "/invite/*" })]
+      })
+    ]);
   });
 });

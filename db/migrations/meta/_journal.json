@@ -106,6 +106,13 @@
       "when": 1786500000000,
       "tag": "0014_household_family",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1786500001000,
+      "tag": "0015_delete_household_keeps_health",
+      "breakpoints": true
     }
   ]
 }

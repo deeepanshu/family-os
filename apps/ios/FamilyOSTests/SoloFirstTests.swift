@@ -4,6 +4,12 @@ import XCTest
 
 @MainActor
 final class SoloFirstTests: XCTestCase {
+    func testFamilyOSCustomURLSchemeIsRegistered() {
+        let types = Bundle(for: HealthBootstrapViewModel.self).object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]] ?? []
+        let schemes = types.flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] }
+        XCTAssertTrue(schemes.contains("familyos"))
+    }
+
     func testHandleInviteURLStoresToken() {
         let viewModel = HealthBootstrapViewModel()
         let url = URL(string: "familyos://invite/abc123")!

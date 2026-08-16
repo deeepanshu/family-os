@@ -88,7 +88,7 @@ struct PublicInvitePreview: Decodable {
     let expiresAt: String
 }
 
-enum CreatorRelationshipLabel: String, CaseIterable, Identifiable {
+enum CreatorRelationshipLabel: String, CaseIterable, Identifiable, Encodable {
     case father = "Father"
     case mother = "Mother"
     case husband = "Husband"

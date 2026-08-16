@@ -4,6 +4,7 @@ import type {
   BloodPressureReading,
   BootstrapResponse,
   CompleteHealthKitRunInput,
+  CreatedInvite,
   CreateInviteResponse,
   CurrentFamilyResponse,
   FamilyMember,
@@ -66,7 +67,7 @@ export interface FamilyStore {
 }
 
 export interface InviteStore {
-  createInvite(input: CreateInviteInput): Promise<CreateInviteResponse>;
+  createInvite(input: CreateInviteInput): Promise<CreatedInvite>;
   getInviteByToken(token: string): Promise<PublicInviteResponse>;
   acceptInvite(
     token: string,

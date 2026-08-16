@@ -72,7 +72,7 @@ extension HealthBootstrapViewModel {
         }
     }
 
-    func acceptInvite(relationshipLabel: String) async {
+    func acceptInvite(relationshipLabel: CreatorRelationshipLabel) async {
         await request(showsFeedback: true) {
             let token = pendingInviteToken ?? family.inviteToken.trimmingCharacters(in: .whitespacesAndNewlines)
             let response = try await client.acceptInvite(

@@ -217,9 +217,8 @@ export class HealthMcpReadService {
   /**
    * The explicit app-toggle → MCP metric mapping (plan §8.2): Blood pressure /
    * `vitals` exposes `blood_pressure` only, Sleep exposes `sleep`, Workouts
-   * exposes `workout`. HealthKit settings are Self-only today; other profiles
-   * get an empty list. Only expected access/settings failures collapse to [];
-   * unexpected errors rethrow.
+   * exposes `workout`. Settings are readable for any household member. Only
+   * expected access/settings failures collapse to []; unexpected errors rethrow.
    */
   private async availableMetricsForProfile(userId: string, personId: string): Promise<McpHealthMetric[]> {
     try {

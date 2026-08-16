@@ -53,7 +53,6 @@ export class PostgresHealthKitStore {
     const self = await this.context.requireSelfPerson(actorUserId);
     const targetPersonId = personId ?? self.personId;
     const access = await this.context.requirePersonAccess(actorUserId, targetPersonId);
-    assertSelfProfileMatch({ selfProfileId: self.personId, requestedPersonId: targetPersonId });
     return this.loadSettings(actorUserId, access.familyId, targetPersonId);
   }
 
@@ -681,8 +680,7 @@ export class PostgresHealthKitStore {
   ): Promise<HealthKitGroupStatus> {
     const self = await this.context.requireSelfPerson(actorUserId);
     const target = personId ?? self.personId;
-    const access = await this.context.requirePersonAccess(actorUserId, target);
-    assertSelfProfileMatch({ selfProfileId: self.personId, requestedPersonId: target });
+    await this.context.requirePersonAccess(actorUserId, target);
 
     const [state] = await this.context.sql`
       select * from healthkit_sync_state where person_id = ${target} and group_key = ${group}

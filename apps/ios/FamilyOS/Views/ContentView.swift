@@ -137,7 +137,7 @@ struct AcceptInviteView: View {
                 Button("Save") {
                     isSubmitting = true
                     Task {
-                        await viewModel.acceptInvite(relationshipLabel: selectedLabel.rawValue)
+                        await viewModel.acceptInvite(relationshipLabel: selectedLabel)
                         isSubmitting = false
                     }
                 }
