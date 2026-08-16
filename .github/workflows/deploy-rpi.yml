@@ -14,6 +14,7 @@ on:
       - "Dockerfile"
       - "infra/docker/**"
       - ".github/workflows/deploy-rpi.yml"
+      - "!**/*.md"
   workflow_dispatch:
     inputs:
       image_tag:
@@ -30,8 +31,73 @@ env:
   IMAGE_NAME: deeepanshu/family-os-health-api
 
 jobs:
+  changes:
+    name: Decide build vs deploy
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.decide.outputs.build }}
+      deploy: ${{ steps.decide.outputs.deploy }}
+      image_tag: ${{ steps.decide.outputs.image_tag }}
+    steps:
+      - name: Checkout
+        if: github.event_name == 'push'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify changes
+        id: decide
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.image_tag }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          IMAGE_RE='^(apps/api/|packages/shared/|db/|drizzle\.config\.ts$|scripts/docker-migrate\.sh$|package\.json$|package-lock\.json$|Dockerfile$)'
+          DEPLOY_RE='^(infra/docker/|\.github/workflows/deploy-rpi\.yml$)'
+
+          build=false
+          deploy=false
+          tag="${GITHUB_SHA}"
+
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            deploy=true
+            if [ -n "${INPUT_TAG}" ]; then
+              tag="${INPUT_TAG}"
+              echo "Manual deploy of existing tag ${tag} (no build)"
+            else
+              build=true
+              echo "Manual rebuild of ${tag}"
+            fi
+          else
+            if [ -z "${BEFORE}" ] || [ "${BEFORE}" = "0000000000000000000000000000000000000000" ]; then
+              build=true
+              deploy=true
+            else
+              CHANGED="$(git diff --name-only "${BEFORE}" "${GITHUB_SHA}" || true)"
+              echo "Changed files:"
+              echo "${CHANGED}"
+              FILTERED="$(printf '%s\n' "${CHANGED}" | grep -vE '\.mdx?$' || true)"
+              if printf '%s\n' "${FILTERED}" | grep -qE "${IMAGE_RE}"; then
+                build=true
+                deploy=true
+              elif printf '%s\n' "${FILTERED}" | grep -qE "${DEPLOY_RE}"; then
+                deploy=true
+                tag="main"
+                echo "Compose/workflow only — deploy existing :main, skip image build"
+              fi
+            fi
+          fi
+
+          echo "build=${build}" >> "$GITHUB_OUTPUT"
+          echo "deploy=${deploy}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Decision: build=${build} deploy=${deploy} image_tag=${tag}"
+
   build-and-push:
     name: Build and push arm64 image
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -45,11 +111,7 @@ jobs:
       - name: Set image tag
         id: meta
         run: |
-          if [ -n "${{ inputs.image_tag }}" ]; then
-            TAG="${{ inputs.image_tag }}"
-          else
-            TAG="${GITHUB_SHA}"
-          fi
+          TAG="${{ needs.changes.outputs.image_tag }}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "Image tag: ${TAG}"
 
@@ -81,15 +143,20 @@ jobs:
 
   deploy:
     name: Deploy on Pi via manager
-    needs: build-and-push
+    needs: [changes, build-and-push]
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: |
+      always() &&
+      needs.changes.result == 'success' &&
+      needs.changes.outputs.deploy == 'true' &&
+      (needs.changes.outputs.build != 'true' || needs.build-and-push.result == 'success') &&
+      (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
     steps:
       - name: Deploy and wait for Pi success
         env:
           DEPLOY_SECRET: ${{ secrets.RPI_DEPLOY_SECRET }}
-          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag || needs.changes.outputs.image_tag }}
           # Short curl per request; overall wait is the poll loop (~15 min).
           POLL_INTERVAL: "10"
           MAX_ATTEMPTS: "90"

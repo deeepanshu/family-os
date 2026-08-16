@@ -10,6 +10,9 @@ ghcr.io/deeepanshu/family-os-health-api:<git-sha>
 ghcr.io/deeepanshu/family-os-health-api:main
 ```
 
+CI builds a new image only when app, schema, or Dockerfile inputs change.
+Compose-only changes deploy the existing `main` tag. Docs do not deploy.
+
 The homelab manager deploys via `POST /hooks/deploy/family-os`, which sets
 `IMAGE_TAG` and runs:
 
