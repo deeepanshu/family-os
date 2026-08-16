@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Health Data section: per-metric Import history / Sync surface (plan §5).
+/// Health Data screen: per-metric Import history / Sync surface (plan §5).
 ///
 /// Display state derives from local activity first and server history second;
 /// a stale server `syncing` with no local run renders as Interrupted, never as
@@ -15,81 +15,95 @@ struct HealthKitSyncView: View {
     private var metrics: [HealthKitSyncMetric] { HealthKitSyncAllRunner.metricOrder }
 
     var body: some View {
-        Section("Health Data") {
-            Toggle(isOn: $viewModel.healthKit.consentGranted) {
-                Text("Upload Apple Health data")
-            }
-            .disabled(viewModel.selfProfile == nil || healthKit.isBusy)
-            .accessibilityIdentifier("healthkit.consentToggle")
-            .onChange(of: viewModel.healthKit.consentGranted) { _, granted in
-                if granted {
-                    // Default to BP (implemented). Sleep/workouts toggles are separate.
-                    if viewModel.healthKit.enabledMetrics.isEmpty {
-                        viewModel.healthKit.enabledMetrics = [.vitals]
-                    }
-                } else {
-                    viewModel.healthKit.enabledMetrics = []
-                }
-            }
-
-            if viewModel.healthKit.consentGranted {
-                ForEach(metrics) { metric in
-                    metricRow(metric)
-                }
-
-                Picker("Health timezone", selection: $viewModel.healthKit.selectedTimezone) {
-                    ForEach(commonTimezones, id: \.self) { zone in
-                        Text(zone).tag(zone)
-                    }
-                }
-                .disabled(healthKit.isBusy)
-                .accessibilityIdentifier("healthkit.timezonePicker")
-
-                if let current = viewModel.healthKit.status?.healthTimezone,
-                   current != viewModel.healthKit.selectedTimezone {
-                    Toggle("I understand this will require a re-import later", isOn: $viewModel.healthKit.confirmTimezoneChange)
-                        .disabled(healthKit.isBusy)
-                        .accessibilityIdentifier("healthkit.timezoneConfirm")
-                }
-
-                Toggle("Notify when background sync uploads", isOn: backgroundAlertsBinding)
-                    .disabled(healthKit.isBusy)
-                    .accessibilityIdentifier("healthkit.backgroundSyncAlerts")
-
-                Button(action: { Task { await viewModel.syncAllEnabledHealthMetrics() } }) {
-                    HStack {
-                        if healthKit.activeRun != nil {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                        Text("Sync all enabled")
-                    }
-                }
-                .disabled(syncAllDisabled)
-                .accessibilityIdentifier("healthkit.syncAll")
-
-                Button(healthKit.isSavingSettings ? "Saving..." : "Save changes") {
-                    Task {
-                        // Only persist groups we support (BP / sleep / workouts).
-                        viewModel.healthKit.enabledMetrics = viewModel.healthKit.enabledMetrics
-                            .intersection(HealthKitSyncStateViewModel.syncableMetrics)
-                        if viewModel.healthKit.consentGranted && viewModel.healthKit.enabledMetrics.isEmpty {
-                            viewModel.healthKit.enabledMetrics = [.vitals]
-                        }
-                        if !viewModel.healthKit.consentGranted {
-                            viewModel.healthKit.enabledMetrics = []
-                        }
-                        if let current = viewModel.healthKit.status?.healthTimezone,
-                           current != viewModel.healthKit.selectedTimezone {
-                            await viewModel.changeHealthTimezone()
-                        } else {
-                            await viewModel.saveHealthKitSettings()
-                        }
-                    }
+        Form {
+            Section {
+                Toggle(isOn: $viewModel.healthKit.consentGranted) {
+                    Text("Upload Apple Health data")
                 }
                 .disabled(viewModel.selfProfile == nil || healthKit.isBusy)
-                .accessibilityIdentifier("healthkit.save")
+                .accessibilityIdentifier("healthkit.consentToggle")
+                .onChange(of: viewModel.healthKit.consentGranted) { _, granted in
+                    if granted {
+                        // Default to BP (implemented). Sleep/workouts toggles are separate.
+                        if viewModel.healthKit.enabledMetrics.isEmpty {
+                            viewModel.healthKit.enabledMetrics = [.vitals]
+                        }
+                    } else {
+                        viewModel.healthKit.enabledMetrics = []
+                    }
+                }
+
+                if viewModel.healthKit.consentGranted {
+                    ForEach(metrics) { metric in
+                        metricRow(metric)
+                    }
+
+                    Picker("Health timezone", selection: $viewModel.healthKit.selectedTimezone) {
+                        ForEach(commonTimezones, id: \.self) { zone in
+                            Text(zone).tag(zone)
+                        }
+                    }
+                    .disabled(healthKit.isBusy)
+                    .accessibilityIdentifier("healthkit.timezonePicker")
+
+                    if let current = viewModel.healthKit.status?.healthTimezone,
+                       current != viewModel.healthKit.selectedTimezone {
+                        Toggle("I understand this will require a re-import later", isOn: $viewModel.healthKit.confirmTimezoneChange)
+                            .disabled(healthKit.isBusy)
+                            .accessibilityIdentifier("healthkit.timezoneConfirm")
+                    }
+
+                    Toggle("Notify when background sync uploads", isOn: backgroundAlertsBinding)
+                        .disabled(healthKit.isBusy)
+                        .accessibilityIdentifier("healthkit.backgroundSyncAlerts")
+
+                    Button(action: { Task { await viewModel.syncAllEnabledHealthMetrics() } }) {
+                        HStack {
+                            if healthKit.activeRun != nil {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text("Sync all enabled")
+                        }
+                    }
+                    .disabled(syncAllDisabled)
+                    .accessibilityIdentifier("healthkit.syncAll")
+
+                    Button(healthKit.isSavingSettings ? "Saving..." : "Save changes") {
+                        Task {
+                            // Only persist groups we support (BP / sleep / workouts).
+                            viewModel.healthKit.enabledMetrics = viewModel.healthKit.enabledMetrics
+                                .intersection(HealthKitSyncStateViewModel.syncableMetrics)
+                            if viewModel.healthKit.consentGranted && viewModel.healthKit.enabledMetrics.isEmpty {
+                                viewModel.healthKit.enabledMetrics = [.vitals]
+                            }
+                            if !viewModel.healthKit.consentGranted {
+                                viewModel.healthKit.enabledMetrics = []
+                            }
+                            if let current = viewModel.healthKit.status?.healthTimezone,
+                               current != viewModel.healthKit.selectedTimezone {
+                                await viewModel.changeHealthTimezone()
+                            } else {
+                                await viewModel.saveHealthKitSettings()
+                            }
+                        }
+                    }
+                    .disabled(viewModel.selfProfile == nil || healthKit.isBusy)
+                    .accessibilityIdentifier("healthkit.save")
+                }
             }
+        }
+        .navigationTitle("Health Data")
+        .navigationBarTitleDisplayMode(.large)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let banner = healthKit.progressBanner {
+                HealthKitSyncProgressBanner(title: banner.title, detail: banner.detail)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: healthKit.progressBanner)
+        .task {
+            await viewModel.loadHealthKitStatus()
         }
         .alert(
             "Import history again?",
@@ -300,5 +314,31 @@ struct HealthKitSyncView: View {
             "Australia/Sydney"
         ]
         return Array(Set(zones)).sorted()
+    }
+}
+
+/// Always-visible run feedback. Complements the in-row stage caption and must
+/// not replace it (plan §5.4).
+struct HealthKitSyncProgressBanner: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ProgressView()
+                .progressViewStyle(.linear)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("healthkit.syncProgress")
+        .accessibilityLabel("\(title). \(detail)")
     }
 }
