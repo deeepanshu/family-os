@@ -6,6 +6,7 @@ on:
     paths:
       - "apps/ios/**"
       - ".github/workflows/release-app.yml"
+      - "!**/*.md"
   workflow_dispatch:
     inputs:
       tag:

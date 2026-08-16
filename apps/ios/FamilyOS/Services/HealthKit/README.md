@@ -2,8 +2,6 @@
 
 **Status: correctness-first rewrite — milestone 3 (BP + sleep + workouts, FG + shared BG).**
 
-Source of truth: `docs/HEALTHKIT_CORRECTNESS_FIRST_SYNC_PLAN.md`
-
 ## Architecture (boring on purpose)
 
 ```

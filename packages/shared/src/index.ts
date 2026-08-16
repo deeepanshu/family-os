@@ -356,8 +356,8 @@ export const MCP_SLEEP_ATTRIBUTE_METRICS = [
 export type McpSleepAttributeMetric = (typeof MCP_SLEEP_ATTRIBUTE_METRICS)[number];
 
 /**
- * Fixed product allowlist for MCP get_health_data in this release
- * (docs/HEALTHKIT_SYNC_AND_MCP_PRODUCT_PLAN.md §8.2). Deliberately NOT derived
+ * Fixed product allowlist for MCP get_health_data in this release.
+ * Deliberately NOT derived
  * from the HealthKit registry: enabling a broad consent group must never
  * advertise unrelated registry metrics.
  */

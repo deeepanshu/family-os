@@ -1,6 +1,5 @@
 /**
  * Correctness-first HealthKit ops protocol.
- * Source: docs/HEALTHKIT_CORRECTNESS_FIRST_SYNC_PLAN.md
  *
  * Natural-key upsert/delete + short-TTL op_id receipts.
  * No entity versions, fingerprints, or session manifests.
@@ -172,7 +171,7 @@ export type HealthKitGroupReadyResult = {
 };
 
 /**
- * Run kinds for the generic run lifecycle (docs/HEALTHKIT_SYNC_AND_MCP_PRODUCT_PLAN.md).
+ * Run kinds for the generic run lifecycle.
  * - initial_import: first 90-day fill; never deletes.
  * - sync: incremental (last success minus overlap); never deletes.
  * - repair_import: explicit 90-day repair; only kind allowed to delete, via

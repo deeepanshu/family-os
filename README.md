@@ -54,10 +54,7 @@ developer sheet.
 - Push notifications.
 - HealthKit-only import for Apple Health readings.
 
-See:
-
-- [Ask](docs/ask.md)
-- [Technical Design](docs/TECHNICAL_DESIGN.md)
+See [Ask](docs/ask.md).
 
 ## Local Setup
 
