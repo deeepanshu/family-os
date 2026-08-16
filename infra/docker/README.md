@@ -113,6 +113,6 @@ Grafana: dashboard **Family OS API** (folder Apps), synced from
 {service_name="family-os-mcp"}
 ```
 
-Requires the shared stack from `rpi-observability` to be up first (`make network && make up`).
+Requires the shared stack from [homelab/observability](https://github.com/deeepanshu/homelab/tree/main/observability) to be up first (`make network && make up` in that tree).
 
-See also: [rpi-manager](https://github.com/deeepanshu/rpi-manager).
+See also: [homelab/manager](https://github.com/deeepanshu/homelab/tree/main/manager).
