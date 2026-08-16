@@ -6,5 +6,7 @@ database="${POSTGRES_DB:-family_os}"
 user="${POSTGRES_USER:-family_os}"
 database_url="${DATABASE_URL:-postgres://family_os:family_os@localhost:5432/family_os}"
 
+sh scripts/wait-for-local-postgres.sh
+
 docker exec -i "$container_name" psql -h 127.0.0.1 -v ON_ERROR_STOP=1 -U "$user" -d "$database" < db/local/0000_auth_stub.sql
 DATABASE_URL="$database_url" npx drizzle-kit migrate --config drizzle.config.ts
