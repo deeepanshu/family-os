@@ -6,6 +6,7 @@ import type {
   BloodPressureReading,
   BootstrapResponse,
   CompleteHealthKitRunInput,
+  FailHealthKitRunInput,
   AcceptInviteInput,
   CreatedInvite,
   CurrentFamilyResponse,
@@ -21,6 +22,7 @@ import type {
   HealthKitOpsBatchResult,
   HealthKitRunBeginResult,
   HealthKitRunCompleteResult,
+  HealthKitRunFailResult,
   HealthKitSettings,
   HealthMetricFreshness,
   HealthProfile,
@@ -183,6 +185,14 @@ export class PostgresFamilyRepository implements FamilyRepository {
     input: CompleteHealthKitRunInput
   ): Promise<HealthKitRunCompleteResult> {
     return this.healthKitStore.completeHealthKitRun(actorUserId, group, input);
+  }
+
+  failHealthKitRun(
+    actorUserId: string,
+    group: HealthKitConsentGroup,
+    input: FailHealthKitRunInput
+  ): Promise<HealthKitRunFailResult> {
+    return this.healthKitStore.failHealthKitRun(actorUserId, group, input);
   }
 
   startHealthKitImport(

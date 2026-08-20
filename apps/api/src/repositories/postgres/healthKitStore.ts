@@ -3,6 +3,7 @@ import type {
   BloodGlucoseReading,
   BloodPressureReading,
   CompleteHealthKitRunInput,
+  FailHealthKitRunInput,
   HealthDailyMetricRecord,
   HealthKitConsentGroup,
   HealthKitGroupImportStartResult,
@@ -16,6 +17,7 @@ import type {
   HealthKitOpsBatchResult,
   HealthKitRunBeginResult,
   HealthKitRunCompleteResult,
+  HealthKitRunFailResult,
   HealthKitSettings,
   HealthKitSyncOp,
   HealthMetricFreshness,
@@ -610,6 +612,79 @@ export class PostgresHealthKitStore {
       coverageEndAt: completedCoverage.coverageEndAt,
       needsInitialImport: false
     };
+  }
+
+  async failHealthKitRun(
+    actorUserId: string,
+    group: HealthKitConsentGroup,
+    input: FailHealthKitRunInput
+  ): Promise<HealthKitRunFailResult> {
+    const self = await this.context.requireSelfPerson(actorUserId);
+    const access = await this.context.requirePersonAccess(actorUserId, input.personId);
+    assertSelfProfileMatch({ selfProfileId: self.personId, requestedPersonId: input.personId });
+
+    const now = new Date();
+    const nowIso = toUtcIso(now);
+
+    const result = await this.context.sql.begin(async (tx: any) => {
+      const authority = await this.loadWriteAuthority(tx, actorUserId, access.familyId, input.personId);
+      if (!authority.settings?.consented_at) {
+        throw new HttpError(403, "consent_withdrawn", "HealthKit upload consent is required.");
+      }
+      if (authority.activeInstallationId !== input.installationId) {
+        throw new HttpError(403, "installation_inactive", "Installation is not the active HealthKit installation.");
+      }
+      if (authority.settings.health_timezone_version !== input.timezoneVersion) {
+        throw new HttpError(409, "timezone_stale", "Timezone version is stale.");
+      }
+      if (!authority.enabledGroups.has(group)) {
+        throw new HttpError(403, "group_disabled", `Group ${group} is not enabled.`);
+      }
+
+      const [state] = await tx`
+        select * from healthkit_sync_state
+        where person_id = ${input.personId} and group_key = ${group}
+      `;
+      const restoredStatus: HealthMetricSyncStatusCode = state?.last_successful_at ? "ready" : "error";
+      await this.touchGroupState(tx, {
+        familyId: access.familyId,
+        personId: input.personId,
+        group,
+        nowIso,
+        status: restoredStatus,
+        lastErrorCode: input.errorCode
+      });
+
+      const needsInitialImport = deriveNeedsInitialImport({
+        historyImportCompletedAt: state?.history_import_completed_at ?? null,
+        historyImportInstallationId: state?.history_import_installation_id ?? null,
+        historyImportTimezoneVersion: state?.history_import_timezone_version ?? null,
+        activeInstallationId: authority.activeInstallationId,
+        healthTimezoneVersion: authority.settings.health_timezone_version
+      });
+
+      return {
+        group,
+        kind: input.kind,
+        status: restoredStatus,
+        lastSuccessfulAt: state?.last_successful_at ? toIso(state.last_successful_at) : undefined,
+        lastErrorCode: input.errorCode,
+        coverageStartAt: state?.coverage_start_at ? toIso(state.coverage_start_at) : undefined,
+        coverageEndAt: state?.coverage_end_at ? toIso(state.coverage_end_at) : undefined,
+        needsInitialImport
+      };
+    });
+
+    await this.context.audit({
+      familyId: access.familyId,
+      actorUserId,
+      action: "healthkit.run_fail",
+      resourceType: "healthkit_sync",
+      resourceId: input.personId,
+      metadata: { group, kind: input.kind, error_code: input.errorCode, status: result.status }
+    });
+
+    return result;
   }
 
   /**

@@ -66,6 +66,8 @@ enum HealthKitRunError: LocalizedError {
     case initialImportRequired(HealthKitSyncMetric)
     case initialImportAlreadyComplete(HealthKitSyncMetric)
     case unexpectedDeleteAuthority(HealthKitSyncMetric)
+    /// Device is locked; HealthKit samples are encrypted and unreadable.
+    case databaseInaccessible
 
     var errorDescription: String? {
         switch self {
@@ -81,6 +83,8 @@ enum HealthKitRunError: LocalizedError {
             return "\(metric.displayName) has already completed Import history. Use Sync instead."
         case .unexpectedDeleteAuthority(let metric):
             return "Server granted unexpected delete permission for \(metric.displayName)."
+        case .databaseInaccessible:
+            return "Apple Health is locked. Unlock the phone and try again."
         }
     }
 }
@@ -102,6 +106,7 @@ actor HealthKitRunGate {
     /// - Throws: `HealthKitRunError.runInProgress` if still busy after waiting.
     func withExclusiveRun<T: Sendable>(
         waitSeconds: TimeInterval = 0,
+        reason: String? = nil,
         _ work: @Sendable () async throws -> T
     ) async throws -> T {
         let deadline = Date().addingTimeInterval(max(0, waitSeconds))
@@ -113,8 +118,68 @@ actor HealthKitRunGate {
             try await Task.sleep(nanoseconds: 100_000_000)
         }
         isRunning = true
-        defer { isRunning = false }
+        HealthKitRunActivity.shared.setRunning(true, reason: reason)
+        defer {
+            isRunning = false
+            HealthKitRunActivity.shared.setRunning(false, reason: nil)
+        }
         return try await work()
+    }
+}
+
+/// Process-wide snapshot of the in-flight run so Health Data can show progress
+/// for become-active / observer / BG work, not only a user tap.
+final class HealthKitRunActivity: @unchecked Sendable {
+    static let shared = HealthKitRunActivity()
+    static let didChange = Notification.Name("HealthKitRunActivityDidChange")
+
+    struct Snapshot: Equatable, Sendable {
+        var isRunning = false
+        var metric: HealthKitSyncMetric?
+        var kind: HealthKitRunKind?
+        var stage: HealthKitRunStage?
+        var reason: String?
+    }
+
+    private let lock = NSLock()
+    private var value = Snapshot()
+
+    func snapshot() -> Snapshot {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    func setRunning(_ running: Bool, reason: String?) {
+        lock.lock()
+        if running {
+            value.isRunning = true
+            value.reason = reason ?? value.reason
+        } else {
+            value = Snapshot()
+        }
+        lock.unlock()
+        notify()
+    }
+
+    func update(metric: HealthKitSyncMetric, kind: HealthKitRunKind, stage: HealthKitRunStage) {
+        lock.lock()
+        value.isRunning = true
+        value.metric = metric
+        value.kind = kind
+        value.stage = stage
+        lock.unlock()
+        notify()
+    }
+
+    private func notify() {
+        if Thread.isMainThread {
+            NotificationCenter.default.post(name: Self.didChange, object: nil)
+        } else {
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: Self.didChange, object: nil)
+            }
+        }
     }
 }
 
@@ -146,6 +211,10 @@ struct HealthKitRunDependencies: Sendable {
     /// Server-reported initial-history completion snapshot.
     let needsInitialImport: @Sendable (HealthKitSyncMetric) -> Bool
     let onProgress: (@Sendable (_ metric: HealthKitSyncMetric, _ stage: HealthKitRunStage) async -> Void)?
+    /// Called after begin if the run cannot complete. Must not delete or move coverage.
+    let failRun: (@Sendable (_ metric: HealthKitSyncMetric, _ kind: HealthKitRunKind, _ errorCode: String) async throws -> Void)?
+    /// Cheap HealthKit probe so a locked-device wake never calls `begin`.
+    let assertDatabaseAccessible: @Sendable () async throws -> Void
 
     init(
         beginRun: @escaping @Sendable (HealthKitSyncMetric, HealthKitRunKind) async throws -> HealthKitRunDescriptorWire,
@@ -155,7 +224,11 @@ struct HealthKitRunDependencies: Sendable {
         fetchAndEnqueue: @escaping @Sendable (HealthKitSyncMetric, Date, Date) async throws -> HealthKitMetricFetchResult,
         isEnabled: @escaping @Sendable (HealthKitSyncMetric) -> Bool,
         needsInitialImport: @escaping @Sendable (HealthKitSyncMetric) -> Bool,
-        onProgress: (@Sendable (HealthKitSyncMetric, HealthKitRunStage) async -> Void)? = nil
+        onProgress: (@Sendable (HealthKitSyncMetric, HealthKitRunStage) async -> Void)? = nil,
+        failRun: (@Sendable (HealthKitSyncMetric, HealthKitRunKind, String) async throws -> Void)? = nil,
+        assertDatabaseAccessible: @escaping @Sendable () async throws -> Void = {
+            try await HealthKitDatabaseAccess.assertAccessible()
+        }
     ) {
         self.beginRun = beginRun
         self.completeRun = completeRun
@@ -165,6 +238,8 @@ struct HealthKitRunDependencies: Sendable {
         self.isEnabled = isEnabled
         self.needsInitialImport = needsInitialImport
         self.onProgress = onProgress
+        self.failRun = failRun
+        self.assertDatabaseAccessible = assertDatabaseAccessible
     }
 }
 
@@ -229,7 +304,7 @@ struct HealthKitRunEngine: HealthKitRunning {
         )
 
         // 1. Authorization for exactly this metric (never a broader set).
-        await report(metric, .requestingAccess)
+        await report(metric, .requestingAccess, kind: kind)
         do {
             try await deps.ensureAuth(metric)
             CrashReporting.healthKit(.authRequested, group: groupKey, metric: metric.scopeMetricKey)
@@ -246,13 +321,34 @@ struct HealthKitRunEngine: HealthKitRunning {
         }
 
         // 2. Begin: the server derives the authoritative range + delete permission.
-        await report(metric, .preparing)
+        await report(metric, .preparing, kind: kind)
+        try await deps.assertDatabaseAccessible()
         let descriptor: HealthKitRunDescriptorWire
         do {
             descriptor = try await deps.beginRun(metric, kind)
         } catch {
             throw Self.mapError(error)
         }
+
+        do {
+            return try await finishStartedRun(
+                request: request,
+                descriptor: descriptor
+            )
+        } catch {
+            await abandonStartedRun(metric: metric, kind: kind, error: Self.mapError(error))
+            throw error
+        }
+    }
+
+    private func finishStartedRun(
+        request: HealthKitRunRequest,
+        descriptor: HealthKitRunDescriptorWire
+    ) async throws -> HealthKitRunResult {
+        let metric = request.metric
+        let kind = request.kind
+        let groupKey = metric.rawValue
+
         // Only repair may ever receive delete authority (plan §6.2).
         if descriptor.allowDeletes, kind != .repairImport {
             CrashReporting.healthKitNonFatal(
@@ -271,7 +367,7 @@ struct HealthKitRunEngine: HealthKitRunning {
         try syncStore.setGroupStatus(groupKey, status: "syncing")
 
         // 3. Read Apple Health over the server range and enqueue idempotent upserts.
-        await report(metric, .reading)
+        await report(metric, .reading, kind: kind)
         let fetchResult: HealthKitMetricFetchResult
         do {
             fetchResult = try await Self.withTimeout(seconds: Self.fetchTimeout(for: metric, kind: kind), label: "\(groupKey)_fetch") {
@@ -317,7 +413,7 @@ struct HealthKitRunEngine: HealthKitRunning {
         // workouts also allow empty successful reads for every run kind.
 
         // 4. Drain the pending queue; readiness requires an empty queue.
-        await report(metric, .uploading)
+        await report(metric, .uploading, kind: kind)
         let worker = HealthKitSyncWorker(
             store: syncStore,
             postBatch: deps.postBatch,
@@ -365,7 +461,7 @@ struct HealthKitRunEngine: HealthKitRunning {
 
         // 5. Complete. Repair supplies the complete present-key manifest; nothing
         //    deletes unless this request is made (deletion safety barrier).
-        await report(metric, .finishing)
+        await report(metric, .finishing, kind: kind)
         let completion: HealthKitRunCompleteResultWire
         do {
             completion = try await deps.completeRun(
@@ -443,9 +539,33 @@ struct HealthKitRunEngine: HealthKitRunning {
         }
     }
 
-    private func report(_ metric: HealthKitSyncMetric, _ stage: HealthKitRunStage) async {
+    private func report(_ metric: HealthKitSyncMetric, _ stage: HealthKitRunStage, kind: HealthKitRunKind) async {
+        HealthKitRunActivity.shared.update(metric: metric, kind: kind, stage: stage)
         if let onProgress = deps.onProgress {
             await onProgress(metric, stage)
+        }
+    }
+
+    private func abandonStartedRun(metric: HealthKitSyncMetric, kind: HealthKitRunKind, error: HealthAPIError) async {
+        let code = error.errorCode ?? "sync_failed"
+        guard let failRun = deps.failRun else {
+            CrashReporting.log(
+                "healthkit_run_abandon_skipped_no_hook group=\(metric.rawValue) code=\(code)"
+            )
+            return
+        }
+        do {
+            try await failRun(metric, kind, code)
+            CrashReporting.log("healthkit_run_abandoned group=\(metric.rawValue) code=\(code)")
+        } catch {
+            CrashReporting.healthKitNonFatal(
+                .syncFailed,
+                stage: .syncFailed,
+                message: "healthkit_run_abandon_failed",
+                group: metric.rawValue,
+                metric: metric.scopeMetricKey,
+                underlying: error
+            )
         }
     }
 
@@ -487,7 +607,20 @@ struct HealthKitRunEngine: HealthKitRunning {
         if let api = error as? HealthAPIError {
             return api
         }
+        if error is CancellationError {
+            return HealthAPIError.badStatus(408, "HealthKit sync was cancelled before it finished.", code: "sync_cancelled")
+        }
+        if HealthKitDatabaseAccess.isInaccessible(error) {
+            return HealthAPIError.badStatus(
+                423,
+                HealthKitRunError.databaseInaccessible.errorDescription,
+                code: "healthkit_locked"
+            )
+        }
         if let runError = error as? HealthKitRunError {
+            if case .databaseInaccessible = runError {
+                return HealthAPIError.badStatus(423, runError.errorDescription, code: "healthkit_locked")
+            }
             return HealthAPIError.badStatus(409, runError.errorDescription, code: "sync_failed")
         }
         return HealthAPIError.badStatus(

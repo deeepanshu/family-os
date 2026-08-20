@@ -427,9 +427,28 @@ extension HealthBootstrapViewModel {
                 await MainActor.run {
                     self?.healthKit.updateActiveRunStage(stage)
                 }
+            },
+            failRun: { metric, kind, errorCode in
+                _ = try await HealthSessionRefresher.withFreshHealthToken { token in
+                    try await apiClient.failHealthKitRun(
+                        baseURL: baseURL,
+                        accessToken: token,
+                        group: metric.rawValue,
+                        installationId: installationId,
+                        personId: personId,
+                        timezoneVersion: timezoneVersion,
+                        kind: kind.rawValue,
+                        errorCode: errorCode
+                    )
+                }
             }
         )
         return HealthKitRunEngine(syncStore: syncStore, deps: deps)
+    }
+
+    func reloadHealthKitStatusAfterPassiveSync() async {
+        try? await refreshSessionIfNeeded()
+        await refreshHealthKitStatusAfterRun()
     }
 
     private func refreshHealthKitStatusAfterRun() async {
@@ -440,6 +459,8 @@ extension HealthBootstrapViewModel {
         ) {
             healthKit.apply(status: refreshed)
             persistServerGroupStates(refreshed)
+        } else {
+            CrashReporting.log("healthkit_status_refresh_failed")
         }
     }
 

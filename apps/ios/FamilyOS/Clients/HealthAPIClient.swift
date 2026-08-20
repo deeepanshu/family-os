@@ -368,6 +368,31 @@ struct HealthAPIClient {
         )
     }
 
+    /// Abandon an in-flight run after begin. Restores ready/error; never deletes.
+    func failHealthKitRun(
+        baseURL: String,
+        accessToken: String,
+        group: String,
+        installationId: String,
+        personId: String,
+        timezoneVersion: Int,
+        kind: String,
+        errorCode: String
+    ) async throws -> HealthKitRunFailResultWire {
+        try await post(
+            path: "healthkit/groups/\(group)/runs/fail",
+            baseURL: baseURL,
+            accessToken: accessToken,
+            body: HealthKitRunFailRequest(
+                installationId: installationId,
+                personId: personId,
+                timezoneVersion: timezoneVersion,
+                kind: kind,
+                errorCode: errorCode
+            )
+        )
+    }
+
     private func put<T: Decodable, Body: Encodable>(
         path: String,
         baseURL: String,

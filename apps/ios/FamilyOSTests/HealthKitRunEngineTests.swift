@@ -411,6 +411,157 @@ final class HealthKitRunEngineTests: XCTestCase {
         )
     }
 
+    func testLockedHealthKitErrorIsDetectedWithoutBegin() async throws {
+        let locked = NSError(
+            domain: HKError.errorDomain,
+            code: HKError.Code.errorDatabaseInaccessible.rawValue,
+            userInfo: nil
+        )
+        XCTAssertTrue(HealthKitDatabaseAccess.isInaccessible(locked))
+        XCTAssertTrue(HealthKitBackgroundSync.isLockedHealthKitError(locked))
+        XCTAssertTrue(HealthKitBackgroundSync.isLockedHealthKitError(HealthKitRunError.databaseInaccessible))
+        XCTAssertTrue(
+            HealthKitBackgroundSync.isLockedHealthKitError(
+                HealthAPIError.badStatus(423, "locked", code: "healthkit_locked")
+            )
+        )
+        XCTAssertFalse(
+            HealthKitDatabaseAccess.isInaccessible(
+                NSError(domain: HKError.errorDomain, code: HKError.Code.errorAuthorizationNotDetermined.rawValue)
+            )
+        )
+
+        let recorder = RunRecorder()
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("healthkit-run-engine-\(UUID().uuidString).sqlite")
+        addTeardownBlock { try? FileManager.default.removeItem(at: path) }
+        let store = try HealthKitSyncStore(path: path.path)
+        let runDescriptor = descriptor(metric: .sleep, kind: .sync)
+        let deps = HealthKitRunDependencies(
+            beginRun: { metric, kind in
+                recorder.beginCalls.append(metric)
+                return runDescriptor
+            },
+            completeRun: { metric, kind, _, _ in
+                recorder.completeCalls.append((metric, kind, nil))
+                return HealthKitRunCompleteResultWire(
+                    group: metric.rawValue,
+                    kind: kind.rawValue,
+                    status: "ready",
+                    deletedCount: 0,
+                    lastSuccessfulAt: nil,
+                    coverageStartAt: nil,
+                    coverageEndAt: nil,
+                    needsInitialImport: false
+                )
+            },
+            postBatch: { _ in .init(results: []) },
+            ensureAuth: { _ in },
+            fetchAndEnqueue: { _, _, _ in .init(fetchedCount: 0, presentNaturalKeys: []) },
+            isEnabled: { $0 == .sleep },
+            needsInitialImport: { _ in false },
+            assertDatabaseAccessible: { throw HealthKitRunError.databaseInaccessible }
+        )
+        let engine = HealthKitRunEngine(syncStore: store, deps: deps)
+        do {
+            _ = try await engine.run(.init(metric: .sleep, kind: .sync))
+            XCTFail("Expected locked HealthKit to skip begin")
+        } catch let error as HealthKitRunError {
+            guard case .databaseInaccessible = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+        XCTAssertEqual(recorder.beginCalls, [])
+        XCTAssertTrue(recorder.failCalls.isEmpty)
+    }
+
+    func testBecomeActiveWaitsOnTheRunGate() {
+        XCTAssertEqual(HealthKitBackgroundSync.exclusiveWaitSeconds(for: "become_active"), 45)
+        XCTAssertEqual(HealthKitBackgroundSync.exclusiveWaitSeconds(for: "observer"), 0)
+        XCTAssertEqual(HealthKitBackgroundSync.exclusiveWaitSeconds(for: "bg_task"), 0)
+    }
+
+    func testObserverBudgetSkipsWhenTheWallClockIsAlmostGone() {
+        XCTAssertTrue(HealthKitBackgroundSync.canStartMetric(elapsed: 0, wallTimeoutSeconds: 25))
+        XCTAssertTrue(HealthKitBackgroundSync.canStartMetric(elapsed: 19, wallTimeoutSeconds: 25))
+        XCTAssertFalse(HealthKitBackgroundSync.canStartMetric(elapsed: 21, wallTimeoutSeconds: 25))
+        XCTAssertTrue(HealthKitBackgroundSync.canStartMetric(elapsed: 100, wallTimeoutSeconds: nil))
+    }
+
+    func testCaptionTreatsStaleServerSyncingAsInterrupted() {
+        let state = metricState(status: .syncing, needsImport: false)
+        let text = HealthKitMetricCaption.text(
+            metric: .vitals,
+            enabled: true,
+            activeRun: nil,
+            localRunInProgress: false,
+            sessionError: nil,
+            state: state
+        )
+        XCTAssertEqual(text, "Interrupted - try Sync or Import history again.")
+        XCTAssertEqual(
+            HealthKitMetricCaption.tone(
+                metric: .vitals,
+                enabled: true,
+                activeRun: nil,
+                localRunInProgress: false,
+                sessionError: nil,
+                state: state
+            ),
+            .warning
+        )
+    }
+
+    func testCaptionDoesNotCallALiveLocalRunInterrupted() {
+        let state = metricState(status: .syncing, needsImport: false)
+        let active = HealthKitActiveRun(metric: .vitals, kind: .sync, stage: .uploading)
+        XCTAssertEqual(
+            HealthKitMetricCaption.text(
+                metric: .vitals,
+                enabled: true,
+                activeRun: active,
+                localRunInProgress: true,
+                sessionError: nil,
+                state: state
+            ),
+            HealthKitRunStage.uploading.displayText
+        )
+        XCTAssertEqual(
+            HealthKitMetricCaption.text(
+                metric: .sleep,
+                enabled: true,
+                activeRun: active,
+                localRunInProgress: true,
+                sessionError: nil,
+                state: state
+            ),
+            "Waiting…"
+        )
+    }
+
+    func testFetchFailureAfterBeginAbandonsTheServerAttempt() async throws {
+        let recorder = RunRecorder()
+        let engine = try makeEngine(
+            enabled: [.sleep],
+            needsImport: [],
+            fetch: { _, _, _ in
+                throw HealthAPIError.badStatus(408, "timed out", code: "sync_timeout")
+            },
+            recorder: recorder
+        )
+
+        do {
+            _ = try await engine.run(.init(metric: .sleep, kind: .sync))
+            XCTFail("Expected fetch failure")
+        } catch let error as HealthAPIError {
+            XCTAssertEqual(error.errorCode, "sync_timeout")
+        }
+        XCTAssertEqual(recorder.beginCalls, [.sleep])
+        XCTAssertEqual(recorder.completeCalls.count, 0)
+        XCTAssertEqual(recorder.failCalls.map(\.metric), [.sleep])
+        XCTAssertEqual(recorder.failCalls.map(\.code), ["sync_timeout"])
+    }
+
     func testUnauthorizedMatcher() {
         XCTAssertTrue(HealthSessionRefresher.isUnauthorized(.badStatus(401, "expired", code: "unauthorized")))
         XCTAssertFalse(HealthSessionRefresher.isUnauthorized(.badStatus(500, "boom", code: "sync_failed")))
@@ -475,9 +626,31 @@ final class HealthKitRunEngineTests: XCTestCase {
                 return try await fetch(metric, from, through)
             },
             isEnabled: { enabled.contains($0) },
-            needsInitialImport: { needsImport.contains($0) }
+            needsInitialImport: { needsImport.contains($0) },
+            failRun: { metric, kind, code in
+                recorder.failCalls.append((metric, kind, code))
+            },
+            assertDatabaseAccessible: {}
         )
         return (HealthKitRunEngine(syncStore: store, deps: deps), store)
+    }
+
+    private func metricState(
+        status: HealthKitMetricSyncStatus,
+        needsImport: Bool
+    ) -> HealthKitMetricState {
+        HealthKitMetricState(
+            group: .vitals,
+            enabled: true,
+            status: status,
+            lastSuccessfulAt: "2026-08-01T00:00:00.000Z",
+            lastAttemptAt: "2026-08-20T00:00:00.000Z",
+            lastErrorCode: nil,
+            coverageStartAt: nil,
+            coverageEndAt: nil,
+            needsInitialImport: needsImport,
+            historyImportCompletedAt: needsImport ? nil : "2026-08-01T00:00:00.000Z"
+        )
     }
 
     private func descriptor(
@@ -498,6 +671,7 @@ private final class RunRecorder: @unchecked Sendable {
     var uploadedGroups: [String] = []
     var fetchedRange: (Date, Date)?
     var fetchCalls = 0
+    var failCalls: [(metric: HealthKitSyncMetric, kind: HealthKitRunKind, code: String)] = []
 }
 
 private actor GateBlocker {

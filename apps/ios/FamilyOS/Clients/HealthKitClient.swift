@@ -207,3 +207,47 @@ struct HealthKitClient {
         }
     }
 }
+
+/// HealthKit encrypts samples while the device is locked. Queries then fail with
+/// `HKError.errorDatabaseInaccessible` (code 6). Crashlytics on 0.1.0 (61)
+/// shows `bg_refresh` beginning every metric then failing fetch with that code,
+/// which left server groups on `syncing`.
+enum HealthKitDatabaseAccess {
+    static func isInaccessible(_ error: Error) -> Bool {
+        let ns = error as NSError
+        return ns.domain == HKError.errorDomain
+            && ns.code == HKError.Code.errorDatabaseInaccessible.rawValue
+    }
+
+    static func assertAccessible(store: HKHealthStore = HKHealthStore()) async throws {
+        do {
+            try await probe(store: store)
+        } catch {
+            if isInaccessible(error) {
+                CrashReporting.log("healthkit_database_inaccessible")
+                throw HealthKitRunError.databaseInaccessible
+            }
+            CrashReporting.log(
+                "healthkit_database_probe_other_error domain=\((error as NSError).domain) code=\((error as NSError).code)"
+            )
+        }
+    }
+
+    private static func probe(store: HKHealthStore) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let query = HKSampleQuery(
+                sampleType: HKObjectType.workoutType(),
+                predicate: nil,
+                limit: 1,
+                sortDescriptors: nil
+            ) { _, _, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+            store.execute(query)
+        }
+    }
+}

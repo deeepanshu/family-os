@@ -9,6 +9,7 @@ import {
   beginRun,
   bloodPressureOp,
   completeRun,
+  failRun,
   postOps,
   seedHealthKitReadyGroup,
   sleepDayOp
@@ -361,6 +362,54 @@ describe("HealthKit run lifecycle", () => {
     const vitals = (await getSettings(api, token)).groups.find((g: { group: string }) => g.group === "vitals");
     expect(vitals.status).toBe("syncing");
     expect(vitals.needsInitialImport).toBe(false);
+  });
+
+  it("fail restores ready after a leftover syncing attempt without moving coverage", async () => {
+    const { api } = app();
+    const { token, profileId } = await setup(api);
+    await putSettings(api, token, profileId);
+    await seedHealthKitReadyGroup(api, token, profileId, installationId, "vitals", []);
+
+    const before = (await getSettings(api, token)).groups.find((g: { group: string }) => g.group === "vitals");
+    const begin = await beginRun(api, token, profileId, installationId, "vitals", "sync");
+    expect(begin.status).toBe(200);
+    expect((await getSettings(api, token)).groups.find((g: { group: string }) => g.group === "vitals").status).toBe(
+      "syncing"
+    );
+
+    const failed = await failRun(api, token, profileId, installationId, "vitals", "sync", "sync_timeout");
+    expect(failed.status).toBe(200);
+    const body = (await failed.json()).data;
+    expect(body.status).toBe("ready");
+    expect(body.lastErrorCode).toBe("sync_timeout");
+    expect(body.needsInitialImport).toBe(false);
+
+    const after = (await getSettings(api, token)).groups.find((g: { group: string }) => g.group === "vitals");
+    expect(after.status).toBe("ready");
+    expect(after.lastSuccessfulAt).toBe(before.lastSuccessfulAt);
+    expect(after.coverageStartAt).toBe(before.coverageStartAt);
+    expect(after.coverageEndAt).toBe(before.coverageEndAt);
+    expect(after.lastErrorCode).toBe("sync_timeout");
+  });
+
+  it("fail without a prior success records error and keeps import required", async () => {
+    const { api } = app();
+    const { token, profileId } = await setup(api);
+    await putSettings(api, token, profileId);
+
+    const begin = await beginRun(api, token, profileId, installationId, "sleep", "initial_import");
+    expect(begin.status).toBe(200);
+
+    const failed = await failRun(api, token, profileId, installationId, "sleep", "initial_import", "sync_timeout");
+    expect(failed.status).toBe(200);
+    const body = (await failed.json()).data;
+    expect(body.status).toBe("error");
+    expect(body.needsInitialImport).toBe(true);
+
+    const sleep = (await getSettings(api, token)).groups.find((g: { group: string }) => g.group === "sleep");
+    expect(sleep.status).toBe("error");
+    expect(sleep.needsInitialImport).toBe(true);
+    expect(sleep.lastErrorCode).toBe("sync_timeout");
   });
 
   it("replayed completion is idempotent", async () => {

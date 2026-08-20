@@ -64,6 +64,8 @@ final class HealthKitSyncStateViewModel: ObservableObject {
     @Published var isSavingSettings = false
     /// The one locally active run (runs serialize process-wide through the gate).
     @Published var activeRun: HealthKitActiveRun?
+    /// True while any local foreground/background run holds the process gate.
+    @Published var localRunInProgress = false
     /// Per-metric actionable failure for the current session (plan §5.3).
     @Published var sessionErrors: [HealthKitSyncMetric: String] = [:]
 
@@ -82,6 +84,7 @@ final class HealthKitSyncStateViewModel: ObservableObject {
         )
         isSavingSettings = false
         activeRun = nil
+        localRunInProgress = false
         sessionErrors = [:]
     }
 
@@ -95,6 +98,26 @@ final class HealthKitSyncStateViewModel: ObservableObject {
         // The server's canonical enabled set is authoritative. In particular,
         // an empty enabled set must not silently turn every metric back on.
         enabledMetrics = status.consentActive ? fromServer : []
+        if !localRunInProgress {
+            for group in status.groups where group.status == .syncing || group.status == .backfilling {
+                CrashReporting.log("healthkit_status_stale_inflight group=\(group.group.rawValue)")
+            }
+        }
+    }
+
+    func applyRunActivity(_ snapshot: HealthKitRunActivity.Snapshot) {
+        localRunInProgress = snapshot.isRunning
+        if snapshot.isRunning, let metric = snapshot.metric {
+            let kind = snapshot.kind ?? .sync
+            let stage = snapshot.stage ?? .preparing
+            if activeRun?.metric != metric || activeRun?.kind != kind {
+                activeRun = HealthKitActiveRun(metric: metric, kind: kind, stage: stage)
+            } else {
+                activeRun?.stage = stage
+            }
+        } else if !snapshot.isRunning {
+            activeRun = nil
+        }
     }
 
     var metricRows: [HealthKitMetricState] {
@@ -107,7 +130,7 @@ final class HealthKitSyncStateViewModel: ObservableObject {
 
     /// True while a save or any run is active; every conflicting control locks.
     var isBusy: Bool {
-        isSavingSettings || activeRun != nil
+        isSavingSettings || activeRun != nil || localRunInProgress
     }
 
     /// Pinned banner copy. Prefer the live run; fall back to settings save so
@@ -177,6 +200,87 @@ final class HealthKitSyncStateViewModel: ObservableObject {
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
                 continuation.resume(returning: granted)
             }
+        }
+    }
+}
+
+enum HealthKitMetricCaption {
+    enum Tone: Equatable {
+        case secondary
+        case warning
+        case error
+    }
+
+    static let lastSyncedFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
+    static func text(
+        metric: HealthKitSyncMetric,
+        enabled: Bool,
+        activeRun: HealthKitActiveRun?,
+        localRunInProgress: Bool,
+        sessionError: String?,
+        state: HealthKitMetricState?
+    ) -> String {
+        if let active = activeRun, active.metric == metric {
+            return active.stage.displayText
+        }
+        guard enabled else { return "Disabled" }
+        if let error = sessionError, !error.isEmpty {
+            return "Failed: \(error)"
+        }
+        guard let state else { return "Not started" }
+        if state.status == .syncing || state.status == .backfilling {
+            if localRunInProgress {
+                return "Waiting…"
+            }
+            return state.needsImport
+                ? "Interrupted - try Import history again."
+                : "Interrupted - try Sync or Import history again."
+        }
+        if state.needsImport {
+            return "Not started"
+        }
+        if state.status == .error {
+            if let code = state.lastErrorCode, !code.isEmpty {
+                return "Failed (\(code))"
+            }
+            return "Failed"
+        }
+        if let last = state.lastSuccessfulAt,
+           let date = HealthKitRunEngine.parseISODate(last) {
+            return "Ready - Last synced \(lastSyncedFormatter.string(from: date))"
+        }
+        return "Ready"
+    }
+
+    static func tone(
+        metric: HealthKitSyncMetric,
+        enabled: Bool,
+        activeRun: HealthKitActiveRun?,
+        localRunInProgress: Bool,
+        sessionError: String?,
+        state: HealthKitMetricState?
+    ) -> Tone {
+        if activeRun?.metric == metric {
+            return .secondary
+        }
+        if sessionError != nil {
+            return .error
+        }
+        guard enabled else { return .secondary }
+        guard let state else { return .secondary }
+        switch state.status {
+        case .syncing, .backfilling:
+            return localRunInProgress ? .secondary : .warning
+        case .error:
+            return .error
+        case .ready, .neverSynced, .disabled:
+            return .secondary
         }
     }
 }
