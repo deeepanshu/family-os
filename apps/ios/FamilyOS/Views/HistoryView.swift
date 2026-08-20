@@ -7,36 +7,15 @@ struct HistoryView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    ProfilePicker(viewModel: viewModel)
-                    if viewModel.isViewingAnotherMember {
-                        Text("Looking at \(viewModel.selectedProfile?.displayName ?? "this person"). History is read-only.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    Picker("Metric", selection: $filter) {
-                        ForEach(HistoryMetricFilter.allCases) { metric in
-                            Text(metric.title).tag(metric)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    Button("Refresh") {
-                        Task { await refreshHistory(showsFeedback: true) }
-                    }
-                }
-
                 if days.isEmpty {
-                    Section {
-                        EmptyRow(emptyCopy)
-                    }
+                    EmptyRow(emptyCopy)
                 } else {
                     ForEach(days) { day in
                         Section(HistoryTimeline.dateTitle(localDay: day.localDay, timeZone: viewModel.historyTimeZone)) {
                             ForEach(day.items) { item in
                                 ReadingRow(
                                     title: title(for: item),
-                                    detail: detail(for: item),
-                                    source: source(for: item)
+                                    detail: detail(for: item)
                                 )
                             }
                         }
@@ -44,11 +23,40 @@ struct HistoryView: View {
                 }
             }
             .navigationTitle("History")
+            .safeAreaInset(edge: .top) {
+                header
+            }
+            .refreshable {
+                await refreshHistory()
+            }
             .task {
                 await viewModel.loadProfiles()
                 await refreshHistory()
             }
         }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if viewModel.profiles.profiles.count > 1 {
+                ProfilePicker(viewModel: viewModel)
+            }
+            if viewModel.isViewingAnotherMember {
+                Text("Looking at \(viewModel.selectedProfile?.displayName ?? "this person"). Read-only.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Picker("Metric", selection: $filter) {
+                ForEach(HistoryMetricFilter.allCases) { metric in
+                    Text(metric.title).tag(metric)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.bar)
     }
 
     private var days: [HistoryDay] {
@@ -65,9 +73,9 @@ struct HistoryView: View {
         }
     }
 
-    private func refreshHistory(showsFeedback: Bool = false) async {
+    private func refreshHistory() async {
         guard viewModel.hasSelectedProfile else { return }
-        await viewModel.loadHistory(showsFeedback: showsFeedback)
+        await viewModel.loadHistory()
     }
 
     private func title(for item: HistoryItem) -> String {
@@ -75,7 +83,7 @@ struct HistoryView: View {
         case let .bloodPressure(reading):
             return "\(reading.systolic)/\(reading.diastolic) mmHg"
         case let .sleep(day):
-            return formatMinutes(day.totalMinutes)
+            return "Sleep \(formatMinutes(day.totalMinutes))"
         case let .steps(day):
             return "\(stepFormatter.string(from: NSNumber(value: day.count)) ?? "\(day.count)") steps"
         case let .workout(workout):
@@ -83,7 +91,7 @@ struct HistoryView: View {
         }
     }
 
-    private func detail(for item: HistoryItem) -> String {
+    private func detail(for item: HistoryItem) -> String? {
         switch item {
         case let .bloodPressure(reading):
             let pulse = reading.pulse.map { "Pulse \($0)" } ?? "Pulse not recorded"
@@ -104,12 +112,13 @@ struct HistoryView: View {
             }
             return parts.joined(separator: " · ")
         case .steps:
-            return "Steps"
+            return nil
         case let .workout(workout):
-            var parts = [formatMinutes(workout.durationSeconds / 60)]
+            var parts: [String] = []
             if let time = formatTime(workout.startedAtUtc) {
-                parts.insert(time, at: 0)
+                parts.append(time)
             }
+            parts.append(formatMinutes(max(workout.durationSeconds / 60, 0)))
             if let kcal = workout.activeEnergyKcal {
                 parts.append("\(Int(kcal.rounded())) kcal")
             }
@@ -117,15 +126,6 @@ struct HistoryView: View {
                 parts.append(String(format: "%.1f km", meters / 1000))
             }
             return parts.joined(separator: " · ")
-        }
-    }
-
-    private func source(for item: HistoryItem) -> String? {
-        switch item {
-        case let .bloodPressure(reading):
-            return reading.source.displayName
-        case .sleep, .steps, .workout:
-            return "HealthKit"
         }
     }
 
