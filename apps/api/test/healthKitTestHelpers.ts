@@ -43,6 +43,7 @@ export async function completeRun(
   });
 }
 
+
 export async function postOps(
   api: Api,
   token: string,
@@ -180,6 +181,35 @@ export function bloodPressureDeleteOp(sourceObjectKey: string): HealthKitSyncOp 
     scopeKey: "blood_pressure",
     op: "delete",
     payload: null
+  };
+}
+
+export function workoutOp(input: {
+  sourceSampleKey?: string;
+  workoutType?: string;
+  startedAtUtc: string;
+  endedAtUtc: string;
+  durationSeconds: number;
+  activeEnergyKcal?: number;
+  distanceMeters?: number;
+}): HealthKitSyncOp {
+  const sourceSampleKey = input.sourceSampleKey ?? crypto.randomUUID();
+  return {
+    opId: crypto.randomUUID(),
+    naturalKey: `workout:${sourceSampleKey}`,
+    group: "workouts",
+    scopeKey: "workout",
+    op: "upsert",
+    payload: {
+      kind: "workout",
+      sourceSampleKey,
+      workoutType: input.workoutType ?? "running",
+      startedAtUtc: input.startedAtUtc,
+      endedAtUtc: input.endedAtUtc,
+      durationSeconds: input.durationSeconds,
+      activeEnergyKcal: input.activeEnergyKcal,
+      distanceMeters: input.distanceMeters
+    }
   };
 }
 

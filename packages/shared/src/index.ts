@@ -292,6 +292,11 @@ export type HealthStepHourRecord = {
   count: number;
 };
 
+export type HealthStepDayRecord = {
+  localDay: string;
+  count: number;
+};
+
 export type HealthSleepDayRecord = {
   personId: string;
   sleepDay: string;

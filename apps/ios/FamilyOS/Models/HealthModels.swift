@@ -137,6 +137,191 @@ struct BloodPressureReading: Decodable, Identifiable {
     let diastolic: Int
     let pulse: Int?
     let source: HealthDataSource
+    let measuredAt: String
+}
+
+struct SleepDayReading: Decodable, Identifiable {
+    let personId: String
+    let sleepDay: String
+    let totalMinutes: Int
+    let coreMinutes: Int
+    let deepMinutes: Int
+    let remMinutes: Int
+    let unspecifiedAsleepMinutes: Int
+    let awakeMinutes: Int
+    let inBedMinutes: Int
+    let wristTemperatureCelsius: Double?
+    let breathingDisturbanceCount: Int?
+
+    var id: String { sleepDay }
+}
+
+struct StepDayReading: Decodable, Identifiable {
+    let localDay: String
+    let count: Int
+
+    var id: String { localDay }
+}
+
+struct WorkoutReading: Decodable, Identifiable {
+    let id: String
+    let workoutType: String
+    let startedAtUtc: String
+    let endedAtUtc: String
+    let durationSeconds: Int
+    let activeEnergyKcal: Double?
+    let distanceMeters: Double?
+}
+
+enum HistoryMetricFilter: String, CaseIterable, Identifiable {
+    case all
+    case bloodPressure
+    case sleep
+    case steps
+    case workouts
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return "All"
+        case .bloodPressure: return "BP"
+        case .sleep: return "Sleep"
+        case .steps: return "Steps"
+        case .workouts: return "Workouts"
+        }
+    }
+}
+
+enum HistoryItem: Identifiable {
+    case bloodPressure(BloodPressureReading)
+    case workout(WorkoutReading)
+    case sleep(SleepDayReading)
+    case steps(StepDayReading)
+
+    var id: String {
+        switch self {
+        case let .bloodPressure(reading): return "bp:\(reading.id)"
+        case let .workout(workout): return "workout:\(workout.id)"
+        case let .sleep(day): return "sleep:\(day.sleepDay)"
+        case let .steps(day): return "steps:\(day.localDay)"
+        }
+    }
+
+    var metric: HistoryMetricFilter {
+        switch self {
+        case .bloodPressure: return .bloodPressure
+        case .workout: return .workouts
+        case .sleep: return .sleep
+        case .steps: return .steps
+        }
+    }
+}
+
+struct HistoryDay: Identifiable {
+    let localDay: String
+    let items: [HistoryItem]
+
+    var id: String { localDay }
+}
+
+enum HistoryTimeline {
+    static func days(
+        bloodPressure: [BloodPressureReading],
+        sleep: [SleepDayReading],
+        steps: [StepDayReading],
+        workouts: [WorkoutReading],
+        filter: HistoryMetricFilter,
+        timeZone: TimeZone
+    ) -> [HistoryDay] {
+        var grouped: [String: [HistoryItem]] = [:]
+
+        func append(_ day: String, _ item: HistoryItem) {
+            guard filter == .all || item.metric == filter else { return }
+            grouped[day, default: []].append(item)
+        }
+
+        for reading in bloodPressure {
+            guard let day = localDay(iso: reading.measuredAt, timeZone: timeZone) else { continue }
+            append(day, .bloodPressure(reading))
+        }
+        for workout in workouts {
+            guard let day = localDay(iso: workout.startedAtUtc, timeZone: timeZone) else { continue }
+            append(day, .workout(workout))
+        }
+        for day in sleep {
+            append(day.sleepDay, .sleep(day))
+        }
+        for day in steps {
+            append(day.localDay, .steps(day))
+        }
+
+        return grouped.keys.sorted(by: >).map { day in
+            HistoryDay(localDay: day, items: grouped[day]!.sorted(by: Self.itemSort))
+        }
+    }
+
+    static func dateTitle(localDay: String, now: Date = Date(), timeZone: TimeZone) -> String {
+        guard let date = date(fromLocalDay: localDay, timeZone: timeZone) else { return localDay }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        if calendar.isDate(date, inSameDayAs: now) {
+            return "Today"
+        }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: now)),
+           calendar.isDate(date, inSameDayAs: yesterday) {
+            return "Yesterday"
+        }
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = timeZone
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        let nowYear = calendar.component(.year, from: now)
+        let dayYear = calendar.component(.year, from: date)
+        formatter.dateFormat = nowYear == dayYear ? "d MMM" : "d MMM yyyy"
+        return formatter.string(from: date)
+    }
+
+    static func localDay(iso: String, timeZone: TimeZone) -> String? {
+        guard let date = parseISO(iso) else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        guard let year = parts.year, let month = parts.month, let day = parts.day else { return nil }
+        return String(format: "%04d-%02d-%02d", year, month, day)
+    }
+
+    static func parseISO(_ iso: String) -> Date? {
+        HealthKitRunEngine.parseISODate(iso)
+    }
+
+    private static func date(fromLocalDay localDay: String, timeZone: TimeZone) -> Date? {
+        let parts = localDay.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        return calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+    }
+
+    private static func itemSort(_ lhs: HistoryItem, _ rhs: HistoryItem) -> Bool {
+        let left = sortKey(lhs)
+        let right = sortKey(rhs)
+        if left.rank != right.rank { return left.rank < right.rank }
+        return left.time > right.time
+    }
+
+    private static func sortKey(_ item: HistoryItem) -> (rank: Int, time: TimeInterval) {
+        switch item {
+        case let .bloodPressure(reading):
+            return (0, parseISO(reading.measuredAt)?.timeIntervalSince1970 ?? 0)
+        case let .workout(workout):
+            return (0, parseISO(workout.startedAtUtc)?.timeIntervalSince1970 ?? 0)
+        case .sleep:
+            return (1, 0)
+        case .steps:
+            return (2, 0)
+        }
+    }
 }
 
 enum HealthDataSource: String, Codable {

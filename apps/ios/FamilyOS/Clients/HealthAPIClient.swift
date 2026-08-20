@@ -164,8 +164,71 @@ struct HealthAPIClient {
     }
 
     func listBloodPressure(baseURL: String, accessToken: String, personId: String) async throws -> [BloodPressureReading] {
+        try await get(path: readingsPath("blood-pressure", personId: personId), baseURL: baseURL, accessToken: accessToken)
+    }
+
+    func listSleepDays(
+        baseURL: String,
+        accessToken: String,
+        personId: String,
+        from: String,
+        to: String
+    ) async throws -> [SleepDayReading] {
+        try await get(
+            path: readingsPath("sleep", personId: personId, from: from, to: to),
+            baseURL: baseURL,
+            accessToken: accessToken
+        )
+    }
+
+    func listStepDays(
+        baseURL: String,
+        accessToken: String,
+        personId: String,
+        from: String,
+        to: String
+    ) async throws -> [StepDayReading] {
+        try await get(
+            path: readingsPath("steps", personId: personId, from: from, to: to),
+            baseURL: baseURL,
+            accessToken: accessToken
+        )
+    }
+
+    func listWorkouts(
+        baseURL: String,
+        accessToken: String,
+        personId: String,
+        from: String,
+        to: String,
+        limit: Int = 50
+    ) async throws -> [WorkoutReading] {
+        try await get(
+            path: readingsPath("workouts", personId: personId, from: from, to: to, limit: limit),
+            baseURL: baseURL,
+            accessToken: accessToken
+        )
+    }
+
+    private func readingsPath(
+        _ resource: String,
+        personId: String,
+        from: String? = nil,
+        to: String? = nil,
+        limit: Int? = nil
+    ) -> String {
         let encodedPersonId = personId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? personId
-        return try await get(path: "readings/blood-pressure?personId=\(encodedPersonId)", baseURL: baseURL, accessToken: accessToken)
+        var path = "readings/\(resource)?personId=\(encodedPersonId)"
+        if let from {
+            path += "&from=\(from)"
+        }
+        if let to {
+            path += "&to=\(to)"
+        }
+        if let limit {
+            path += "&limit=\(limit)"
+        }
+        return path
     }
 
     func healthKitSettings(baseURL: String, accessToken: String, personId: String? = nil) async throws -> HealthKitSyncStatus {

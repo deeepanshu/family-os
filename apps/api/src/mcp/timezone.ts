@@ -68,6 +68,18 @@ export function localDateRangeEndingToday(rangeDays: number, timeZone: string, n
   return { rangeStart, rangeEnd };
 }
 
+/** Widen a local-day inclusive range so UTC hour/instant rows near timezone edges are included. */
+export function expandedUtcRangeForLocalDays(rangeStart: string, rangeEnd: string): {
+  start: string;
+  end: string;
+} {
+  const start = new Date(`${rangeStart}T00:00:00.000Z`);
+  start.setUTCDate(start.getUTCDate() - 1);
+  const end = new Date(`${rangeEnd}T23:59:59.999Z`);
+  end.setUTCDate(end.getUTCDate() + 1);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
 export function isDateInInclusiveRange(date: string, rangeStart: string, rangeEnd: string): boolean {
   return date >= rangeStart && date <= rangeEnd;
 }

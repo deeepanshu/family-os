@@ -504,6 +504,79 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertEqual(viewModel.healthKit.linkedProfileId, profile.id)
         XCTAssertEqual(viewModel.selfProfile?.id, profile.id)
     }
+
+    func testHistoryTimelineGroupsByLocalDayNewestFirst() {
+        let bangkok = TimeZone(identifier: "Asia/Bangkok")!
+        let days = HistoryTimeline.days(
+            bloodPressure: [
+                makeBloodPressure(id: "bp-19", systolic: 120, diastolic: 80, measuredAt: "2026-08-19T01:12:00.000Z"),
+                makeBloodPressure(id: "bp-18", systolic: 118, diastolic: 76, measuredAt: "2026-08-18T14:04:00.000Z")
+            ],
+            sleep: [makeSleepDay(sleepDay: "2026-08-19", totalMinutes: 432)],
+            steps: [StepDayReading(localDay: "2026-08-19", count: 8432)],
+            workouts: [
+                makeWorkout(id: "w1", startedAtUtc: "2026-08-19T00:40:00.000Z", durationSeconds: 1920)
+            ],
+            filter: .all,
+            timeZone: bangkok
+        )
+
+        XCTAssertEqual(days.map(\.localDay), ["2026-08-19", "2026-08-18"])
+        XCTAssertEqual(days[0].items.map(\.id), ["bp:bp-19", "workout:w1", "sleep:2026-08-19", "steps:2026-08-19"])
+        XCTAssertEqual(days[1].items.map(\.id), ["bp:bp-18"])
+    }
+
+    func testHistoryTimelineBloodPressureFilterOmitsOtherMetrics() {
+        let bangkok = TimeZone(identifier: "Asia/Bangkok")!
+        let days = HistoryTimeline.days(
+            bloodPressure: [
+                makeBloodPressure(id: "bp-19", systolic: 120, diastolic: 80, measuredAt: "2026-08-19T01:12:00.000Z")
+            ],
+            sleep: [makeSleepDay(sleepDay: "2026-08-19", totalMinutes: 432)],
+            steps: [StepDayReading(localDay: "2026-08-19", count: 8432)],
+            workouts: [],
+            filter: .bloodPressure,
+            timeZone: bangkok
+        )
+
+        XCTAssertEqual(days.map(\.localDay), ["2026-08-19"])
+        XCTAssertEqual(days[0].items.map(\.id), ["bp:bp-19"])
+    }
+
+    func testHistoryDateTitleUsesTodayYesterdayAndDayMonth() {
+        let bangkok = TimeZone(identifier: "Asia/Bangkok")!
+        let now = HistoryTimeline.parseISO("2026-08-20T10:00:00.000Z")!
+        XCTAssertEqual(HistoryTimeline.dateTitle(localDay: "2026-08-20", now: now, timeZone: bangkok), "Today")
+        XCTAssertEqual(HistoryTimeline.dateTitle(localDay: "2026-08-19", now: now, timeZone: bangkok), "Yesterday")
+        XCTAssertEqual(HistoryTimeline.dateTitle(localDay: "2026-08-18", now: now, timeZone: bangkok), "18 Aug")
+    }
+
+    func testLoadHistoryFillsSleepStepsAndWorkouts() async {
+        let personId = "00000000-0000-4000-8000-000000000111"
+        let viewModel = makeViewModelWithMock([
+            "/readings/blood-pressure": """
+            {"data":[{"id":"bp1","systolic":120,"diastolic":80,"pulse":72,"source":"healthkit","measuredAt":"2026-08-19T01:12:00.000Z"}]}
+            """,
+            "/readings/sleep": """
+            {"data":[{"personId":"\(personId)","sleepDay":"2026-08-19","timezoneVersion":1,"totalMinutes":432,"coreMinutes":240,"deepMinutes":80,"remMinutes":90,"unspecifiedAsleepMinutes":22,"awakeMinutes":0,"inBedMinutes":432}]}
+            """,
+            "/readings/steps": """
+            {"data":[{"localDay":"2026-08-19","count":8432}]}
+            """,
+            "/readings/workouts": """
+            {"data":[{"id":"w1","workoutType":"running","startedAtUtc":"2026-08-19T00:40:00.000Z","endedAtUtc":"2026-08-19T01:12:00.000Z","durationSeconds":1920,"activeEnergyKcal":280}]}
+            """
+        ])
+        viewModel.auth.accessToken = "dev-token"
+        viewModel.profiles.selectedProfileId = personId
+
+        await viewModel.loadHistory()
+
+        XCTAssertEqual(viewModel.readings.bloodPressureReadings.map(\.id), ["bp1"])
+        XCTAssertEqual(viewModel.readings.sleepDays.map(\.sleepDay), ["2026-08-19"])
+        XCTAssertEqual(viewModel.readings.stepDays.map(\.count), [8432])
+        XCTAssertEqual(viewModel.readings.workouts.map(\.workoutType), ["running"])
+    }
 }
 
 private func makeProfile(
@@ -521,6 +594,51 @@ private func makeProfile(
     }
     """.data(using: .utf8)!
     return try! JSONDecoder().decode(HealthProfile.self, from: json)
+}
+
+private func makeBloodPressure(
+    id: String,
+    systolic: Int,
+    diastolic: Int,
+    measuredAt: String,
+    pulse: Int? = 72
+) -> BloodPressureReading {
+    BloodPressureReading(
+        id: id,
+        systolic: systolic,
+        diastolic: diastolic,
+        pulse: pulse,
+        source: .healthkit,
+        measuredAt: measuredAt
+    )
+}
+
+private func makeSleepDay(sleepDay: String, totalMinutes: Int) -> SleepDayReading {
+    SleepDayReading(
+        personId: "p1",
+        sleepDay: sleepDay,
+        totalMinutes: totalMinutes,
+        coreMinutes: 240,
+        deepMinutes: 80,
+        remMinutes: 90,
+        unspecifiedAsleepMinutes: 22,
+        awakeMinutes: 0,
+        inBedMinutes: totalMinutes,
+        wristTemperatureCelsius: nil,
+        breathingDisturbanceCount: nil
+    )
+}
+
+private func makeWorkout(id: String, startedAtUtc: String, durationSeconds: Int) -> WorkoutReading {
+    WorkoutReading(
+        id: id,
+        workoutType: "running",
+        startedAtUtc: startedAtUtc,
+        endedAtUtc: startedAtUtc,
+        durationSeconds: durationSeconds,
+        activeEnergyKcal: 280,
+        distanceMeters: 5000
+    )
 }
 
 private func makeMembership(id: String, userId: String, role: FamilyRole, status: MembershipStatus) -> FamilyMembership {

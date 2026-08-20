@@ -2,14 +2,96 @@ import Foundation
 
 extension HealthBootstrapViewModel {
     func loadBloodPressure(showsFeedback: Bool = false) async {
+        await loadHistory(showsFeedback: showsFeedback)
+    }
+
+    func loadHistory(showsFeedback: Bool = false) async {
         await request(showsFeedback: showsFeedback) {
-            readings.bloodPressureReadings = try await client.listBloodPressure(
-                baseURL: connection.baseURL,
-                accessToken: auth.accessToken,
-                personId: profiles.selectedProfileId
-            )
-            return "Loaded \(readings.bloodPressureReadings.count) BP readings."
+            let personId = profiles.selectedProfileId
+            let window = historyDayWindow()
+            async let bloodPressure = optionalList {
+                try await client.listBloodPressure(
+                    baseURL: connection.baseURL,
+                    accessToken: auth.accessToken,
+                    personId: personId
+                )
+            }
+            async let sleep = optionalList {
+                try await client.listSleepDays(
+                    baseURL: connection.baseURL,
+                    accessToken: auth.accessToken,
+                    personId: personId,
+                    from: window.from,
+                    to: window.to
+                )
+            }
+            async let steps = optionalList {
+                try await client.listStepDays(
+                    baseURL: connection.baseURL,
+                    accessToken: auth.accessToken,
+                    personId: personId,
+                    from: window.from,
+                    to: window.to
+                )
+            }
+            async let workouts = optionalList {
+                try await client.listWorkouts(
+                    baseURL: connection.baseURL,
+                    accessToken: auth.accessToken,
+                    personId: personId,
+                    from: window.from,
+                    to: window.to
+                )
+            }
+            let (
+                bloodPressureReadings,
+                sleepDays,
+                stepDays,
+                workoutReadings
+            ) = await (bloodPressure, sleep, steps, workouts)
+            if let bloodPressureReadings { readings.bloodPressureReadings = bloodPressureReadings }
+            if let sleepDays { readings.sleepDays = sleepDays }
+            if let stepDays { readings.stepDays = stepDays }
+            if let workoutReadings { readings.workouts = workoutReadings }
+            let loaded =
+                readings.bloodPressureReadings.count
+                + readings.sleepDays.count
+                + readings.stepDays.count
+                + readings.workouts.count
+            return "Loaded \(loaded) history items."
         }
+    }
+
+    var historyTimeZone: TimeZone {
+        TimeZone(identifier: healthKit.status?.healthTimezone ?? TimeZone.current.identifier) ?? .current
+    }
+
+    func historyDays(filter: HistoryMetricFilter) -> [HistoryDay] {
+        HistoryTimeline.days(
+            bloodPressure: readings.bloodPressureReadings,
+            sleep: readings.sleepDays,
+            steps: readings.stepDays,
+            workouts: readings.workouts,
+            filter: filter,
+            timeZone: historyTimeZone
+        )
+    }
+
+    private func historyDayWindow(now: Date = Date()) -> (from: String, to: String) {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = historyTimeZone
+        let today = calendar.startOfDay(for: now)
+        let start = calendar.date(byAdding: .day, value: -89, to: today) ?? today
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = historyTimeZone
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return (formatter.string(from: start), formatter.string(from: today))
+    }
+
+    private func optionalList<T>(_ work: () async throws -> [T]) async -> [T]? {
+        try? await work()
     }
 
     func handleNotification(userInfo: [AnyHashable: Any]) {
