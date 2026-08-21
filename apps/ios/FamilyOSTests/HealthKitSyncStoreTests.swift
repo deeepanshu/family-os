@@ -313,6 +313,40 @@ final class HealthKitSyncStoreTests: XCTestCase {
         XCTAssertEqual(days[0].awakeMinutes, 15)
     }
 
+    func testSleepAggregationKeepsSubMinuteStagesInSessionTotal() throws {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        let queryStart = try XCTUnwrap(iso.date(from: "2026-08-17T07:00:00Z"))
+        let rangeEnd = try XCTUnwrap(iso.date(from: "2026-08-18T14:00:00Z"))
+        let start = try XCTUnwrap(iso.date(from: "2026-08-18T06:00:00Z"))
+
+        // Nine 22s core fragments = 198s. Per-sample rounding used to drop each
+        // (< 30s → 0m) and lose ~3 minutes Watch still shows.
+        let intervals = (0..<9).map { i in
+            let from = start.addingTimeInterval(TimeInterval(i * 22))
+            return HealthKitSleepDaySync.SleepInterval(
+                start: from,
+                end: from.addingTimeInterval(22),
+                value: HKCategoryValueSleepAnalysis.asleepCore.rawValue,
+                sourceBundleId: "com.apple.health.watch",
+                sourceName: "Apple Watch"
+            )
+        }
+
+        let days = HealthKitSleepDaySync.aggregateSleepDays(
+            intervals: intervals,
+            healthTimezone: "UTC",
+            queryStart: queryStart,
+            rangeEnd: rangeEnd
+        )
+
+        XCTAssertEqual(days.count, 1)
+        XCTAssertEqual(days[0].sleepDay, "2026-08-18")
+        XCTAssertEqual(days[0].totalMinutes, 3)
+        XCTAssertEqual(days[0].coreMinutes, 3)
+    }
+
+
     func testSleepAggregationOmitsDayWhenQueryStartsAfterBedtime() throws {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]

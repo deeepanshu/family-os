@@ -63,6 +63,7 @@ Background: `HealthKitBackgroundSync` (observers + `enableBackgroundDelivery` + 
 ## Sleep rules (locked)
 
 - Day totals: total, core, deep, rem, unspecified, awake, inBed
+- Sum stage seconds, then round to minutes once; keep sub-30s stages
 - `sleepDay` = local calendar day the **session** ends (wake) in profile `healthTimezone`
 - Same-source samples within 3h form one session; pre-midnight stages stay on the wake day
 - Prefer Apple / Watch source; never sum overlapping apps

@@ -177,12 +177,12 @@ enum HealthKitSleepDaySync {
     }
 
     private struct StageBucket {
-        var core = 0
-        var deep = 0
-        var rem = 0
-        var unspecified = 0
-        var awake = 0
-        var inBed = 0
+        var core: TimeInterval = 0
+        var deep: TimeInterval = 0
+        var rem: TimeInterval = 0
+        var unspecified: TimeInterval = 0
+        var awake: TimeInterval = 0
+        var inBed: TimeInterval = 0
 
         mutating func add(_ other: StageBucket) {
             core += other.core
@@ -193,37 +193,49 @@ enum HealthKitSleepDaySync {
             inBed += other.inBed
         }
 
-        mutating func add(_ interval: SleepInterval, minutes: Int) {
+        mutating func add(_ interval: SleepInterval, duration: TimeInterval) {
             switch interval.value {
             case HKCategoryValueSleepAnalysis.asleepCore.rawValue:
-                core += minutes
+                core += duration
             case HKCategoryValueSleepAnalysis.asleepDeep.rawValue:
-                deep += minutes
+                deep += duration
             case HKCategoryValueSleepAnalysis.asleepREM.rawValue:
-                rem += minutes
+                rem += duration
             case HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue:
-                unspecified += minutes
+                unspecified += duration
             case HKCategoryValueSleepAnalysis.awake.rawValue:
-                awake += minutes
+                awake += duration
             case HKCategoryValueSleepAnalysis.inBed.rawValue:
-                inBed += minutes
+                inBed += duration
             default:
-                unspecified += minutes
+                unspecified += duration
             }
         }
 
         func clampedSample(sleepDay: String) -> SleepDaySample {
-            let total = core + deep + rem + unspecified
+            let coreMinutes = minutes(core)
+            let deepMinutes = minutes(deep)
+            let remMinutes = minutes(rem)
+            var unspecifiedMinutes = minutes(unspecified)
+            let totalMinutes = minutes(core + deep + rem + unspecified)
+            let stageSum = coreMinutes + deepMinutes + remMinutes + unspecifiedMinutes
+            if totalMinutes > stageSum {
+                unspecifiedMinutes += totalMinutes - stageSum
+            }
             return SleepDaySample(
                 sleepDay: sleepDay,
-                totalMinutes: min(1440, max(0, total)),
-                coreMinutes: min(1440, max(0, core)),
-                deepMinutes: min(1440, max(0, deep)),
-                remMinutes: min(1440, max(0, rem)),
-                unspecifiedAsleepMinutes: min(1440, max(0, unspecified)),
-                awakeMinutes: min(1440, max(0, awake)),
-                inBedMinutes: min(1440, max(0, inBed))
+                totalMinutes: totalMinutes,
+                coreMinutes: coreMinutes,
+                deepMinutes: deepMinutes,
+                remMinutes: remMinutes,
+                unspecifiedAsleepMinutes: unspecifiedMinutes,
+                awakeMinutes: minutes(awake),
+                inBedMinutes: minutes(inBed)
             )
+        }
+
+        private func minutes(_ seconds: TimeInterval) -> Int {
+            min(1440, max(0, Int((seconds / 60.0).rounded())))
         }
     }
 
@@ -241,16 +253,16 @@ enum HealthKitSleepDaySync {
         let sorted = intervals.sorted { $0.start < $1.start }
         var sessions: [SleepSession] = []
         for interval in sorted {
-            let minutes = max(0, Int((interval.end.timeIntervalSince(interval.start) / 60.0).rounded()))
-            guard minutes > 0 else { continue }
+            let duration = interval.end.timeIntervalSince(interval.start)
+            guard duration > 0 else { continue }
             if var current = sessions.last, interval.start.timeIntervalSince(current.end) <= sessionGap {
                 current.start = min(current.start, interval.start)
                 current.end = max(current.end, interval.end)
-                current.bucket.add(interval, minutes: minutes)
+                current.bucket.add(interval, duration: duration)
                 sessions[sessions.count - 1] = current
             } else {
                 var bucket = StageBucket()
-                bucket.add(interval, minutes: minutes)
+                bucket.add(interval, duration: duration)
                 sessions.append(SleepSession(start: interval.start, end: interval.end, bucket: bucket))
             }
         }
