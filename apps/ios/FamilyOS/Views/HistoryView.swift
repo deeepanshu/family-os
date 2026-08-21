@@ -7,43 +7,57 @@ struct HistoryView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                if days.isEmpty {
-                    EmptyRow(emptyCopy)
-                } else {
-                    ForEach(days) { day in
-                        Section(HistoryTimeline.dateTitle(localDay: day.localDay, timeZone: viewModel.historyTimeZone)) {
-                            ForEach(day.items) { item in
-                                if case let .sleep(sleepDay) = item {
-                                    ReadingRow(
-                                        kicker: kicker(for: item),
-                                        title: title(for: item),
-                                        detail: detail(for: item),
-                                        onInfo: { showingSleepLegend = true }
-                                    ) {
-                                        SleepStageBar(segments: HistorySleepStages.segments(sleepDay))
+            VStack(alignment: .leading, spacing: 10) {
+                profileLine
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                Picker("Metric", selection: $filter) {
+                    ForEach(HistoryMetricFilter.allCases) { metric in
+                        Text(metric.title).tag(metric)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+
+                List {
+                    if days.isEmpty {
+                        EmptyRow(emptyCopy)
+                    } else {
+                        ForEach(days) { day in
+                            Section(HistoryTimeline.dateTitle(localDay: day.localDay, timeZone: viewModel.historyTimeZone)) {
+                                ForEach(day.items) { item in
+                                    if case let .sleep(sleepDay) = item {
+                                        ReadingRow(
+                                            kicker: kicker(for: item),
+                                            title: title(for: item),
+                                            detail: detail(for: item),
+                                            onInfo: { showingSleepLegend = true }
+                                        ) {
+                                            SleepStageBar(segments: HistorySleepStages.segments(sleepDay))
+                                        }
+                                    } else {
+                                        ReadingRow(
+                                            kicker: kicker(for: item),
+                                            title: title(for: item),
+                                            detail: detail(for: item)
+                                        )
                                     }
-                                } else {
-                                    ReadingRow(
-                                        kicker: kicker(for: item),
-                                        title: title(for: item),
-                                        detail: detail(for: item)
-                                    )
                                 }
                             }
                         }
                     }
                 }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .refreshable {
+                    await refreshHistory()
+                }
             }
-            .navigationTitle("History")
+            .background(Color(.systemGroupedBackground))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showingSleepLegend) {
                 SleepStageLegendSheet()
-            }
-            .safeAreaInset(edge: .top) {
-                header
-            }
-            .refreshable {
-                await refreshHistory()
             }
             .task {
                 await viewModel.loadProfiles()
@@ -52,27 +66,27 @@ struct HistoryView: View {
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if viewModel.profiles.profiles.count > 1 {
-                ProfilePicker(viewModel: viewModel)
-            }
-            if viewModel.isViewingAnotherMember {
-                Text("Looking at \(viewModel.selectedProfile?.displayName ?? "this person"). Read-only.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            Picker("Metric", selection: $filter) {
-                ForEach(HistoryMetricFilter.allCases) { metric in
-                    Text(metric.title).tag(metric)
+    private var profileLine: some View {
+        Menu {
+            ForEach(viewModel.profiles.profiles) { profile in
+                Button(profile.displayName) {
+                    viewModel.profiles.selectedProfileId = profile.id
+                    Task { await refreshHistory() }
                 }
             }
-            .pickerStyle(.segmented)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(viewModel.selectedProfile?.displayName ?? "Choose profile")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.bar)
+        .buttonStyle(.plain)
+        .disabled(viewModel.profiles.profiles.count < 2)
     }
 
     private var days: [HistoryDay] {
