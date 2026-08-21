@@ -551,6 +551,23 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertEqual(HistoryTimeline.dateTitle(localDay: "2026-08-18", now: now, timeZone: bangkok), "18 Aug")
     }
 
+    func testHistorySleepStagesOmitsZeroMinutesAndCaptionsOther() {
+        let day = makeSleepDay(sleepDay: "2026-08-19", totalMinutes: 432)
+        let segments = HistorySleepStages.segments(day)
+        XCTAssertEqual(segments.map(\.id), ["core", "deep", "rem", "other"])
+        XCTAssertEqual(segments.map(\.minutes), [240, 80, 90, 22])
+
+        let caption = HistorySleepStages.caption(day) { minutes in
+            let hours = minutes / 60
+            let mins = minutes % 60
+            if hours == 0 { return "\(mins)m" }
+            if mins == 0 { return "\(hours)h" }
+            return "\(hours)h \(mins)m"
+        }
+        XCTAssertEqual(caption, "Deep 1h 20m · REM 1h 30m · Other 22m")
+    }
+
+
     func testLoadHistoryFillsSleepStepsAndWorkouts() async {
         let personId = "00000000-0000-4000-8000-000000000111"
         let viewModel = makeViewModelWithMock([
