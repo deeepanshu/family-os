@@ -65,4 +65,6 @@ Background: `HealthKitBackgroundSync` (observers + `enableBackgroundDelivery` + 
 - Day totals: total, core, deep, rem, unspecified, awake, inBed
 - `sleepDay` = local calendar day of sample **end** in profile `healthTimezone`
 - Prefer Apple / Watch source; never sum overlapping apps
+- Query overlapping samples with a 48h lead-in so overnight sessions survive a 24h sync window
+- Omit a day when the query started after that night's bedtime — never overwrite a full night with leftover stages
 - Empty full query never deletes history

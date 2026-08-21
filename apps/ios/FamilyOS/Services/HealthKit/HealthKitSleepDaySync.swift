@@ -3,6 +3,12 @@ import HealthKit
 
 /// Sleep reads over an explicit range supplied by the run module.
 /// Day key = local calendar day of sample **end** in profile `healthTimezone`.
+///
+/// Incremental sync windows are ~24h and use the sample start. Overnight
+/// sessions start the previous evening, so a naive `strictStartDate` query
+/// drops the night and upserts only leftover morning stages (tens of minutes).
+/// Query overlapping samples with a lead-in, and only emit days whose bedtime
+/// cannot have been clipped by the query start.
 enum HealthKitSleepDaySync {
     struct SleepDaySample: Sendable {
         let sleepDay: String // YYYY-MM-DD
@@ -17,6 +23,20 @@ enum HealthKitSleepDaySync {
 
     static func naturalKey(for sample: SleepDaySample) -> String {
         "sleep_day:\(sample.sleepDay)"
+    }
+
+    /// Sessions that end in the server window can start the previous evening.
+    static let overnightLookback: TimeInterval = 48 * 60 * 60
+    /// Do not emit a sleep day unless the query started at least this far
+    /// before that local midnight — otherwise the night may be truncated.
+    static let completeNightLeadIn: TimeInterval = 12 * 60 * 60
+
+    struct SleepInterval: Sendable, Equatable {
+        let start: Date
+        let end: Date
+        let value: Int
+        let sourceBundleId: String
+        let sourceName: String
     }
 
     static func fetchSleepDays(
@@ -36,7 +56,8 @@ enum HealthKitSleepDaySync {
             return []
         }
 
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+        let queryStart = start.addingTimeInterval(-overnightLookback)
+        let predicate = HKQuery.predicateForSamples(withStart: queryStart, end: end, options: [])
         let samples: [HKCategorySample] = try await querySamples(
             store: store,
             sampleType: sleepType,
@@ -44,27 +65,57 @@ enum HealthKitSleepDaySync {
         )
         CrashReporting.log("healthkit_sleep_raw_sample_count=\(samples.count)")
 
+        let intervals = samples.map { sample in
+            SleepInterval(
+                start: sample.startDate,
+                end: sample.endDate,
+                value: sample.value,
+                sourceBundleId: sample.sourceRevision.source.bundleIdentifier,
+                sourceName: sample.sourceRevision.source.name
+            )
+        }
+        let results = aggregateSleepDays(
+            intervals: intervals,
+            healthTimezone: healthTimezone,
+            queryStart: queryStart,
+            rangeEnd: end
+        )
+        CrashReporting.log("healthkit_sleep_day_count=\(results.count)")
+        return results
+    }
+
+    /// Aggregates stage minutes per local end-day, preferring Apple/Watch.
+    /// Days whose local midnight is less than `completeNightLeadIn` after
+    /// `queryStart` are omitted so a clipped query cannot overwrite a full night.
+    static func aggregateSleepDays(
+        intervals: [SleepInterval],
+        healthTimezone: String,
+        queryStart: Date,
+        rangeEnd: Date
+    ) -> [SleepDaySample] {
         let timeZone = TimeZone(identifier: healthTimezone) ?? .current
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
+        let minCompleteDayStart = queryStart.addingTimeInterval(completeNightLeadIn)
 
-        // day -> sourceKey -> stage minutes
         var byDaySource: [String: [String: StageBucket]] = [:]
         var sourceMeta: [String: SourceMeta] = [:]
 
-        for sample in samples {
-            let day = dayString(for: sample.endDate, calendar: calendar)
-            let bundleId = sample.sourceRevision.source.bundleIdentifier
-            let name = sample.sourceRevision.source.name
-            let sourceKey = bundleId.isEmpty ? name : bundleId
-            sourceMeta[sourceKey] = SourceMeta(bundleId: bundleId, name: name)
+        for interval in intervals {
+            guard interval.end > queryStart, interval.end <= rangeEnd else { continue }
+            let dayStart = calendar.startOfDay(for: interval.end)
+            guard dayStart >= minCompleteDayStart else { continue }
 
-            let minutes = max(0, Int((sample.endDate.timeIntervalSince(sample.startDate) / 60.0).rounded()))
+            let day = dayString(for: interval.end, calendar: calendar)
+            let sourceKey = interval.sourceBundleId.isEmpty ? interval.sourceName : interval.sourceBundleId
+            sourceMeta[sourceKey] = SourceMeta(bundleId: interval.sourceBundleId, name: interval.sourceName)
+
+            let minutes = max(0, Int((interval.end.timeIntervalSince(interval.start) / 60.0).rounded()))
             guard minutes > 0 else { continue }
 
             var dayMap = byDaySource[day] ?? [:]
             var bucket = dayMap[sourceKey] ?? StageBucket()
-            switch sample.value {
+            switch interval.value {
             case HKCategoryValueSleepAnalysis.asleepCore.rawValue:
                 bucket.core += minutes
             case HKCategoryValueSleepAnalysis.asleepDeep.rawValue:
@@ -79,7 +130,6 @@ enum HealthKitSleepDaySync {
             case HKCategoryValueSleepAnalysis.inBed.rawValue:
                 bucket.inBed += minutes
             default:
-                // Unknown stage — treat as unspecified asleep so total still accounts for it.
                 bucket.unspecified += minutes
             }
             dayMap[sourceKey] = bucket
@@ -107,8 +157,6 @@ enum HealthKitSleepDaySync {
                 )
             )
         }
-
-        CrashReporting.log("healthkit_sleep_day_count=\(results.count)")
         return results
     }
 

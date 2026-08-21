@@ -1,3 +1,4 @@
+import HealthKit
 import XCTest
 @testable import FamilyOS
 
@@ -225,6 +226,77 @@ final class HealthKitSyncStoreTests: XCTestCase {
         XCTAssertEqual(object?["kind"] as? String, "sleep_day")
         XCTAssertEqual(object?["sleepDay"] as? String, "2026-08-01")
         XCTAssertEqual(object?["totalMinutes"] as? Int, 420)
+    }
+
+    func testSleepAggregationKeepsOvernightNightOnTruncatedSyncWindow() throws {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+
+        // Watch night 22:00 → 07:00, then a 32-minute nap ending the same local day.
+        // A 24h sync that starts at yesterday's wake (~07:00) would previously
+        // drop the overnight samples via strictStartDate and upsert only 32m.
+        let nightStart = try XCTUnwrap(iso.date(from: "2026-08-17T22:00:00Z"))
+        let nightEnd = try XCTUnwrap(iso.date(from: "2026-08-18T07:00:00Z"))
+        let napStart = try XCTUnwrap(iso.date(from: "2026-08-18T13:00:00Z"))
+        let napEnd = try XCTUnwrap(iso.date(from: "2026-08-18T13:32:00Z"))
+        let queryStart = try XCTUnwrap(iso.date(from: "2026-08-17T07:00:00Z"))
+        let rangeEnd = try XCTUnwrap(iso.date(from: "2026-08-18T14:00:00Z"))
+
+        let days = HealthKitSleepDaySync.aggregateSleepDays(
+            intervals: [
+                .init(
+                    start: nightStart,
+                    end: nightEnd,
+                    value: HKCategoryValueSleepAnalysis.asleepCore.rawValue,
+                    sourceBundleId: "com.apple.health.watch",
+                    sourceName: "Apple Watch"
+                ),
+                .init(
+                    start: napStart,
+                    end: napEnd,
+                    value: HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue,
+                    sourceBundleId: "com.apple.health.watch",
+                    sourceName: "Apple Watch"
+                )
+            ],
+            healthTimezone: "UTC",
+            queryStart: queryStart,
+            rangeEnd: rangeEnd
+        )
+
+        XCTAssertEqual(days.count, 1)
+        XCTAssertEqual(days[0].sleepDay, "2026-08-18")
+        XCTAssertEqual(days[0].totalMinutes, 540 + 32)
+        XCTAssertEqual(days[0].coreMinutes, 540)
+        XCTAssertEqual(days[0].unspecifiedAsleepMinutes, 32)
+    }
+
+    func testSleepAggregationOmitsDayWhenQueryStartsAfterBedtime() throws {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+
+        let napStart = try XCTUnwrap(iso.date(from: "2026-08-18T13:00:00Z"))
+        let napEnd = try XCTUnwrap(iso.date(from: "2026-08-18T13:32:00Z"))
+        // Query starts after the previous evening — not enough lead-in for a complete night.
+        let queryStart = try XCTUnwrap(iso.date(from: "2026-08-18T07:00:00Z"))
+        let rangeEnd = try XCTUnwrap(iso.date(from: "2026-08-18T14:00:00Z"))
+
+        let days = HealthKitSleepDaySync.aggregateSleepDays(
+            intervals: [
+                .init(
+                    start: napStart,
+                    end: napEnd,
+                    value: HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue,
+                    sourceBundleId: "com.apple.health.watch",
+                    sourceName: "Apple Watch"
+                )
+            ],
+            healthTimezone: "UTC",
+            queryStart: queryStart,
+            rangeEnd: rangeEnd
+        )
+
+        XCTAssertTrue(days.isEmpty)
     }
 
     func testStepsHourPayloadEnqueueAndEncode() throws {
