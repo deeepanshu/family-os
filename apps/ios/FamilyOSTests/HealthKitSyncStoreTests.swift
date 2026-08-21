@@ -271,6 +271,48 @@ final class HealthKitSyncStoreTests: XCTestCase {
         XCTAssertEqual(days[0].unspecifiedAsleepMinutes, 32)
     }
 
+    func testSleepAggregationPutsOvernightStagesOnWakeDay() throws {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+
+        // Watch night: 23:05 → 06:30. Pre-midnight stages used to land on yesterday.
+        let queryStart = try XCTUnwrap(iso.date(from: "2026-08-17T07:00:00Z"))
+        let rangeEnd = try XCTUnwrap(iso.date(from: "2026-08-18T14:00:00Z"))
+        let watch = "com.apple.health.watch"
+
+        func interval(_ start: String, _ end: String, _ value: HKCategoryValueSleepAnalysis) throws -> HealthKitSleepDaySync.SleepInterval {
+            .init(
+                start: try XCTUnwrap(iso.date(from: start)),
+                end: try XCTUnwrap(iso.date(from: end)),
+                value: value.rawValue,
+                sourceBundleId: watch,
+                sourceName: "Apple Watch"
+            )
+        }
+
+        let days = HealthKitSleepDaySync.aggregateSleepDays(
+            intervals: [
+                try interval("2026-08-17T23:05:00Z", "2026-08-17T23:40:00Z", .asleepCore),
+                try interval("2026-08-17T23:40:00Z", "2026-08-18T00:00:00Z", .asleepDeep),
+                try interval("2026-08-18T00:00:00Z", "2026-08-18T03:10:00Z", .asleepCore),
+                try interval("2026-08-18T03:10:00Z", "2026-08-18T04:00:00Z", .asleepREM),
+                try interval("2026-08-18T04:00:00Z", "2026-08-18T04:15:00Z", .awake),
+                try interval("2026-08-18T04:15:00Z", "2026-08-18T06:30:00Z", .asleepCore)
+            ],
+            healthTimezone: "UTC",
+            queryStart: queryStart,
+            rangeEnd: rangeEnd
+        )
+
+        XCTAssertEqual(days.count, 1)
+        XCTAssertEqual(days[0].sleepDay, "2026-08-18")
+        XCTAssertEqual(days[0].totalMinutes, 430)
+        XCTAssertEqual(days[0].coreMinutes, 35 + 190 + 135)
+        XCTAssertEqual(days[0].deepMinutes, 20)
+        XCTAssertEqual(days[0].remMinutes, 50)
+        XCTAssertEqual(days[0].awakeMinutes, 15)
+    }
+
     func testSleepAggregationOmitsDayWhenQueryStartsAfterBedtime() throws {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]

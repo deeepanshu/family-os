@@ -2,7 +2,9 @@ import Foundation
 import HealthKit
 
 /// Sleep reads over an explicit range supplied by the run module.
-/// Day key = local calendar day of sample **end** in profile `healthTimezone`.
+/// Day key = local calendar day of the **session end** (wake) in `healthTimezone`.
+/// Same-source samples within `sessionGap` are one night; pre-midnight stages
+/// stay with that night instead of becoming yesterday's leftover minutes.
 ///
 /// Incremental sync windows are ~24h and use the sample start. Overnight
 /// sessions start the previous evening, so a naive `strictStartDate` query
@@ -30,6 +32,8 @@ enum HealthKitSleepDaySync {
     /// Do not emit a sleep day unless the query started at least this far
     /// before that local midnight — otherwise the night may be truncated.
     static let completeNightLeadIn: TimeInterval = 12 * 60 * 60
+    /// Watch treats nearby stages as one night. Gaps longer than this are a nap.
+    static let sessionGap: TimeInterval = 3 * 60 * 60
 
     struct SleepInterval: Sendable, Equatable {
         let start: Date
@@ -84,9 +88,11 @@ enum HealthKitSleepDaySync {
         return results
     }
 
-    /// Aggregates stage minutes per local end-day, preferring Apple/Watch.
-    /// Days whose local midnight is less than `completeNightLeadIn` after
-    /// `queryStart` are omitted so a clipped query cannot overwrite a full night.
+    /// Aggregates stage minutes per wake day, preferring Apple/Watch.
+    /// Same-source samples separated by at most `sessionGap` form one session
+    /// attributed to the local day the session ends. Days whose local midnight
+    /// is less than `completeNightLeadIn` after `queryStart` are omitted so a
+    /// clipped query cannot overwrite a full night.
     static func aggregateSleepDays(
         intervals: [SleepInterval],
         healthTimezone: String,
@@ -98,42 +104,28 @@ enum HealthKitSleepDaySync {
         calendar.timeZone = timeZone
         let minCompleteDayStart = queryStart.addingTimeInterval(completeNightLeadIn)
 
-        var byDaySource: [String: [String: StageBucket]] = [:]
+        var bySource: [String: [SleepInterval]] = [:]
         var sourceMeta: [String: SourceMeta] = [:]
-
         for interval in intervals {
-            guard interval.end > queryStart, interval.end <= rangeEnd else { continue }
-            let dayStart = calendar.startOfDay(for: interval.end)
-            guard dayStart >= minCompleteDayStart else { continue }
+            guard interval.end > queryStart, interval.start < rangeEnd else { continue }
+            let key = sourceKey(for: interval)
+            sourceMeta[key] = SourceMeta(bundleId: interval.sourceBundleId, name: interval.sourceName)
+            bySource[key, default: []].append(interval)
+        }
 
-            let day = dayString(for: interval.end, calendar: calendar)
-            let sourceKey = interval.sourceBundleId.isEmpty ? interval.sourceName : interval.sourceBundleId
-            sourceMeta[sourceKey] = SourceMeta(bundleId: interval.sourceBundleId, name: interval.sourceName)
-
-            let minutes = max(0, Int((interval.end.timeIntervalSince(interval.start) / 60.0).rounded()))
-            guard minutes > 0 else { continue }
-
-            var dayMap = byDaySource[day] ?? [:]
-            var bucket = dayMap[sourceKey] ?? StageBucket()
-            switch interval.value {
-            case HKCategoryValueSleepAnalysis.asleepCore.rawValue:
-                bucket.core += minutes
-            case HKCategoryValueSleepAnalysis.asleepDeep.rawValue:
-                bucket.deep += minutes
-            case HKCategoryValueSleepAnalysis.asleepREM.rawValue:
-                bucket.rem += minutes
-            case HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue:
-                // Includes deprecated `.asleep` (same raw value).
-                bucket.unspecified += minutes
-            case HKCategoryValueSleepAnalysis.awake.rawValue:
-                bucket.awake += minutes
-            case HKCategoryValueSleepAnalysis.inBed.rawValue:
-                bucket.inBed += minutes
-            default:
-                bucket.unspecified += minutes
+        var byDaySource: [String: [String: StageBucket]] = [:]
+        for (key, sourceIntervals) in bySource {
+            for session in clusteredSessions(sourceIntervals) {
+                guard session.end > queryStart, session.start < rangeEnd else { continue }
+                let dayStart = calendar.startOfDay(for: session.end)
+                guard dayStart >= minCompleteDayStart else { continue }
+                let day = dayString(for: session.end, calendar: calendar)
+                var dayMap = byDaySource[day] ?? [:]
+                var bucket = dayMap[key] ?? StageBucket()
+                bucket.add(session.bucket)
+                dayMap[key] = bucket
+                byDaySource[day] = dayMap
             }
-            dayMap[sourceKey] = bucket
-            byDaySource[day] = dayMap
         }
 
         var results: [SleepDaySample] = []
@@ -141,21 +133,7 @@ enum HealthKitSleepDaySync {
             guard let dayMap = byDaySource[day], !dayMap.isEmpty else { continue }
             let preferredKey = pickPreferredSource(keys: Array(dayMap.keys), meta: sourceMeta)
             guard let bucket = dayMap[preferredKey] else { continue }
-
-            let total = bucket.core + bucket.deep + bucket.rem + bucket.unspecified
-            let clampedTotal = min(1440, max(0, total))
-            results.append(
-                SleepDaySample(
-                    sleepDay: day,
-                    totalMinutes: clampedTotal,
-                    coreMinutes: min(1440, max(0, bucket.core)),
-                    deepMinutes: min(1440, max(0, bucket.deep)),
-                    remMinutes: min(1440, max(0, bucket.rem)),
-                    unspecifiedAsleepMinutes: min(1440, max(0, bucket.unspecified)),
-                    awakeMinutes: min(1440, max(0, bucket.awake)),
-                    inBedMinutes: min(1440, max(0, bucket.inBed))
-                )
-            )
+            results.append(bucket.clampedSample(sleepDay: day))
         }
         return results
     }
@@ -205,6 +183,78 @@ enum HealthKitSleepDaySync {
         var unspecified = 0
         var awake = 0
         var inBed = 0
+
+        mutating func add(_ other: StageBucket) {
+            core += other.core
+            deep += other.deep
+            rem += other.rem
+            unspecified += other.unspecified
+            awake += other.awake
+            inBed += other.inBed
+        }
+
+        mutating func add(_ interval: SleepInterval, minutes: Int) {
+            switch interval.value {
+            case HKCategoryValueSleepAnalysis.asleepCore.rawValue:
+                core += minutes
+            case HKCategoryValueSleepAnalysis.asleepDeep.rawValue:
+                deep += minutes
+            case HKCategoryValueSleepAnalysis.asleepREM.rawValue:
+                rem += minutes
+            case HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue:
+                unspecified += minutes
+            case HKCategoryValueSleepAnalysis.awake.rawValue:
+                awake += minutes
+            case HKCategoryValueSleepAnalysis.inBed.rawValue:
+                inBed += minutes
+            default:
+                unspecified += minutes
+            }
+        }
+
+        func clampedSample(sleepDay: String) -> SleepDaySample {
+            let total = core + deep + rem + unspecified
+            return SleepDaySample(
+                sleepDay: sleepDay,
+                totalMinutes: min(1440, max(0, total)),
+                coreMinutes: min(1440, max(0, core)),
+                deepMinutes: min(1440, max(0, deep)),
+                remMinutes: min(1440, max(0, rem)),
+                unspecifiedAsleepMinutes: min(1440, max(0, unspecified)),
+                awakeMinutes: min(1440, max(0, awake)),
+                inBedMinutes: min(1440, max(0, inBed))
+            )
+        }
+    }
+
+    private struct SleepSession {
+        var start: Date
+        var end: Date
+        var bucket: StageBucket
+    }
+
+    private static func sourceKey(for interval: SleepInterval) -> String {
+        interval.sourceBundleId.isEmpty ? interval.sourceName : interval.sourceBundleId
+    }
+
+    private static func clusteredSessions(_ intervals: [SleepInterval]) -> [SleepSession] {
+        let sorted = intervals.sorted { $0.start < $1.start }
+        var sessions: [SleepSession] = []
+        for interval in sorted {
+            let minutes = max(0, Int((interval.end.timeIntervalSince(interval.start) / 60.0).rounded()))
+            guard minutes > 0 else { continue }
+            if var current = sessions.last, interval.start.timeIntervalSince(current.end) <= sessionGap {
+                current.start = min(current.start, interval.start)
+                current.end = max(current.end, interval.end)
+                current.bucket.add(interval, minutes: minutes)
+                sessions[sessions.count - 1] = current
+            } else {
+                var bucket = StageBucket()
+                bucket.add(interval, minutes: minutes)
+                sessions.append(SleepSession(start: interval.start, end: interval.end, bucket: bucket))
+            }
+        }
+        return sessions
     }
 
     private static func pickPreferredSource(keys: [String], meta: [String: SourceMeta]) -> String {
