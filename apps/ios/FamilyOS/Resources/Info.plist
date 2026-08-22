@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Kinstead</string>
+	<string>FamilyStack</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -34,7 +34,7 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Kinstead connects to your Mac’s local Health API during development so health sync can be tested on this network.</string>
+	<string>FamilyStack connects to your Mac’s local Health API during development so health sync can be tested on this network.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -53,9 +53,9 @@
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.lifestyle</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>Kinstead reads HealthKit data you approve so your family can view synced health readings.</string>
+	<string>FamilyStack reads HealthKit data you approve so your family can view synced health readings.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>Kinstead writes health readings only when you choose to save approved data.</string>
+	<string>FamilyStack writes health readings only when you choose to save approved data.</string>
 	<key>SUPABASE_ANON_KEY</key>
 	<string>$(SUPABASE_ANON_KEY)</string>
 	<key>SUPABASE_URL</key>
@@ -79,8 +79,8 @@
 		<string>processing</string>
 		<string>fetch</string>
 	</array>
-	<key>UILaunchScreen</key>
-	<dict/>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

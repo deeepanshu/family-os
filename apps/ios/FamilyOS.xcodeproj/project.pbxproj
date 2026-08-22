@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		0CD7138FE8E06E045D912B6D /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 39BA820786BFFC3D0B31746A /* GRDB */; };
 		DE0AA0000000000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DE0AA0000000000000000002 /* Assets.xcassets */; };
+		DE0AA0000000000000000011 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = DE0AA0000000000000000010 /* LaunchScreen.storyboard */; };
 		DE1000000000000000000001 /* FamilyOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1000000000000000000011 /* FamilyOSApp.swift */; };
 		DE1000000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1000000000000000000012 /* ContentView.swift */; };
 		DE1000000000000000000003 /* HealthBootstrapViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1000000000000000000013 /* HealthBootstrapViewModel.swift */; };
@@ -81,6 +82,7 @@
 
 /* Begin PBXFileReference section */
 		DE0AA0000000000000000002 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		DE0AA0000000000000000010 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		DE0CF0000000000000000001 /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
 		DE0CF0000000000000000002 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		DE0CF0000000000000000003 /* Local.private.xcconfig.example */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.private.xcconfig.example; sourceTree = "<group>"; };
@@ -277,6 +279,7 @@
 			isa = PBXGroup;
 			children = (
 				DE0AA0000000000000000002 /* Assets.xcassets */,
+				DE0AA0000000000000000010 /* LaunchScreen.storyboard */,
 				DE1000000000000000000016 /* FamilyOS.entitlements */,
 				DE1000000000000000000019 /* Info.plist */,
 				DE7000000000000000000020 /* GoogleService-Info.plist.example */,
@@ -439,6 +442,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				DE0AA0000000000000000001 /* Assets.xcassets in Resources */,
+				DE0AA0000000000000000011 /* LaunchScreen.storyboard in Resources */,
 				DE7000000000000000000022 /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

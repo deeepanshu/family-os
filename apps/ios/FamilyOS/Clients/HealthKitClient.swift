@@ -143,7 +143,7 @@ struct HealthKitClient {
                     code: CrashReporting.HealthKitCode.fetchFailed.rawValue,
                     userInfo: [
                         NSLocalizedDescriptionKey:
-                            "Health authorization timed out after \(Int(Self.authorizationTimeoutSeconds))s. If you already enabled access in Settings → Health → Data Access → Kinstead, pull to dismiss and tap Sync again."
+                            "Health authorization timed out after \(Int(Self.authorizationTimeoutSeconds))s. If you already enabled access in Settings → Health → Data Access → FamilyStack, pull to dismiss and tap Sync again."
                     ]
                 )
             }
@@ -175,7 +175,7 @@ struct HealthKitClient {
                                         code: HKError.Code.errorAuthorizationNotDetermined.rawValue,
                                         userInfo: [
                                             NSLocalizedDescriptionKey:
-                                                "Health authorization was not completed. Enable the requested types for Kinstead in Settings → Health → Data Access."
+                                                "Health authorization was not completed. Enable the requested types for FamilyStack in Settings → Health → Data Access."
                                         ]
                                     )
                                 )

@@ -8,10 +8,10 @@ struct ContentView: View {
         Group {
             if !viewModel.hasAccessToken {
                 SignInView(viewModel: viewModel)
-            } else if viewModel.isStartingUp {
-                startupLoadingView
             } else if viewModel.startupError != nil {
                 startupErrorView
+            } else if viewModel.isStartingUp {
+                courtyardSplash
             } else if viewModel.needsProfileSetup {
                 SetUpProfileView(viewModel: viewModel)
             } else if viewModel.shouldShowInviteAccept {
@@ -64,11 +64,15 @@ struct ContentView: View {
         )
     }
 
-    private var startupLoadingView: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-            Text("Starting Family OS...")
-                .foregroundStyle(.secondary)
+    private var courtyardSplash: some View {
+        ZStack {
+            Color("LaunchBackground")
+                .ignoresSafeArea()
+            Image("LaunchMark")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 320, height: 320)
+                .accessibilityLabel("FamilyStack")
         }
     }
 
