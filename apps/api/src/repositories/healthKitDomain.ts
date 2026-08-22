@@ -4,7 +4,8 @@ import type {
   HealthKitOpPayload,
   HealthKitRunKind,
   HealthKitSyncOp,
-  HealthMetricSyncStatusCode
+  HealthMetricSyncStatusCode,
+  HealthWorkoutExerciseLog
 } from "@family-os/shared";
 import {
   BACKFILL_WINDOW_MS,
@@ -19,6 +20,7 @@ import {
 } from "@family-os/shared";
 import { HttpError } from "../errors";
 
+
 export const HEALTHKIT_METRICS: readonly HealthKitMetric[] = HEALTHKIT_CONSENT_GROUPS;
 
 export function assertSelfProfileMatch(input: {
@@ -32,6 +34,37 @@ export function assertSelfProfileMatch(input: {
     throw new HttpError(403, "profile_forbidden", "HealthKit writes can only target your linked Self profile.");
   }
 }
+
+export function normalizeWorkoutExercises(input: HealthWorkoutExerciseLog[]): HealthWorkoutExerciseLog[] {
+  if (input.length > 40) {
+    throw new HttpError(400, "payload_invalid", "A workout can have at most 40 exercises.");
+  }
+  return input.map((exercise, index) => {
+    const name = exercise.name.trim();
+    if (name.length < 1 || name.length > 80) {
+      throw new HttpError(400, "payload_invalid", `Exercise ${index + 1} name is invalid.`);
+    }
+    if (exercise.sets.length < 1 || exercise.sets.length > 50) {
+      throw new HttpError(400, "payload_invalid", `${name} must have 1-50 sets.`);
+    }
+    return {
+      name,
+      sets: exercise.sets.map((set, setIndex) => {
+        if (!Number.isInteger(set.reps) || set.reps < 1 || set.reps > 1000) {
+          throw new HttpError(400, "payload_invalid", `${name} set ${setIndex + 1} reps are invalid.`);
+        }
+        if (set.weightKg === undefined) {
+          return { reps: set.reps };
+        }
+        if (!Number.isFinite(set.weightKg) || set.weightKg < 0 || set.weightKg > 1000) {
+          throw new HttpError(400, "payload_invalid", `${name} set ${setIndex + 1} weight is invalid.`);
+        }
+        return { reps: set.reps, weightKg: Math.round(set.weightKg * 10) / 10 };
+      })
+    };
+  });
+}
+
 
 export function isValidIanaTimezone(timezone: string): boolean {
   try {

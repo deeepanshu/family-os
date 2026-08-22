@@ -77,6 +77,22 @@ extension HealthBootstrapViewModel {
         )
     }
 
+    func saveWorkoutExercises(workoutId: String, exercises: [WorkoutExerciseLog]) async {
+        await request(showsFeedback: true) {
+            let saved = try await client.putWorkoutExercises(
+                baseURL: connection.baseURL,
+                accessToken: auth.accessToken,
+                workoutId: workoutId,
+                exercises: exercises
+            )
+            if let index = readings.workouts.firstIndex(where: { $0.id == saved.id }) {
+                readings.workouts[index] = saved
+            }
+            return exercises.isEmpty ? "Cleared workout exercises." : "Saved workout exercises."
+        }
+    }
+
+
     private func historyDayWindow(now: Date = Date()) -> (from: String, to: String) {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = historyTimeZone

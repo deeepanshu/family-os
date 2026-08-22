@@ -13,6 +13,31 @@ import {
   resolveTimezone
 } from "../mcp/timezone";
 
+const workoutIdParam = z.object({ id: z.string().uuid() });
+
+const workoutSetBody = z
+  .object({
+    reps: z.number().int().min(1).max(1000),
+    weightKg: z.number().min(0).max(1000).optional()
+  })
+  .strict();
+
+const workoutExercisesBody = z
+  .object({
+    exercises: z
+      .array(
+        z
+          .object({
+            name: z.string().trim().min(1).max(80),
+            sets: z.array(workoutSetBody).min(1).max(50)
+          })
+          .strict()
+      )
+      .max(40)
+  })
+  .strict();
+
+
 const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const query = z.object({
   personId: z.string().uuid().optional(),
@@ -124,5 +149,18 @@ export function createWorkoutRoutes(repository: HealthKitStore) {
       data: workoutsInLocalRange(rows, window.timezone, window.rangeStart, window.rangeEnd, parsed.limit)
     });
   });
+  routes.put(
+    "/:id/exercises",
+    zValidator("param", workoutIdParam),
+    zValidator("json", workoutExercisesBody),
+    async (c) => {
+      const data = await repository.putHealthKitWorkoutExercises(
+        c.get("user").id,
+        c.req.valid("param").id,
+        c.req.valid("json").exercises
+      );
+      return c.json({ data });
+    }
+  );
   return routes;
 }

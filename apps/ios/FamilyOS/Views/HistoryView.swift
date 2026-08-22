@@ -4,6 +4,8 @@ struct HistoryView: View {
     @ObservedObject var viewModel: HealthBootstrapViewModel
     @State private var filter: HistoryMetricFilter = .all
     @State private var showingSleepLegend = false
+    @State private var selectedWorkout: WorkoutReading?
+
 
     var body: some View {
         NavigationStack {
@@ -35,6 +37,17 @@ struct HistoryView: View {
                                         ) {
                                             SleepStageBar(segments: HistorySleepStages.segments(sleepDay))
                                         }
+                                    } else if case let .workout(workout) = item, workout.isStrengthWorkout {
+                                        Button {
+                                            selectedWorkout = workout
+                                        } label: {
+                                            ReadingRow(
+                                                kicker: kicker(for: item),
+                                                title: title(for: item),
+                                                detail: detail(for: item)
+                                            )
+                                        }
+                                        .buttonStyle(.plain)
                                     } else {
                                         ReadingRow(
                                             kicker: kicker(for: item),
@@ -44,6 +57,7 @@ struct HistoryView: View {
                                     }
                                 }
                             }
+
                         }
                     }
                 }
@@ -59,6 +73,17 @@ struct HistoryView: View {
             .sheet(isPresented: $showingSleepLegend) {
                 SleepStageLegendSheet()
             }
+            .sheet(item: $selectedWorkout) { workout in
+                WorkoutExerciseLogSheet(
+                    workout: workout,
+                    canEdit: !viewModel.isViewingAnotherMember,
+                    formatTime: formatTime,
+                    formatMinutes: formatMinutes
+                ) { exercises in
+                    await viewModel.saveWorkoutExercises(workoutId: workout.id, exercises: exercises)
+                }
+            }
+
             .task {
                 await viewModel.loadProfiles()
                 await refreshHistory()
@@ -154,7 +179,14 @@ struct HistoryView: View {
             if let meters = workout.distanceMeters {
                 parts.append(String(format: "%.1f km", meters / 1000))
             }
+            if let first = workout.exercises?.first {
+                let extra = (workout.exercises?.count ?? 1) > 1
+                    ? " + \((workout.exercises?.count ?? 1) - 1) more"
+                    : ""
+                parts.append("\(first.name)\(extra)")
+            }
             return parts.joined(separator: " · ")
+
         }
     }
 

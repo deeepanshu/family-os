@@ -654,7 +654,8 @@ private func makeWorkout(id: String, startedAtUtc: String, durationSeconds: Int)
         endedAtUtc: startedAtUtc,
         durationSeconds: durationSeconds,
         activeEnergyKcal: 280,
-        distanceMeters: 5000
+        distanceMeters: 5000,
+        exercises: nil
     )
 }
 

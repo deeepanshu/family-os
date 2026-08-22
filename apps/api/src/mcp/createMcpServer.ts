@@ -59,7 +59,8 @@ export function createFamilyOsMcpServer(options: {
     {
       title: "Get health data",
       description:
-        "Returns bounded, metric-specific health data for one authorized profile: blood pressure as a reading table, sleep as a per-night summary (stages plus optional wrist temperature and breathing disturbance fields), and workouts as a bounded table. Returns stored data with coverage and last-synced metadata, up to 90 days per call.",
+        "Returns bounded, metric-specific health data for one authorized profile: blood pressure as a reading table, sleep as a per-night summary (stages plus optional wrist temperature and breathing disturbance fields), and workouts as a bounded table. Strength workouts may include a user-authored exercises array (name, per-set reps, optional weightKg). Returns stored data with coverage and last-synced metadata, up to 90 days per call.",
+
       inputSchema: getHealthDataInput
     },
     async (args) => {

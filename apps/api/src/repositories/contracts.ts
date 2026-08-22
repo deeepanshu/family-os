@@ -27,6 +27,7 @@ import type {
   HealthProfile,
   HealthSleepDayRecord,
   HealthStepHourRecord,
+  HealthWorkoutExerciseLog,
   HealthWorkoutRecord,
   BloodGlucoseReading,
   MarkHealthKitGroupReadyInput,
@@ -40,6 +41,7 @@ import type {
   ReminderRecipient,
   StartHealthKitImportInput
 } from "@family-os/shared";
+
 import type {
   CreateFamilyInput,
   CreateInviteInput,
@@ -174,7 +176,13 @@ export interface HealthKitStore {
     rangeEndUtc: string,
     limit: number
   ): Promise<HealthWorkoutRecord[]>;
+  putHealthKitWorkoutExercises(
+    actorUserId: string,
+    workoutId: string,
+    exercises: HealthWorkoutExerciseLog[]
+  ): Promise<HealthWorkoutRecord>;
 }
+
 
 export type CreateMcpConnectionInput = {
   userId: string;

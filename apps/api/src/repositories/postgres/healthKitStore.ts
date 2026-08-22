@@ -24,12 +24,14 @@ import type {
   HealthMetricSyncStatusCode,
   HealthSleepDayRecord,
   HealthStepHourRecord,
+  HealthWorkoutExerciseLog,
   HealthWorkoutRecord,
   MarkHealthKitGroupReadyInput,
   PutHealthKitSettingsInput,
   StartHealthKitImportInput
 } from "@family-os/shared";
-import { BACKFILL_WINDOW_MS, HEALTHKIT_METRIC_REGISTRY } from "@family-os/shared";
+import { BACKFILL_WINDOW_MS, HEALTHKIT_METRIC_REGISTRY, isStrengthWorkoutType } from "@family-os/shared";
+
 import { HttpError } from "../../errors";
 import {
   assertOpCoherent,
@@ -40,9 +42,11 @@ import {
   deriveNeedsInitialImport,
   deriveRunRange,
   HEALTHKIT_METRICS,
+  normalizeWorkoutExercises,
   toUtcIso,
   unionCompletedCoverage
 } from "../healthKitDomain";
+
 import { PostgresRepositoryContext } from "./context";
 import { toDateString, toIso } from "./dateUtils";
 import { mapBloodGlucose, mapBloodPressure } from "./mappers";
@@ -950,7 +954,7 @@ export class PostgresHealthKitStore {
     rangeEndUtc: string,
     limit: number
   ): Promise<BloodGlucoseReading[]> {
-    const access = await this.context.requirePersonAccess(actorUserId, personId);
+    await this.context.requirePersonAccess(actorUserId, personId);
     const rows = await this.context.sql`
       select r.*, s.user_id as recorded_by_user_id, 'healthkit'::text as source
       from health_blood_glucose_readings r
@@ -961,17 +965,18 @@ export class PostgresHealthKitStore {
       order by r.measured_at asc
       limit ${limit}
     `;
-    return rows.map(mapBloodGlucose);
+    return rows.map((row: Row) => mapBloodGlucose(row));
   }
 
   async listHealthKitWorkouts(
+
     actorUserId: string,
     personId: string,
     rangeStartUtc: string,
     rangeEndUtc: string,
     limit: number
   ): Promise<HealthWorkoutRecord[]> {
-    const access = await this.context.requirePersonAccess(actorUserId, personId);
+    await this.context.requirePersonAccess(actorUserId, personId);
     const rows = await this.context.sql`
       select *
       from health_workouts
@@ -981,7 +986,61 @@ export class PostgresHealthKitStore {
       order by started_at asc
       limit ${limit}
     `;
-    return rows.map((row: Row) => ({
+    const logs = await this.loadExerciseLogs(
+      personId,
+      rows.map((row: Row) => row.source_sample_key as string)
+    );
+    return rows.map((row: Row) => this.mapWorkout(row, logs.get(row.source_sample_key as string)));
+  }
+
+  async putHealthKitWorkoutExercises(
+    actorUserId: string,
+    workoutId: string,
+    exercises: HealthWorkoutExerciseLog[]
+  ): Promise<HealthWorkoutRecord> {
+    const self = await this.context.requireSelfPerson(actorUserId);
+    const [row] = await this.context.sql`
+      select * from health_workouts where id = ${workoutId} limit 1
+    `;
+    if (!row) {
+      throw new HttpError(404, "workout_not_found", "Workout was not found.");
+    }
+    await this.context.requirePersonAccess(actorUserId, row.person_id as string);
+    assertSelfProfileMatch({ selfProfileId: self.personId, requestedPersonId: row.person_id as string });
+    if (!isStrengthWorkoutType(row.workout_type as string)) {
+      throw new HttpError(400, "workout_not_strength", "Exercise logs are only allowed on strength workouts.");
+    }
+    const normalized = normalizeWorkoutExercises(exercises);
+    await this.context.sql.begin(async (tx: any) => {
+      await tx`
+        delete from health_workout_exercises
+        where person_id = ${row.person_id}
+          and source_sample_key = ${row.source_sample_key}
+      `;
+      for (const [exerciseIndex, exercise] of normalized.entries()) {
+        const [inserted] = await tx`
+          insert into health_workout_exercises (person_id, source_sample_key, position, name)
+          values (${row.person_id}, ${row.source_sample_key}, ${exerciseIndex}, ${exercise.name})
+          returning id
+        `;
+        for (const [setIndex, set] of exercise.sets.entries()) {
+          await tx`
+            insert into health_workout_sets (exercise_id, position, reps, weight_kg)
+            values (
+              ${inserted.id},
+              ${setIndex},
+              ${set.reps},
+              ${set.weightKg ?? null}
+            )
+          `;
+        }
+      }
+    });
+    return this.mapWorkout(row, normalized.length === 0 ? undefined : normalized);
+  }
+
+  private mapWorkout(row: Row, exercises?: HealthWorkoutExerciseLog[]): HealthWorkoutRecord {
+    return {
       id: row.id,
       personId: row.person_id,
       workoutType: row.workout_type,
@@ -992,9 +1051,10 @@ export class PostgresHealthKitStore {
       distanceMeters: row.distance_meters === null ? undefined : Number(row.distance_meters),
       averageHeartRateBpm: row.average_heart_rate_bpm === null ? undefined : Number(row.average_heart_rate_bpm),
       maximumHeartRateBpm: row.maximum_heart_rate_bpm === null ? undefined : Number(row.maximum_heart_rate_bpm),
-      minimumHeartRateBpm: row.minimum_heart_rate_bpm === null || row.minimum_heart_rate_bpm === undefined
-        ? undefined
-        : Number(row.minimum_heart_rate_bpm),
+      minimumHeartRateBpm:
+        row.minimum_heart_rate_bpm === null || row.minimum_heart_rate_bpm === undefined
+          ? undefined
+          : Number(row.minimum_heart_rate_bpm),
       sourceName: row.source_name ?? undefined,
       sourceBundleId: row.source_bundle_id ?? undefined,
       deviceName: row.device_name ?? undefined,
@@ -1004,14 +1064,55 @@ export class PostgresHealthKitStore {
         row.elevation_ascended_meters === null || row.elevation_ascended_meters === undefined
           ? undefined
           : Number(row.elevation_ascended_meters),
-      averageMETs:
-        row.average_mets === null || row.average_mets === undefined ? undefined : Number(row.average_mets),
+      averageMETs: row.average_mets === null || row.average_mets === undefined ? undefined : Number(row.average_mets),
       swimmingStrokeCount: row.swimming_stroke_count ?? undefined,
       totalFlightsClimbed: row.total_flights_climbed ?? undefined,
       events: Array.isArray(row.events_json) ? row.events_json : undefined,
-      activities: Array.isArray(row.activities_json) ? row.activities_json : undefined
-    }));
+      activities: Array.isArray(row.activities_json) ? row.activities_json : undefined,
+      exercises
+    };
   }
+
+  private async loadExerciseLogs(
+    personId: string,
+    sourceSampleKeys: string[]
+  ): Promise<Map<string, HealthWorkoutExerciseLog[]>> {
+    const logs = new Map<string, HealthWorkoutExerciseLog[]>();
+    if (sourceSampleKeys.length === 0) return logs;
+    const rows = await this.context.sql`
+      select
+        e.source_sample_key,
+        e.position as exercise_position,
+        e.name,
+        s.position as set_position,
+        s.reps,
+        s.weight_kg
+      from health_workout_exercises e
+      join health_workout_sets s on s.exercise_id = e.id
+      where e.person_id = ${personId}
+        and e.source_sample_key = any(${sourceSampleKeys}::uuid[])
+      order by e.position asc, s.position asc
+    `;
+    const byExercise = new Map<string, HealthWorkoutExerciseLog>();
+    for (const row of rows) {
+      const exerciseKey = `${row.source_sample_key}:${row.exercise_position}`;
+      let exercise = byExercise.get(exerciseKey);
+      if (!exercise) {
+        exercise = { name: row.name as string, sets: [] };
+        byExercise.set(exerciseKey, exercise);
+        const sampleKey = row.source_sample_key as string;
+        const list = logs.get(sampleKey) ?? [];
+        list.push(exercise);
+        logs.set(sampleKey, list);
+      }
+      exercise.sets.push({
+        reps: Number(row.reps),
+        weightKg: row.weight_kg === null || row.weight_kg === undefined ? undefined : Number(row.weight_kg)
+      });
+    }
+    return logs;
+  }
+
 
   private async applyOneOp(
     tx: any,
