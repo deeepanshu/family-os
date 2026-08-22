@@ -4,6 +4,7 @@ import type {
   BloodPressureReading,
   BootstrapResponse,
   CompleteHealthKitRunInput,
+  FailHealthKitRunInput,
   AcceptInviteInput,
   CreatedInvite,
   CreateInviteResponse,
@@ -19,6 +20,7 @@ import type {
   HealthKitOpsBatchResult,
   HealthKitRunBeginResult,
   HealthKitRunCompleteResult,
+  HealthKitRunFailResult,
   HealthKitSettings,
   HealthDailyMetricRecord,
   HealthMetricFreshness,
@@ -105,6 +107,15 @@ export interface HealthKitStore {
     group: HealthKitConsentGroup,
     input: CompleteHealthKitRunInput
   ): Promise<HealthKitRunCompleteResult>;
+  /**
+   * Abandon an in-flight run after begin. Restores `ready` when a prior
+   * success exists; otherwise `error`. Never deletes or moves coverage.
+   */
+  failHealthKitRun(
+    actorUserId: string,
+    group: HealthKitConsentGroup,
+    input: FailHealthKitRunInput
+  ): Promise<HealthKitRunFailResult>;
   /** @deprecated Compatibility for released clients; prefer beginHealthKitRun. */
   startHealthKitImport(
     actorUserId: string,

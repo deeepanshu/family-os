@@ -194,6 +194,16 @@ const runCompleteBody = z
   })
   .strict();
 
+const runFailBody = z
+  .object({
+    installationId: uuid,
+    personId: uuid,
+    timezoneVersion: z.number().int().min(1),
+    kind: runKind,
+    errorCode: z.string().min(1).max(64)
+  })
+  .strict();
+
 export function createHealthKitRoutes(repository: HealthKitStore) {
   const healthKit = new Hono<{ Variables: AppVariables }>();
   healthKit.use("*", requireAuth());
@@ -251,6 +261,19 @@ export function createHealthKitRoutes(repository: HealthKitStore) {
       throw new HttpError(400, "payload_invalid", "group is not allowlisted.");
     }
     const data = await repository.completeHealthKitRun(
+      c.get("user").id,
+      groupKey as (typeof HEALTHKIT_CONSENT_GROUPS)[number],
+      c.req.valid("json")
+    );
+    return c.json({ data });
+  });
+
+  healthKit.post("/groups/:group/runs/fail", zValidator("json", runFailBody), async (c) => {
+    const groupKey = c.req.param("group");
+    if (!group.safeParse(groupKey).success) {
+      throw new HttpError(400, "payload_invalid", "group is not allowlisted.");
+    }
+    const data = await repository.failHealthKitRun(
       c.get("user").id,
       groupKey as (typeof HEALTHKIT_CONSENT_GROUPS)[number],
       c.req.valid("json")

@@ -6,6 +6,7 @@ import type {
   BloodPressureReading,
   BootstrapResponse,
   CompleteHealthKitRunInput,
+  FailHealthKitRunInput,
   AcceptInviteInput,
   CreatedInvite,
   CurrentFamilyResponse,
@@ -25,6 +26,7 @@ import type {
   HealthKitOpsBatchResult,
   HealthKitRunBeginResult,
   HealthKitRunCompleteResult,
+  HealthKitRunFailResult,
   HealthKitSettings,
   HealthMetricFreshness,
   HealthProfile,
@@ -676,6 +678,14 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     input: CompleteHealthKitRunInput
   ): Promise<HealthKitRunCompleteResult> {
     return this.healthKit.completeHealthKitRun(actorUserId, group, input);
+  }
+
+  async failHealthKitRun(
+    actorUserId: string,
+    group: HealthKitConsentGroup,
+    input: FailHealthKitRunInput
+  ): Promise<HealthKitRunFailResult> {
+    return this.healthKit.failHealthKitRun(actorUserId, group, input);
   }
 
   async startHealthKitImport(

@@ -7,6 +7,7 @@ import type {
   BloodGlucoseReading,
   BloodPressureReading,
   CompleteHealthKitRunInput,
+  FailHealthKitRunInput,
   HealthDailyMetricRecord,
   HealthKitConsentGroup,
   HealthKitGroupImportStartResult,
@@ -19,6 +20,7 @@ import type {
   HealthKitOpsBatchResult,
   HealthKitRunBeginResult,
   HealthKitRunCompleteResult,
+  HealthKitRunFailResult,
   HealthKitSettings,
   HealthKitSyncOp,
   HealthMetricFreshness,
@@ -572,6 +574,52 @@ export class MemoryHealthKitEngine {
       coverageStartAt: completedCoverage.coverageStartAt,
       coverageEndAt: completedCoverage.coverageEndAt,
       needsInitialImport: false
+    };
+  }
+
+  async failHealthKitRun(
+    actorUserId: string,
+    group: HealthKitConsentGroup,
+    input: FailHealthKitRunInput
+  ): Promise<HealthKitRunFailResult> {
+    const self = await this.requireSelf(actorUserId);
+    assertSelfProfileMatch({ selfProfileId: self.id, requestedPersonId: input.personId });
+    this.assertWriteFence(input);
+
+    if (!this.groupEnabled.get(`${input.personId}:${group}`)) {
+      throw new HttpError(403, "group_disabled", `Group ${group} is not enabled.`);
+    }
+
+    const nowIso = toUtcIso(new Date());
+    const prev = this.syncState.get(`${input.personId}:${group}`);
+    const restoredStatus: HealthMetricSyncStatusCode = prev?.lastSuccessfulAt ? "ready" : "error";
+    this.touchState({
+      familyId: self.familyId,
+      personId: input.personId,
+      group,
+      nowIso,
+      status: restoredStatus,
+      lastErrorCode: input.errorCode
+    });
+
+    this.host.audit({
+      familyId: self.familyId,
+      actorUserId,
+      action: "healthkit.run_fail",
+      resourceType: "healthkit_sync",
+      resourceId: input.personId,
+      metadata: { group, kind: input.kind, error_code: input.errorCode, status: restoredStatus }
+    });
+
+    return {
+      group,
+      kind: input.kind,
+      status: restoredStatus,
+      lastSuccessfulAt: prev?.lastSuccessfulAt,
+      lastErrorCode: input.errorCode,
+      coverageStartAt: prev?.coverageStartAt,
+      coverageEndAt: prev?.coverageEndAt,
+      needsInitialImport: this.needsInitialImport(input.personId, group)
     };
   }
 

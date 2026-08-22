@@ -40,6 +40,28 @@ enum HealthKitBackgroundSync {
 
     private static let observerState = ObserverState()
 
+    private final class WorkBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var task: Task<Void, Never>?
+
+        func replace(_ task: Task<Void, Never>) {
+            lock.lock()
+            self.task = task
+            lock.unlock()
+        }
+
+        func cancel() {
+            lock.lock()
+            let running = task
+            task = nil
+            lock.unlock()
+            running?.cancel()
+        }
+    }
+
+    private static let processingWork = WorkBox()
+    private static let refreshWork = WorkBox()
+
     /// Scene-phase mirror so observers never read `UIApplication` (MainActor).
     private final class SceneState: @unchecked Sendable {
         private let lock = NSLock()
@@ -394,28 +416,32 @@ enum HealthKitBackgroundSync {
         scheduleAppRefresh()
         let handle = BGProcessingHandle(task)
         task.expirationHandler = {
+            processingWork.cancel()
             handle.complete(success: false)
             CrashReporting.log("healthkit_bg_task_expired")
         }
-        Task {
+        let work = Task {
             await runBoundedSync(reason: "bg_task")
             handle.complete(success: true)
             CrashReporting.log("healthkit_bg_task_completed")
         }
+        processingWork.replace(work)
     }
 
     private static func handleRefreshTask(_ task: BGAppRefreshTask) {
         scheduleAppRefresh()
         let handle = BGRefreshHandle(task)
         task.expirationHandler = {
+            refreshWork.cancel()
             handle.complete(success: false)
             CrashReporting.log("healthkit_bg_refresh_expired")
         }
-        Task {
+        let work = Task {
             await runBoundedSync(reason: "bg_refresh")
             handle.complete(success: true)
             CrashReporting.log("healthkit_bg_refresh_completed")
         }
+        refreshWork.replace(work)
     }
 
     /// Lightweight path for leftover outbox (including activity) after incremental sync.
@@ -515,6 +541,15 @@ enum HealthKitBackgroundSync {
                 return
             }
 
+            do {
+                try await HealthKitDatabaseAccess.assertAccessible()
+            } catch {
+                CrashReporting.log("healthkit_bg_sync_skip_database_inaccessible reason=\(reason)")
+                scheduleBackgroundSync()
+                scheduleAppRefresh()
+                return
+            }
+
             let baseURL = loadBaseURL()
             let client = HealthAPIClient()
             let personId = config.personId
@@ -571,23 +606,65 @@ enum HealthKitBackgroundSync {
                     healthTimezone: healthTimezone
                 ),
                 isEnabled: { eligible.contains($0) },
-                needsInitialImport: { needingImport.contains($0.rawValue) }
+                needsInitialImport: { needingImport.contains($0.rawValue) },
+                failRun: { metric, kind, errorCode in
+                    _ = try await HealthSessionRefresher.withFreshHealthToken { accessToken in
+                        try await client.failHealthKitRun(
+                            baseURL: baseURL,
+                            accessToken: accessToken,
+                            group: metric.rawValue,
+                            installationId: installationId,
+                            personId: personId,
+                            timezoneVersion: timezoneVersion,
+                            kind: kind.rawValue,
+                            errorCode: errorCode
+                        )
+                    }
+                }
             )
             let engine = HealthKitRunEngine(syncStore: store, deps: deps)
 
             do {
-                // Never wait: if the user holds the gate, skip quietly.
-                try await HealthKitRunGate.shared.withExclusiveRun(waitSeconds: 0) {
+                let waitSeconds = exclusiveWaitSeconds(for: reason)
+                try await HealthKitRunGate.shared.withExclusiveRun(waitSeconds: waitSeconds, reason: reason) {
                     let work: @Sendable () async throws -> Void = {
+                        let loopStarted = Date()
                         for metric in eligible {
+                            if Task.isCancelled {
+                                CrashReporting.log(
+                                    "healthkit_bg_sync_cancelled reason=\(reason) group=\(metric.rawValue)"
+                                )
+                                break
+                            }
+                            let elapsed = Date().timeIntervalSince(loopStarted)
+                            if !canStartMetric(elapsed: elapsed, wallTimeoutSeconds: wallTimeoutSeconds) {
+                                CrashReporting.log(
+                                    "healthkit_bg_sync_skip_no_budget reason=\(reason) group=\(metric.rawValue) elapsed=\(Int(elapsed))"
+                                )
+                                break
+                            }
+                            let metricStarted = Date()
+                            CrashReporting.log("healthkit_bg_metric_start reason=\(reason) group=\(metric.rawValue)")
                             do {
                                 let result = try await engine.run(HealthKitRunRequest(metric: metric, kind: .sync))
+                                CrashReporting.log(
+                                    "healthkit_bg_metric_complete reason=\(reason) group=\(metric.rawValue) applied=\(result.appliedCount) ms=\(Int(Date().timeIntervalSince(metricStarted) * 1000))"
+                                )
                                 HealthKitBackgroundSyncAlert.notifyIfNeeded(
                                     metric: metric,
                                     appliedCount: result.appliedCount,
                                     reason: reason
                                 )
                             } catch {
+                                CrashReporting.log(
+                                    "healthkit_bg_metric_failed reason=\(reason) group=\(metric.rawValue) ms=\(Int(Date().timeIntervalSince(metricStarted) * 1000))"
+                                )
+                                if isLockedHealthKitError(error) {
+                                    CrashReporting.log(
+                                        "healthkit_bg_sync_skip_database_inaccessible reason=\(reason) group=\(metric.rawValue)"
+                                    )
+                                    break
+                                }
                                 // One metric's failure never stops later eligible metrics.
                                 CrashReporting.healthKitNonFatal(
                                     .syncFailed,
@@ -640,6 +717,26 @@ enum HealthKitBackgroundSync {
 
     /// Pure policy seam for background tests: only already-imported metrics may
     /// run incrementally, in the same fixed product order as foreground Sync all.
+    static func isLockedHealthKitError(_ error: Error) -> Bool {
+        if HealthKitDatabaseAccess.isInaccessible(error) { return true }
+        if case .databaseInaccessible = error as? HealthKitRunError { return true }
+        if let api = error as? HealthAPIError, api.errorCode == "healthkit_locked" { return true }
+        return false
+    }
+
+    static func exclusiveWaitSeconds(for reason: String) -> TimeInterval {
+        reason == "become_active" ? 45 : 0
+    }
+
+    static func canStartMetric(
+        elapsed: TimeInterval,
+        wallTimeoutSeconds: TimeInterval?,
+        minimumBudgetSeconds: TimeInterval = 5
+    ) -> Bool {
+        guard let wall = wallTimeoutSeconds else { return true }
+        return elapsed + minimumBudgetSeconds <= wall
+    }
+
     static func incrementalEligibility(
         enabled: Set<HealthKitSyncMetric>,
         needingInitialImport: Set<String>

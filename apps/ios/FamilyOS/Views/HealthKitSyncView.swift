@@ -196,57 +196,31 @@ struct HealthKitSyncView: View {
     }
 
     private func caption(for metric: HealthKitSyncMetric) -> String {
-        if let active = healthKit.activeRun, active.metric == metric {
-            return active.stage.displayText
-        }
-        guard healthKit.enabledMetrics.contains(metric) else {
-            return "Disabled"
-        }
-        if let error = healthKit.sessionErrors[metric], !error.isEmpty {
-            return "Failed: \(error)"
-        }
-        guard let state = healthKit.metricState(for: metric) else {
-            return "Not started"
-        }
-        // No local run: a stale server in-flight state is an interrupted run.
-        if state.status == .syncing || state.status == .backfilling {
-            return state.needsImport
-                ? "Interrupted - try Import history again."
-                : "Interrupted - try Sync or Import history again."
-        }
-        if state.needsImport {
-            return "Not started"
-        }
-        if state.status == .error {
-            if let code = state.lastErrorCode, !code.isEmpty {
-                return "Failed (\(code))"
-            }
-            return "Failed"
-        }
-        if let last = state.lastSuccessfulAt,
-           let date = HealthKitRunEngine.parseISODate(last) {
-            return "Ready - Last synced \(Self.lastSyncedFormatter.string(from: date))"
-        }
-        return "Ready"
+        HealthKitMetricCaption.text(
+            metric: metric,
+            enabled: healthKit.enabledMetrics.contains(metric),
+            activeRun: healthKit.activeRun,
+            localRunInProgress: healthKit.localRunInProgress,
+            sessionError: healthKit.sessionErrors[metric],
+            state: healthKit.metricState(for: metric)
+        )
     }
 
     private func captionColor(for metric: HealthKitSyncMetric) -> Color {
-        if healthKit.activeRun?.metric == metric {
+        switch HealthKitMetricCaption.tone(
+            metric: metric,
+            enabled: healthKit.enabledMetrics.contains(metric),
+            activeRun: healthKit.activeRun,
+            localRunInProgress: healthKit.localRunInProgress,
+            sessionError: healthKit.sessionErrors[metric],
+            state: healthKit.metricState(for: metric)
+        ) {
+        case .secondary:
             return .secondary
-        }
-        if healthKit.sessionErrors[metric] != nil {
-            return .red
-        }
-        guard let state = healthKit.metricState(for: metric) else {
-            return .secondary
-        }
-        switch state.status {
-        case .syncing, .backfilling:
+        case .warning:
             return .orange
         case .error:
             return .red
-        case .ready, .neverSynced, .disabled:
-            return .secondary
         }
     }
 
@@ -306,12 +280,7 @@ struct HealthKitSyncView: View {
         )
     }
 
-    private static let lastSyncedFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter
-    }()
+
 
     private var commonTimezones: [String] {
         var zones = [

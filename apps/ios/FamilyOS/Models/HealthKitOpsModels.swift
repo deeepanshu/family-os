@@ -312,4 +312,23 @@ struct HealthKitRunCompleteResultWire: Decodable, Sendable {
     let needsInitialImport: Bool?
 }
 
+struct HealthKitRunFailRequest: Encodable, Sendable {
+    let installationId: String
+    let personId: String
+    let timezoneVersion: Int
+    let kind: String
+    let errorCode: String
+}
+
+struct HealthKitRunFailResultWire: Decodable, Sendable {
+    let group: String
+    let kind: String
+    let status: String
+    let lastSuccessfulAt: String?
+    let lastErrorCode: String
+    let coverageStartAt: String?
+    let coverageEndAt: String?
+    let needsInitialImport: Bool?
+}
+
 

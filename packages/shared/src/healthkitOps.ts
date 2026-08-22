@@ -233,6 +233,26 @@ export type HealthKitRunCompleteResult = {
   needsInitialImport: boolean;
 };
 
+/** Client could not finish after begin. Never deletes and never moves coverage. */
+export type FailHealthKitRunInput = {
+  installationId: string;
+  personId: string;
+  timezoneVersion: number;
+  kind: HealthKitRunKind;
+  errorCode: string;
+};
+
+export type HealthKitRunFailResult = {
+  group: HealthKitConsentGroup;
+  kind: HealthKitRunKind;
+  status: "ready" | "error";
+  lastSuccessfulAt?: string;
+  lastErrorCode: string;
+  coverageStartAt?: string;
+  coverageEndAt?: string;
+  needsInitialImport: boolean;
+};
+
 export type HealthKitGroupStatus = {
   personId: string;
   group: HealthKitConsentGroup;

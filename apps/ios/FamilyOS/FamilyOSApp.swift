@@ -29,14 +29,20 @@ struct FamilyOSApp: App {
                 .onOpenURL { url in
                     _ = viewModel.handleInviteURL(url)
                 }
-                .onChange(of: scenePhase) { _, phase in
+                .onReceive(NotificationCenter.default.publisher(for: HealthKitRunActivity.didChange)) { _ in
+                    viewModel.healthKit.applyRunActivity(HealthKitRunActivity.shared.snapshot())
+                }
+                .onChange(of: scenePhase, initial: true) { _, phase in
                     HealthKitBackgroundSync.setSceneActive(phase == .active)
                     if phase == .active {
                         HealthKitBackgroundSync.scheduleBackgroundSync()
                         HealthKitBackgroundSync.scheduleAppRefresh()
                         Task {
+                            CrashReporting.log("healthkit_become_active_start")
                             await HealthKitBackgroundSync.runBoundedSync(reason: "become_active")
                             await HealthKitBackgroundSync.drainIfConfigured()
+                            await viewModel.reloadHealthKitStatusAfterPassiveSync()
+                            CrashReporting.log("healthkit_become_active_end")
                         }
                     }
                 }

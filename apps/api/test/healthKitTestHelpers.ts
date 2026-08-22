@@ -44,6 +44,23 @@ export async function completeRun(
 }
 
 
+export async function failRun(
+  api: Api,
+  token: string,
+  profileId: string,
+  installationId: string,
+  group: HealthKitConsentGroup,
+  kind: HealthKitRunKind,
+  errorCode: string,
+  timezoneVersion = 1
+) {
+  return api.request(`${HEALTH_API_PREFIX}/healthkit/groups/${group}/runs/fail`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ installationId, personId: profileId, timezoneVersion, kind, errorCode })
+  });
+}
+
 export async function postOps(
   api: Api,
   token: string,
