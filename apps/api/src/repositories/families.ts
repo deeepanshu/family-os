@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+
 import type {
   AuditLog,
   BeginHealthKitRunInput,
@@ -32,6 +33,7 @@ import type {
   HealthProfile,
   HealthSleepDayRecord,
   HealthStepHourRecord,
+  HealthWorkoutExerciseLog,
   HealthWorkoutRecord,
   MarkHealthKitGroupReadyInput,
   McpCapability,
@@ -47,6 +49,7 @@ import type {
   ReminderType,
   StartHealthKitImportInput
 } from "@family-os/shared";
+
 import { HttpError } from "../errors";
 import type {
   AuditLogStore,
@@ -777,6 +780,15 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   ): Promise<HealthWorkoutRecord[]> {
     return this.healthKit.listHealthKitWorkouts(actorUserId, personId, rangeStartUtc, rangeEndUtc, limit);
   }
+
+  async putHealthKitWorkoutExercises(
+    actorUserId: string,
+    workoutId: string,
+    exercises: HealthWorkoutExerciseLog[]
+  ): Promise<HealthWorkoutRecord> {
+    return this.healthKit.putHealthKitWorkoutExercises(actorUserId, workoutId, exercises);
+  }
+
 
   async createConnection(input: CreateMcpConnectionInput): Promise<McpConnectionGrant> {
     const capabilities = normalizeMcpCapabilities(input.capabilities);

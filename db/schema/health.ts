@@ -378,6 +378,56 @@ export const healthWorkouts = pgTable(
   ]
 );
 
+export const healthWorkoutExercises = pgTable(
+  "health_workout_exercises",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    personId: uuid("person_id").notNull().references(() => people.id, { onDelete: "cascade" }),
+    sourceSampleKey: uuid("source_sample_key").notNull(),
+    position: integer("position").notNull(),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("health_workout_exercises_person_sample_position_idx").on(
+      table.personId,
+      table.sourceSampleKey,
+      table.position
+    ),
+    index("health_workout_exercises_person_sample_idx").on(table.personId, table.sourceSampleKey),
+    check("health_workout_exercises_position_check", sql`${table.position} >= 0`),
+    check(
+      "health_workout_exercises_name_check",
+      sql`char_length(${table.name}) between 1 and 80`
+    )
+  ]
+);
+
+export const healthWorkoutSets = pgTable(
+  "health_workout_sets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    exerciseId: uuid("exercise_id")
+      .notNull()
+      .references(() => healthWorkoutExercises.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    reps: integer("reps").notNull(),
+    weightKg: numeric("weight_kg", { precision: 6, scale: 1 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("health_workout_sets_exercise_position_idx").on(table.exerciseId, table.position),
+    check("health_workout_sets_position_check", sql`${table.position} >= 0`),
+    check("health_workout_sets_reps_check", sql`${table.reps} between 1 and 1000`),
+    check(
+      "health_workout_sets_weight_check",
+      sql`${table.weightKg} is null or (${table.weightKg} >= 0 and ${table.weightKg} <= 1000)`
+    )
+  ]
+);
+
+
 export const reminders = pgTable(
   "reminders",
   {

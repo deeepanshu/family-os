@@ -77,6 +77,9 @@ describe("Postgres RLS policies", () => {
         health_blood_glucose_readings,
         health_blood_pressure_readings,
         health_workouts,
+        health_workout_sets,
+        health_workout_exercises,
+
         people,
         family_invites,
         family_memberships,
@@ -158,6 +161,9 @@ describe("Postgres repository wiring", () => {
         health_blood_glucose_readings,
         health_blood_pressure_readings,
         health_workouts,
+        health_workout_sets,
+        health_workout_exercises,
+
         people,
         family_invites,
         family_memberships,

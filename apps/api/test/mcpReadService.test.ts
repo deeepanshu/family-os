@@ -5,7 +5,8 @@ import {
   MCP_HEALTH_METRIC_FOR_PRODUCT_GROUP,
   mcpHealthMetricsForEnabledGroups
 } from "@family-os/shared";
-import { bloodPressureOp, seedHealthKitReadyGroup, sleepDayOp, stepsHourOp, beginRun, postOps } from "./healthKitTestHelpers";
+import { bloodPressureOp, postOps, seedHealthKitReadyGroup, sleepDayOp, stepsHourOp, workoutOp as makeWorkoutOp, beginRun } from "./healthKitTestHelpers";
+
 import { SignJWT } from "jose";
 import { createApp } from "../src/app";
 import { HealthMcpReadService } from "../src/mcp/HealthMcpReadService";
@@ -272,6 +273,41 @@ describe("HealthMcpReadService", () => {
     expect(mcpAudit?.metadata?.oauth_client_id).toBe(oauthClientId);
     expect(JSON.stringify(mcpAudit?.metadata ?? {})).not.toContain("120");
   });
+
+  it("includes saved strength exercises on workout_table rows", async () => {
+    const repo = new InMemoryFamilyRepository();
+    const { api, token, profileId } = await seedUserWithHealthData(repo, userId);
+    const strengthKey = "b9758548-5fab-4e47-a4ac-9a05693bea71";
+    const batch = await postOps(api, token, profileId, installationId, [
+      makeWorkoutOp({
+        sourceSampleKey: strengthKey,
+        workoutType: "traditional_strength_training",
+        startedAtUtc: "2026-07-17T11:00:00.000Z",
+        endedAtUtc: "2026-07-17T11:40:00.000Z",
+        durationSeconds: 2400
+      })
+    ]);
+    expect(batch.status).toBe(200);
+    const exercises = [{ name: "Hip Thrusts", sets: [{ reps: 6, weightKg: 90 }] }];
+    const put = await api.request(`${HEALTH_API_PREFIX}/readings/workouts/${strengthKey}/exercises`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ exercises })
+    });
+    expect(put.status).toBe(200);
+
+    const service = await serviceFor(repo);
+    const workouts = await service.getHealthData(
+      { userId, oauthClientId },
+      { personId: profileId, healthMetric: "workout", rangeDays: 30, timezone: "UTC" }
+    );
+    expect(workouts.viewType).toBe("workout_table");
+    if (workouts.viewType === "workout_table") {
+      const strength = workouts.workouts.find((row) => row.workoutType === "traditional_strength_training");
+      expect(strength?.exercises).toEqual(exercises);
+    }
+  });
+
 
   it("denies clients not on the MCP OAuth allowlist even with an active grant", async () => {
     const repo = new InMemoryFamilyRepository();

@@ -210,6 +210,21 @@ struct HealthAPIClient {
         )
     }
 
+    func putWorkoutExercises(
+        baseURL: String,
+        accessToken: String,
+        workoutId: String,
+        exercises: [WorkoutExerciseLog]
+    ) async throws -> WorkoutReading {
+        try await put(
+            path: "readings/workouts/\(workoutId)/exercises",
+            baseURL: baseURL,
+            accessToken: accessToken,
+            body: WorkoutExercisesRequest(exercises: exercises)
+        )
+    }
+
+
     private func readingsPath(
         _ resource: String,
         personId: String,
@@ -560,6 +575,11 @@ private struct CreateFamilyRequest: Encodable {
 private struct AcceptInviteRequest: Encodable {
     let relationshipLabel: CreatorRelationshipLabel
 }
+
+private struct WorkoutExercisesRequest: Encodable {
+    let exercises: [WorkoutExerciseLog]
+}
+
 
 private struct CreateProfileRequest: Encodable {
     let displayName: String

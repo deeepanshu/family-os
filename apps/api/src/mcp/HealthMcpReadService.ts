@@ -408,7 +408,8 @@ export class HealthMcpReadService {
           swimmingStrokeCount: workout.swimmingStrokeCount,
           totalFlightsClimbed: workout.totalFlightsClimbed,
           eventCount: workout.events?.length,
-          activitySegmentCount: workout.activities?.length
+          activitySegmentCount: workout.activities?.length,
+          exercises: workout.exercises
         };
       })
     };

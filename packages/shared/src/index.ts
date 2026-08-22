@@ -261,6 +261,29 @@ export type HealthWorkoutActivitySegmentRecord = {
   durationSeconds: number;
 };
 
+export const STRENGTH_WORKOUT_TYPES = [
+  "traditional_strength_training",
+  "functional_strength_training",
+  "core_training"
+] as const;
+
+export type StrengthWorkoutType = (typeof STRENGTH_WORKOUT_TYPES)[number];
+
+export function isStrengthWorkoutType(workoutType: string): workoutType is StrengthWorkoutType {
+  return (STRENGTH_WORKOUT_TYPES as readonly string[]).includes(workoutType);
+}
+
+export type HealthWorkoutSetLog = {
+  reps: number;
+  weightKg?: number;
+};
+
+export type HealthWorkoutExerciseLog = {
+  name: string;
+  sets: HealthWorkoutSetLog[];
+};
+
+
 export type HealthWorkoutRecord = {
   id: string;
   personId: string;
@@ -284,6 +307,7 @@ export type HealthWorkoutRecord = {
   totalFlightsClimbed?: number;
   events?: HealthWorkoutEventRecord[];
   activities?: HealthWorkoutActivitySegmentRecord[];
+  exercises?: HealthWorkoutExerciseLog[];
 };
 
 export type HealthStepHourRecord = {
@@ -529,6 +553,7 @@ export type McpWorkoutRow = {
   totalFlightsClimbed?: number;
   eventCount?: number;
   activitySegmentCount?: number;
+  exercises?: HealthWorkoutExerciseLog[];
 };
 
 export type McpHealthDataBase = {

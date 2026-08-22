@@ -27,12 +27,14 @@ import type {
   HealthMetricSyncStatusCode,
   HealthSleepDayRecord,
   HealthStepHourRecord,
+  HealthWorkoutExerciseLog,
   HealthWorkoutRecord,
   MarkHealthKitGroupReadyInput,
   PutHealthKitSettingsInput,
   StartHealthKitImportInput
 } from "@family-os/shared";
-import { BACKFILL_WINDOW_MS, HEALTHKIT_METRIC_REGISTRY } from "@family-os/shared";
+
+import { BACKFILL_WINDOW_MS, HEALTHKIT_METRIC_REGISTRY, isStrengthWorkoutType } from "@family-os/shared";
 import { HttpError } from "../errors";
 import {
   assertOpCoherent,
@@ -43,9 +45,11 @@ import {
   deriveNeedsInitialImport,
   deriveRunRange,
   HEALTHKIT_METRICS,
+  normalizeWorkoutExercises,
   toUtcIso,
   unionCompletedCoverage
 } from "./healthKitDomain";
+
 
 type FamilyCtx = {
   family: { id: string };
@@ -165,8 +169,11 @@ export class MemoryHealthKitEngine {
       totalFlightsClimbed?: number;
       events?: HealthWorkoutRecord["events"];
       activities?: HealthWorkoutRecord["activities"];
+
     }
   >();
+  readonly exerciseLogs = new Map<string, HealthWorkoutExerciseLog[]>();
+
 
   constructor(private readonly host: MemoryHealthKitHost) {}
 
@@ -883,8 +890,58 @@ export class MemoryHealthKitEngine {
         swimmingStrokeCount: r.swimmingStrokeCount,
         totalFlightsClimbed: r.totalFlightsClimbed,
         events: r.events,
-        activities: r.activities
+        activities: r.activities,
+        exercises: this.exerciseLogs.get(`${r.personId}:${r.sourceSampleKey}`)
       }));
+  }
+
+  async putHealthKitWorkoutExercises(
+    actorUserId: string,
+    workoutId: string,
+    exercises: HealthWorkoutExerciseLog[]
+  ): Promise<HealthWorkoutRecord> {
+    const self = await this.requireSelf(actorUserId);
+    const workout = [...this.workouts.values()].find((row) => row.sourceSampleKey === workoutId);
+    if (!workout) {
+      throw new HttpError(404, "workout_not_found", "Workout was not found.");
+    }
+    this.host.requireReadablePerson(actorUserId, workout.personId);
+    assertSelfProfileMatch({ selfProfileId: self.id, requestedPersonId: workout.personId });
+    if (!isStrengthWorkoutType(workout.workoutType)) {
+      throw new HttpError(400, "workout_not_strength", "Exercise logs are only allowed on strength workouts.");
+    }
+    const normalized = normalizeWorkoutExercises(exercises);
+    const key = `${workout.personId}:${workout.sourceSampleKey}`;
+    if (normalized.length === 0) {
+      this.exerciseLogs.delete(key);
+    } else {
+      this.exerciseLogs.set(key, normalized);
+    }
+    return {
+      id: workout.sourceSampleKey,
+      personId: workout.personId,
+      workoutType: workout.workoutType,
+      startedAtUtc: workout.startedAtUtc,
+      endedAtUtc: workout.endedAtUtc,
+      durationSeconds: workout.durationSeconds,
+      activeEnergyKcal: workout.activeEnergyKcal,
+      distanceMeters: workout.distanceMeters,
+      averageHeartRateBpm: workout.averageHeartRateBpm,
+      maximumHeartRateBpm: workout.maximumHeartRateBpm,
+      minimumHeartRateBpm: workout.minimumHeartRateBpm,
+      sourceName: workout.sourceName,
+      sourceBundleId: workout.sourceBundleId,
+      deviceName: workout.deviceName,
+      deviceManufacturer: workout.deviceManufacturer,
+      isIndoor: workout.isIndoor,
+      elevationAscendedMeters: workout.elevationAscendedMeters,
+      averageMETs: workout.averageMETs,
+      swimmingStrokeCount: workout.swimmingStrokeCount,
+      totalFlightsClimbed: workout.totalFlightsClimbed,
+      events: workout.events,
+      activities: workout.activities,
+      exercises: normalized.length === 0 ? undefined : normalized
+    };
   }
 
   private applyOne(

@@ -28,6 +28,7 @@ import type {
   HealthProfile,
   HealthSleepDayRecord,
   HealthStepHourRecord,
+  HealthWorkoutExerciseLog,
   HealthWorkoutRecord,
   MarkHealthKitGroupReadyInput,
   NotificationDelivery,
@@ -38,6 +39,7 @@ import type {
   ReminderRecipient,
   StartHealthKitImportInput
 } from "@family-os/shared";
+
 import type {
   CreateFamilyInput,
   CreateInviteInput,
@@ -280,6 +282,15 @@ export class PostgresFamilyRepository implements FamilyRepository {
   ): Promise<HealthWorkoutRecord[]> {
     return this.healthKitStore.listHealthKitWorkouts(actorUserId, personId, rangeStartUtc, rangeEndUtc, limit);
   }
+
+  putHealthKitWorkoutExercises(
+    actorUserId: string,
+    workoutId: string,
+    exercises: HealthWorkoutExerciseLog[]
+  ): Promise<HealthWorkoutRecord> {
+    return this.healthKitStore.putHealthKitWorkoutExercises(actorUserId, workoutId, exercises);
+  }
+
 
   createConnection(input: CreateMcpConnectionInput): Promise<McpConnectionGrant> {
     return this.mcpConnectionStore.createConnection(input);

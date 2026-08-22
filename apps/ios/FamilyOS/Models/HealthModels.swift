@@ -163,6 +163,33 @@ struct StepDayReading: Decodable, Identifiable {
     var id: String { localDay }
 }
 
+struct WorkoutSetLog: Codable, Identifiable, Hashable {
+    var id = UUID()
+    var reps: Int
+    var weightKg: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case reps, weightKg
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(reps, forKey: .reps)
+        try container.encodeIfPresent(weightKg, forKey: .weightKg)
+    }
+}
+
+
+struct WorkoutExerciseLog: Codable, Identifiable, Hashable {
+    var id = UUID()
+    var name: String
+    var sets: [WorkoutSetLog]
+
+    enum CodingKeys: String, CodingKey {
+        case name, sets
+    }
+}
+
 struct WorkoutReading: Decodable, Identifiable {
     let id: String
     let workoutType: String
@@ -171,7 +198,18 @@ struct WorkoutReading: Decodable, Identifiable {
     let durationSeconds: Int
     let activeEnergyKcal: Double?
     let distanceMeters: Double?
+    let exercises: [WorkoutExerciseLog]?
+
+    var isStrengthWorkout: Bool {
+        switch workoutType {
+        case "traditional_strength_training", "functional_strength_training", "core_training":
+            return true
+        default:
+            return false
+        }
+    }
 }
+
 
 enum HistoryMetricFilter: String, CaseIterable, Identifiable {
     case all
