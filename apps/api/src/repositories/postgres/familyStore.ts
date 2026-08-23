@@ -561,7 +561,9 @@ export class PostgresFamilyStore {
         update reminders
         set subject_person_id = null, updated_at = now()
         where subject_person_id in (
-          select id from people where linked_user_id = ${actorUserId}
+          select id from people
+          where linked_user_id = ${actorUserId}
+             or (created_by_user_id = ${actorUserId} and linked_user_id is null)
         )
       `;
       await tx`delete from people where created_by_user_id = ${actorUserId} and linked_user_id is null`;
@@ -586,6 +588,21 @@ export class PostgresFamilyStore {
           await tx`delete from families where id = ${current.family.id}`;
         }
       }
+
+      await tx`
+        update people
+        set family_id = null, updated_at = now()
+        where family_id in (
+          select id from families
+          where created_by_user_id = ${actorUserId}
+            and kind = 'personal'
+        )
+      `;
+      await tx`
+        delete from families
+        where created_by_user_id = ${actorUserId}
+          and kind = 'personal'
+      `;
 
       const createdFamilies = await tx`
         select id from families where created_by_user_id = ${actorUserId}

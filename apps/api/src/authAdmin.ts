@@ -1,5 +1,6 @@
 import type { AppConfig } from "./config";
 import { HttpError } from "./errors";
+import { logError } from "./logging/otelLogs";
 
 /**
  * Hard-delete a Supabase Auth user via the Admin API.
@@ -25,5 +26,7 @@ export async function deleteSupabaseAuthUser(config: AppConfig, userId: string):
     return;
   }
 
+  const body = (await response.text()).slice(0, 500);
+  logError("auth_delete_failed", { status: response.status, body });
   throw new HttpError(500, "auth_delete_failed", "Could not delete the authentication identity.");
 }
