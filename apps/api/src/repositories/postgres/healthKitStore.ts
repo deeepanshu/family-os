@@ -25,7 +25,9 @@ import type {
   HealthSleepDayRecord,
   HealthStepHourRecord,
   HealthWorkoutExerciseLog,
+  HealthWorkoutExerciseWrite,
   HealthWorkoutRecord,
+
   MarkHealthKitGroupReadyInput,
   PutHealthKitSettingsInput,
   StartHealthKitImportInput
@@ -996,7 +998,7 @@ export class PostgresHealthKitStore {
   async putHealthKitWorkoutExercises(
     actorUserId: string,
     workoutId: string,
-    exercises: HealthWorkoutExerciseLog[]
+    exercises: HealthWorkoutExerciseWrite[]
   ): Promise<HealthWorkoutRecord> {
     const self = await this.context.requireSelfPerson(actorUserId);
     const [row] = await this.context.sql`
@@ -1012,6 +1014,7 @@ export class PostgresHealthKitStore {
     }
     const normalized = normalizeWorkoutExercises(exercises);
     await this.context.sql.begin(async (tx: any) => {
+
       await tx`
         delete from health_workout_exercises
         where person_id = ${row.person_id}
@@ -1019,8 +1022,14 @@ export class PostgresHealthKitStore {
       `;
       for (const [exerciseIndex, exercise] of normalized.entries()) {
         const [inserted] = await tx`
-          insert into health_workout_exercises (person_id, source_sample_key, position, name)
-          values (${row.person_id}, ${row.source_sample_key}, ${exerciseIndex}, ${exercise.name})
+          insert into health_workout_exercises (person_id, source_sample_key, catalog_id, position, name)
+          values (
+            ${row.person_id},
+            ${row.source_sample_key},
+            ${exercise.exerciseId},
+            ${exerciseIndex},
+            ${exercise.name}
+          )
           returning id
         `;
         for (const [setIndex, set] of exercise.sets.entries()) {
@@ -1083,6 +1092,7 @@ export class PostgresHealthKitStore {
       select
         e.source_sample_key,
         e.position as exercise_position,
+        e.catalog_id,
         e.name,
         s.position as set_position,
         s.reps,
@@ -1098,7 +1108,11 @@ export class PostgresHealthKitStore {
       const exerciseKey = `${row.source_sample_key}:${row.exercise_position}`;
       let exercise = byExercise.get(exerciseKey);
       if (!exercise) {
-        exercise = { name: row.name as string, sets: [] };
+        exercise = {
+          exerciseId: row.catalog_id as string,
+          name: row.name as string,
+          sets: []
+        };
         byExercise.set(exerciseKey, exercise);
         const sampleKey = row.source_sample_key as string;
         const list = logs.get(sampleKey) ?? [];

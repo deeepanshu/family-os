@@ -1,7 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
-import type { HealthStepDayRecord, HealthWorkoutRecord } from "@family-os/shared";
+import { WORKOUT_EXERCISE_CATALOG, type HealthStepDayRecord, type HealthWorkoutRecord } from "@family-os/shared";
 import { requireAuth, type AppVariables } from "../auth";
 import { HttpError } from "../errors";
 import type { HealthKitStore } from "../repositories/contracts";
@@ -28,7 +28,7 @@ const workoutExercisesBody = z
       .array(
         z
           .object({
-            name: z.string().trim().min(1).max(80),
+            exerciseId: z.string().uuid(),
             sets: z.array(workoutSetBody).min(1).max(50)
           })
           .strict()
@@ -36,6 +36,12 @@ const workoutExercisesBody = z
       .max(40)
   })
   .strict();
+
+const catalogQuery = z.object({
+  q: z.string().trim().max(80).optional(),
+  category: z.string().trim().max(40).optional()
+});
+
 
 
 const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -134,6 +140,17 @@ export function createStepsRoutes(repository: HealthKitStore) {
 export function createWorkoutRoutes(repository: HealthKitStore) {
   const routes = new Hono<{ Variables: AppVariables }>();
   routes.use("*", requireAuth());
+  routes.get("/exercises", zValidator("query", catalogQuery), async (c) => {
+    const parsed = c.req.valid("query");
+    const needle = parsed.q?.toLowerCase();
+    const category = parsed.category;
+    const data = WORKOUT_EXERCISE_CATALOG.filter((entry) => {
+      if (category && entry.category !== category) return false;
+      if (needle && !entry.name.toLowerCase().includes(needle)) return false;
+      return true;
+    });
+    return c.json({ data });
+  });
   routes.get("/", zValidator("query", query), async (c) => {
     const parsed = c.req.valid("query");
     const window = await resolveHistoryWindow(repository, c.get("user").id, parsed);

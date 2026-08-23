@@ -28,7 +28,9 @@ import type {
   HealthSleepDayRecord,
   HealthStepHourRecord,
   HealthWorkoutExerciseLog,
+  HealthWorkoutExerciseWrite,
   HealthWorkoutRecord,
+
   BloodGlucoseReading,
   MarkHealthKitGroupReadyInput,
   McpCapability,
@@ -179,7 +181,7 @@ export interface HealthKitStore {
   putHealthKitWorkoutExercises(
     actorUserId: string,
     workoutId: string,
-    exercises: HealthWorkoutExerciseLog[]
+    exercises: HealthWorkoutExerciseWrite[]
   ): Promise<HealthWorkoutRecord>;
 }
 

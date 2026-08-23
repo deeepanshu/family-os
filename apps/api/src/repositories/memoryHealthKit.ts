@@ -28,7 +28,9 @@ import type {
   HealthSleepDayRecord,
   HealthStepHourRecord,
   HealthWorkoutExerciseLog,
+  HealthWorkoutExerciseWrite,
   HealthWorkoutRecord,
+
   MarkHealthKitGroupReadyInput,
   PutHealthKitSettingsInput,
   StartHealthKitImportInput
@@ -898,8 +900,9 @@ export class MemoryHealthKitEngine {
   async putHealthKitWorkoutExercises(
     actorUserId: string,
     workoutId: string,
-    exercises: HealthWorkoutExerciseLog[]
+    exercises: HealthWorkoutExerciseWrite[]
   ): Promise<HealthWorkoutRecord> {
+
     const self = await this.requireSelf(actorUserId);
     const workout = [...this.workouts.values()].find((row) => row.sourceSampleKey === workoutId);
     if (!workout) {

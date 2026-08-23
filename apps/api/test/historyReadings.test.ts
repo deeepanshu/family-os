@@ -158,19 +158,37 @@ describe("history reading lists", () => {
 
 describe("workout exercise logs", () => {
   const strengthKey = "a9758548-5fab-4e47-a4ac-9a05693bea71";
+  const curlId = "b5b4f1e4-0214-564e-a71d-06ee7e4e03cc";
+  const hipId = "a0b3a1f0-34fa-53b0-87e4-73dbddf2eff9";
   const exercises = [
     {
-      name: "Bicep Curls",
+      exerciseId: curlId,
       sets: [
         { reps: 10, weightKg: 15 },
         { reps: 8, weightKg: 12.5 }
       ]
     },
     {
-      name: "Hip Thrusts",
+      exerciseId: hipId,
       sets: [{ reps: 8, weightKg: 80 }]
     }
   ];
+  const savedExercises = [
+    {
+      exerciseId: curlId,
+      name: "Biceps Curls With Dumbbell",
+      sets: [
+        { reps: 10, weightKg: 15 },
+        { reps: 8, weightKg: 12.5 }
+      ]
+    },
+    {
+      exerciseId: hipId,
+      name: "Hip Thrust",
+      sets: [{ reps: 8, weightKg: 80 }]
+    }
+  ];
+
 
   async function setupStrengthWorkout() {
     const { api } = app();
@@ -219,6 +237,19 @@ describe("workout exercise logs", () => {
     return { api, token, profileId };
   }
 
+  it("lists catalog exercises for the picker", async () => {
+    const { api, token } = await setupStrengthWorkout();
+    const res = await api.request(`${HEALTH_API_PREFIX}/readings/workouts/exercises?q=Hip%20Thrust`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.some((row: { id: string; name: string }) => row.id === hipId && row.name === "Hip Thrust")).toBe(
+      true
+    );
+  });
+
+
   it("saves per-set logs on a strength workout and returns them on GET", async () => {
     const { api, token, profileId } = await setupStrengthWorkout();
     const put = await api.request(`${HEALTH_API_PREFIX}/readings/workouts/${strengthKey}/exercises`, {
@@ -227,7 +258,7 @@ describe("workout exercise logs", () => {
       body: JSON.stringify({ exercises })
     });
     expect(put.status).toBe(200);
-    expect((await put.json()).data.exercises).toEqual(exercises);
+    expect((await put.json()).data.exercises).toEqual(savedExercises);
 
     const list = await api.request(
       `${HEALTH_API_PREFIX}/readings/workouts?personId=${profileId}&from=2026-08-19&to=2026-08-19`,
@@ -235,7 +266,8 @@ describe("workout exercise logs", () => {
     );
     const body = await list.json();
     const strength = body.data.find((row: { id: string }) => row.id === strengthKey);
-    expect(strength.exercises).toEqual(exercises);
+    expect(strength.exercises).toEqual(savedExercises);
+
   });
 
   it("rejects logs on a running workout", async () => {
@@ -297,7 +329,8 @@ describe("workout exercise logs", () => {
     );
     const strength = (await list.json()).data.find((row: { id: string }) => row.id === strengthKey);
     expect(strength.durationSeconds).toBe(3000);
-    expect(strength.exercises).toEqual(exercises);
+    expect(strength.exercises).toEqual(savedExercises);
+
   });
 });
 

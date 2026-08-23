@@ -5,7 +5,8 @@ import type {
   HealthKitRunKind,
   HealthKitSyncOp,
   HealthMetricSyncStatusCode,
-  HealthWorkoutExerciseLog
+  HealthWorkoutExerciseLog,
+  HealthWorkoutExerciseWrite
 } from "@family-os/shared";
 import {
   BACKFILL_WINDOW_MS,
@@ -16,9 +17,11 @@ import {
   healthKitNaturalKey,
   isHealthKitMetricKey,
   isHealthKitProductGroup,
-  requiredScopeKeysForGroup
+  requiredScopeKeysForGroup,
+  workoutExerciseById
 } from "@family-os/shared";
 import { HttpError } from "../errors";
+
 
 
 export const HEALTHKIT_METRICS: readonly HealthKitMetric[] = HEALTHKIT_CONSENT_GROUPS;
@@ -35,35 +38,38 @@ export function assertSelfProfileMatch(input: {
   }
 }
 
-export function normalizeWorkoutExercises(input: HealthWorkoutExerciseLog[]): HealthWorkoutExerciseLog[] {
+export function normalizeWorkoutExercises(input: HealthWorkoutExerciseWrite[]): HealthWorkoutExerciseLog[] {
+
   if (input.length > 40) {
     throw new HttpError(400, "payload_invalid", "A workout can have at most 40 exercises.");
   }
   return input.map((exercise, index) => {
-    const name = exercise.name.trim();
-    if (name.length < 1 || name.length > 80) {
-      throw new HttpError(400, "payload_invalid", `Exercise ${index + 1} name is invalid.`);
+    const catalog = workoutExerciseById(exercise.exerciseId);
+    if (!catalog) {
+      throw new HttpError(400, "payload_invalid", `Exercise ${index + 1} is not in the catalog.`);
     }
     if (exercise.sets.length < 1 || exercise.sets.length > 50) {
-      throw new HttpError(400, "payload_invalid", `${name} must have 1-50 sets.`);
+      throw new HttpError(400, "payload_invalid", `${catalog.name} must have 1-50 sets.`);
     }
     return {
-      name,
+      exerciseId: catalog.id,
+      name: catalog.name,
       sets: exercise.sets.map((set, setIndex) => {
         if (!Number.isInteger(set.reps) || set.reps < 1 || set.reps > 1000) {
-          throw new HttpError(400, "payload_invalid", `${name} set ${setIndex + 1} reps are invalid.`);
+          throw new HttpError(400, "payload_invalid", `${catalog.name} set ${setIndex + 1} reps are invalid.`);
         }
         if (set.weightKg === undefined) {
           return { reps: set.reps };
         }
         if (!Number.isFinite(set.weightKg) || set.weightKg < 0 || set.weightKg > 1000) {
-          throw new HttpError(400, "payload_invalid", `${name} set ${setIndex + 1} weight is invalid.`);
+          throw new HttpError(400, "payload_invalid", `${catalog.name} set ${setIndex + 1} weight is invalid.`);
         }
         return { reps: set.reps, weightKg: Math.round(set.weightKg * 10) / 10 };
       })
     };
   });
 }
+
 
 
 export function isValidIanaTimezone(timezone: string): boolean {

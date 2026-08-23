@@ -5,11 +5,15 @@ struct WorkoutExerciseLogSheet: View {
     let canEdit: Bool
     let formatTime: (String) -> String?
     let formatMinutes: (Int) -> String
+    let loadCatalog: (String?) async -> [WorkoutExerciseCatalogEntry]
     let onSave: ([WorkoutExerciseLog]) async -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("familyos.recentExerciseNames") private var recentNamesRaw = ""
+    @AppStorage("familyos.recentExerciseIds") private var recentIdsRaw = ""
     @State private var exercises: [DraftExercise]
+    @State private var catalog: [WorkoutExerciseCatalogEntry] = []
+    @State private var search = ""
+    @State private var pickingFor: UUID?
     @State private var isSaving = false
 
     init(
@@ -17,12 +21,14 @@ struct WorkoutExerciseLogSheet: View {
         canEdit: Bool,
         formatTime: @escaping (String) -> String?,
         formatMinutes: @escaping (Int) -> String,
+        loadCatalog: @escaping (String?) async -> [WorkoutExerciseCatalogEntry],
         onSave: @escaping ([WorkoutExerciseLog]) async -> Void
     ) {
         self.workout = workout
         self.canEdit = canEdit
         self.formatTime = formatTime
         self.formatMinutes = formatMinutes
+        self.loadCatalog = loadCatalog
         self.onSave = onSave
         _exercises = State(initialValue: (workout.exercises ?? []).map(DraftExercise.init))
     }
@@ -38,12 +44,12 @@ struct WorkoutExerciseLogSheet: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if canEdit, !recentNames.isEmpty {
+                if canEdit, !recentEntries.isEmpty {
                     Section("Recent") {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack {
-                                ForEach(recentNames, id: \.self) { name in
-                                    Button(name) { addExercise(named: name) }
+                                ForEach(recentEntries) { entry in
+                                    Button(entry.name) { addExercise(entry) }
                                         .buttonStyle(.bordered)
                                 }
                             }
@@ -54,8 +60,18 @@ struct WorkoutExerciseLogSheet: View {
                 ForEach($exercises) { $exercise in
                     Section {
                         if canEdit {
-                            TextField("Exercise name", text: $exercise.name)
-                                .font(.headline)
+                            Button {
+                                pickingFor = exercise.id
+                            } label: {
+                                HStack {
+                                    Text(exercise.name.isEmpty ? "Choose exercise" : exercise.name)
+                                        .font(.headline)
+                                        .foregroundStyle(exercise.name.isEmpty ? .secondary : .primary)
+                                    Spacer()
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                         } else {
                             Text(exercise.name.isEmpty ? "Untitled" : exercise.name)
                                 .font(.headline)
@@ -106,7 +122,7 @@ struct WorkoutExerciseLogSheet: View {
 
                 if canEdit {
                     Section {
-                        Button("Add Exercise") { addExercise(named: "") }
+                        Button("Add Exercise") { addBlankExercise() }
                         if !exercises.isEmpty {
                             Button("Clear All", role: .destructive) { exercises = [] }
                         }
@@ -126,8 +142,49 @@ struct WorkoutExerciseLogSheet: View {
                     }
                 }
             }
+            .sheet(isPresented: Binding(
+                get: { pickingFor != nil },
+                set: { if !$0 { pickingFor = nil } }
+            )) {
+                catalogPicker
+            }
+            .task {
+                catalog = await loadCatalog(nil)
+            }
         }
         .presentationDetents([.large])
+    }
+
+    private var catalogPicker: some View {
+        NavigationStack {
+            List(filteredCatalog) { entry in
+                Button {
+                    choose(entry)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(entry.name)
+                        Text([entry.category, entry.equipment.joined(separator: ", ")].filter { !$0.isEmpty }.joined(separator: " · "))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("Choose exercise")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $search, prompt: "Search exercises")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { pickingFor = nil }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private var filteredCatalog: [WorkoutExerciseCatalogEntry] {
+        let needle = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.isEmpty else { return catalog }
+        return catalog.filter { $0.name.lowercased().contains(needle) }
     }
 
     private var metaLine: String {
@@ -137,12 +194,27 @@ struct WorkoutExerciseLogSheet: View {
         return parts.joined(separator: " · ")
     }
 
-    private var recentNames: [String] {
-        recentNamesRaw.split(separator: "\u{1e}").map(String.init).filter { !$0.isEmpty }
+    private var recentEntries: [WorkoutExerciseCatalogEntry] {
+        recentIdsRaw.split(separator: "\u{1e}").compactMap { id in
+            catalog.first { $0.id == String(id) }
+        }
     }
 
-    private func addExercise(named name: String) {
-        exercises.append(DraftExercise(name: name, sets: [DraftSet()]))
+    private func addBlankExercise() {
+        let draft = DraftExercise()
+        exercises.append(draft)
+        pickingFor = draft.id
+    }
+
+    private func addExercise(_ entry: WorkoutExerciseCatalogEntry) {
+        exercises.append(DraftExercise(exerciseId: entry.id, name: entry.name, sets: [DraftSet()]))
+    }
+
+    private func choose(_ entry: WorkoutExerciseCatalogEntry) {
+        guard let target = pickingFor, let index = exercises.firstIndex(where: { $0.id == target }) else { return }
+        exercises[index].exerciseId = entry.id
+        exercises[index].name = entry.name
+        pickingFor = nil
     }
 
     private func addSet(to exerciseId: UUID) {
@@ -155,41 +227,44 @@ struct WorkoutExerciseLogSheet: View {
         isSaving = true
         defer { isSaving = false }
         let payload = exercises.compactMap(\.payload)
-        remember(names: payload.map(\.name))
+        remember(ids: payload.map(\.exerciseId))
         await onSave(payload)
         dismiss()
     }
 
-    private func remember(names: [String]) {
-        var next = names + recentNames
+    private func remember(ids: [String]) {
+        var next = ids + recentIdsRaw.split(separator: "\u{1e}").map(String.init)
         var seen = Set<String>()
         next = next.filter { seen.insert($0).inserted }
-        recentNamesRaw = next.prefix(8).joined(separator: "\u{1e}")
+        recentIdsRaw = next.prefix(8).joined(separator: "\u{1e}")
     }
 }
 
 private struct DraftExercise: Identifiable {
     let id: UUID
+    var exerciseId: String
     var name: String
     var sets: [DraftSet]
 
-    init(id: UUID = UUID(), name: String = "", sets: [DraftSet] = [DraftSet()]) {
+    init(id: UUID = UUID(), exerciseId: String = "", name: String = "", sets: [DraftSet] = [DraftSet()]) {
         self.id = id
+        self.exerciseId = exerciseId
         self.name = name
         self.sets = sets
     }
 
     init(_ log: WorkoutExerciseLog) {
         id = log.id
+        exerciseId = log.exerciseId
         name = log.name
         sets = log.sets.map(DraftSet.init)
     }
 
     var payload: WorkoutExerciseLog? {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !exerciseId.isEmpty, !name.isEmpty else { return nil }
         let sets = sets.compactMap(\.payload)
-        guard !trimmed.isEmpty, !sets.isEmpty else { return nil }
-        return WorkoutExerciseLog(name: trimmed, sets: sets)
+        guard !sets.isEmpty else { return nil }
+        return WorkoutExerciseLog(exerciseId: exerciseId, name: name, sets: sets)
     }
 }
 
