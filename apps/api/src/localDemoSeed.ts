@@ -7,9 +7,12 @@ import {
 import type { AppRepositories } from "./repositories/contracts";
 
 export const LOCAL_DEMO_USER_ID = "00000000-0000-4000-8000-000000000001";
+export const LOCAL_DEMO_MEMBER_USER_ID = "00000000-0000-4000-8000-000000000002";
 export const LOCAL_DEMO_INSTALLATION_ID = "00000000-0000-4000-8000-000000005eed";
+export const LOCAL_DEMO_MEMBER_INSTALLATION_ID = "00000000-0000-4000-8000-000000005ee2";
 export const LOCAL_DEMO_TIMEZONE = "UTC";
 export const LOCAL_DEMO_FAMILY_NAME = "Jain Family";
+export const LOCAL_DEMO_MEMBER_NAME = "MJ";
 export const LOCAL_DEMO_DAY_COUNT = 14;
 
 const ENABLED_GROUPS = ["activity", "sleep", "vitals", "workouts"] as const satisfies readonly HealthKitConsentGroup[];
@@ -21,7 +24,7 @@ const STRENGTH_START_HOUR = 18;
 const RUN_START_HOUR = 7;
 const WALK_START_HOUR = 17;
 
-export type LocalDemoSeedStores = Pick<AppRepositories, "families" | "profiles" | "healthKit">;
+export type LocalDemoSeedStores = Pick<AppRepositories, "families" | "profiles" | "healthKit" | "invites">;
 
 export type LocalDemoSeedOptions = {
   userId?: string;
@@ -33,6 +36,8 @@ export type LocalDemoSeedResult = {
   userId: string;
   profileId: string;
   profileName: string;
+  memberProfileId: string | null;
+  memberProfileName: string | null;
   familyId: string;
   familyName: string;
   asOf: string;
@@ -57,6 +62,8 @@ export async function seedLocalDemo(
     throw new Error("Local demo seed failed to create or load a household.");
   }
 
+  const member = await ensureDemoMember(stores, userId);
+
   const existingSettings = await stores.healthKit.getHealthKitSettings(userId, profile.id);
   const installationId = existingSettings.activeInstallationId ?? LOCAL_DEMO_INSTALLATION_ID;
   const settings = await stores.healthKit.putHealthKitSettings(userId, {
@@ -76,21 +83,14 @@ export async function seedLocalDemo(
 
   const opsByGroup = buildDemoOps(userId, days, lastDay);
   for (const group of ENABLED_GROUPS) {
-    const ops = opsByGroup[group];
-    if (ops.length === 0) continue;
-    const batch = await stores.healthKit.applyHealthKitOps(userId, {
+    await applyOps(stores, {
+      userId,
+      profileId: profile.id,
       installationId,
-      personId: profile.id,
       timezoneVersion: settings.healthTimezoneVersion,
-      ops
+      group,
+      ops: opsByGroup[group]
     });
-    const rejected = batch.results.filter((result) => result.result === "rejected");
-    if (rejected.length > 0) {
-      const first = rejected[0];
-      throw new Error(
-        `Demo seed rejected ${rejected.length} ${group} op(s): ${first?.errorCode ?? "unknown"} ${first?.errorMessage ?? ""}`.trim()
-      );
-    }
   }
 
   const workouts = await stores.healthKit.listHealthKitWorkouts(
@@ -102,7 +102,8 @@ export async function seedLocalDemo(
   );
   const strength = workouts.find(
     (workout) =>
-      workout.workoutType === "traditional_strength_training" && workout.startedAtUtc.startsWith(`${lastDay}T${String(STRENGTH_START_HOUR).padStart(2, "0")}:00`)
+      workout.workoutType === "traditional_strength_training" &&
+      workout.startedAtUtc.startsWith(`${lastDay}T${String(STRENGTH_START_HOUR).padStart(2, "0")}:00`)
   );
   if (!strength) {
     throw new Error("Demo seed did not find the strength workout after applying ops.");
@@ -136,14 +137,137 @@ export async function seedLocalDemo(
     });
   }
 
+  if (member) {
+    await seedVitalsOnly(stores, {
+      userId: member.userId,
+      profileId: member.profileId,
+      fallbackInstallationId: LOCAL_DEMO_MEMBER_INSTALLATION_ID,
+      days,
+      asOf
+    });
+  }
+
   return {
     userId,
     profileId: profile.id,
     profileName: profile.displayName,
+    memberProfileId: member?.profileId ?? null,
+    memberProfileName: member?.displayName ?? null,
     familyId: family.family.id,
     familyName: family.family.name,
     asOf: lastDay
   };
+}
+
+async function ensureDemoMember(
+  stores: LocalDemoSeedStores,
+  creatorUserId: string
+): Promise<{ userId: string; profileId: string; displayName: string } | null> {
+  const current = await stores.families.getCurrentFamily(creatorUserId);
+  if (!current || current.family.createdByUserId !== creatorUserId) {
+    return null;
+  }
+
+  const members = await stores.families.listMembers(creatorUserId);
+  const alreadyJoined = members.some((member) => member.membership.userId === LOCAL_DEMO_MEMBER_USER_ID);
+  await stores.families.bootstrap(LOCAL_DEMO_MEMBER_USER_ID);
+  const memberProfile = await stores.profiles.createSelfProfile(LOCAL_DEMO_MEMBER_USER_ID, LOCAL_DEMO_MEMBER_NAME);
+
+  if (!alreadyJoined) {
+    const invite = await stores.invites.createInvite({ actorUserId: creatorUserId });
+    await stores.invites.acceptInvite(invite.token, LOCAL_DEMO_MEMBER_USER_ID, { relationshipLabel: "Brother" });
+  }
+
+  return { userId: LOCAL_DEMO_MEMBER_USER_ID, profileId: memberProfile.id, displayName: memberProfile.displayName };
+}
+
+async function seedVitalsOnly(
+  stores: LocalDemoSeedStores,
+  input: {
+    userId: string;
+    profileId: string;
+    fallbackInstallationId: string;
+    days: string[];
+    asOf: Date;
+  }
+): Promise<void> {
+  const existing = await stores.healthKit.getHealthKitSettings(input.userId, input.profileId);
+  const installationId = existing.activeInstallationId ?? input.fallbackInstallationId;
+  const settings = await stores.healthKit.putHealthKitSettings(input.userId, {
+    personId: input.profileId,
+    consentVersion: "local-demo-2026-08-23",
+    enabledGroups: ["vitals"],
+    healthTimezone: LOCAL_DEMO_TIMEZONE,
+    installationId
+  });
+  const firstDay = input.days[0];
+  if (!firstDay) return;
+  await applyOps(stores, {
+    userId: input.userId,
+    profileId: input.profileId,
+    installationId,
+    timezoneVersion: settings.healthTimezoneVersion,
+    group: "vitals",
+    ops: buildMemberVitalsOps(input.userId, input.days)
+  });
+  await stores.healthKit.markHealthKitGroupReady(input.userId, "vitals", {
+    installationId,
+    personId: input.profileId,
+    timezoneVersion: settings.healthTimezoneVersion,
+    coverageStartAt: `${firstDay}T00:00:00.000Z`,
+    coverageEndAt: input.asOf.toISOString()
+  });
+}
+
+async function applyOps(
+  stores: LocalDemoSeedStores,
+  input: {
+    userId: string;
+    profileId: string;
+    installationId: string;
+    timezoneVersion: number;
+    group: HealthKitConsentGroup;
+    ops: HealthKitSyncOp[];
+  }
+): Promise<void> {
+  if (input.ops.length === 0) return;
+  const batch = await stores.healthKit.applyHealthKitOps(input.userId, {
+    installationId: input.installationId,
+    personId: input.profileId,
+    timezoneVersion: input.timezoneVersion,
+    ops: input.ops
+  });
+  const rejected = batch.results.filter((result) => result.result === "rejected");
+  if (rejected.length > 0) {
+    const first = rejected[0];
+    throw new Error(
+      `Demo seed rejected ${rejected.length} ${input.group} op(s): ${first?.errorCode ?? "unknown"} ${first?.errorMessage ?? ""}`.trim()
+    );
+  }
+}
+
+function buildMemberVitalsOps(userId: string, days: string[]): HealthKitSyncOp[] {
+  const ops: HealthKitSyncOp[] = [];
+  for (const [index, day] of days.entries()) {
+    if (index % 2 !== 0) continue;
+    const sourceObjectKey = uuidHash(`local-demo-source:${userId}:bp:${day}`);
+    ops.push(
+      upsertOp(userId, {
+        naturalKey: bloodPressureNaturalKey(sourceObjectKey),
+        group: "vitals",
+        scopeKey: "blood_pressure",
+        payload: {
+          kind: "blood_pressure",
+          sourceObjectKey,
+          measuredAtUtc: `${day}T08:40:00.000Z`,
+          systolic: 134 + (index % 4) * 2,
+          diastolic: 84 + (index % 3),
+          pulse: 72 + (index % 5)
+        }
+      })
+    );
+  }
+  return ops;
 }
 
 function buildDemoOps(

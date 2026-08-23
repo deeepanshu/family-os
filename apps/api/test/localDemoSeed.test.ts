@@ -5,6 +5,8 @@ import { createApp } from "../src/app";
 import { repositoriesFromFamilyRepository } from "../src/dependencies";
 import {
   LOCAL_DEMO_FAMILY_NAME,
+  LOCAL_DEMO_MEMBER_NAME,
+  LOCAL_DEMO_MEMBER_USER_ID,
   LOCAL_DEMO_USER_ID,
   seedLocalDemo
 } from "../src/localDemoSeed";
@@ -85,6 +87,8 @@ describe("local demo seed", () => {
     const second = await seedLocalDemo(stores, { userId: LOCAL_DEMO_USER_ID, asOf });
     expect(second.profileId).toBe(first.profileId);
     expect(second.familyId).toBe(first.familyId);
+    expect(second.memberProfileId).toBe(first.memberProfileId);
+    expect(first.memberProfileName).toBe(LOCAL_DEMO_MEMBER_NAME);
 
     const api = createApp({
       config: {
@@ -109,12 +113,13 @@ describe("local demo seed", () => {
     expect(current.data.membership.userId).toBe(LOCAL_DEMO_USER_ID);
 
     const members = await (await api.request(`${HEALTH_API_PREFIX}/families/members`, { headers: auth })).json();
-    expect(members.data.some((member: { membership: { userId: string } }) => member.membership.userId === LOCAL_DEMO_USER_ID)).toBe(
-      true
-    );
+    expect(members.data.some((member: { membership: { userId: string } }) => member.membership.userId === LOCAL_DEMO_USER_ID)).toBe(true);
+    expect(members.data.some((member: { membership: { userId: string } }) => member.membership.userId === LOCAL_DEMO_MEMBER_USER_ID)).toBe(true);
 
     const people = await (await api.request(`${HEALTH_API_PREFIX}/people`, { headers: auth })).json();
-    expect(people.data.some((profile: { relationshipLabel: string }) => profile.relationshipLabel === "Self")).toBe(true);
+    expect(people.data.map((profile: { displayName: string }) => profile.displayName).sort()).toEqual(
+      [first.profileName, LOCAL_DEMO_MEMBER_NAME].sort()
+    );
 
     const settings = await (await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, { headers: auth })).json();
     const readyGroups = settings.data.groups.filter((group: { group: string; status: string }) =>
@@ -129,16 +134,19 @@ describe("local demo seed", () => {
     expect(bloodPressure.data.length).toBeGreaterThan(0);
     expect(bloodPressure.data[0].systolic).toEqual(expect.any(Number));
 
+    const memberBp = await (
+      await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure?personId=${first.memberProfileId}`, { headers: auth })
+    ).json();
+    expect(memberBp.data.length).toBeGreaterThan(0);
+    expect(memberBp.data[0].systolic).toBeGreaterThan(130);
+
     const from = "2026-08-10";
     const to = "2026-08-23";
     const query = `personId=${first.profileId}&from=${from}&to=${to}`;
-
     const sleep = await (await api.request(`${HEALTH_API_PREFIX}/readings/sleep?${query}`, { headers: auth })).json();
     expect(sleep.data).toHaveLength(14);
-
     const steps = await (await api.request(`${HEALTH_API_PREFIX}/readings/steps?${query}`, { headers: auth })).json();
     expect(steps.data).toHaveLength(14);
-
     const workouts = await (await api.request(`${HEALTH_API_PREFIX}/readings/workouts?${query}`, { headers: auth })).json();
     expect(workouts.data).toHaveLength(3);
     const strength = workouts.data.find(

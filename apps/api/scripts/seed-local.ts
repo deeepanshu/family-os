@@ -24,9 +24,12 @@ try {
   const result = await seedLocalDemo(repositoriesFromFamilyRepository(repository), { userId });
   console.log(`Seeded local demo for ${result.userId}`);
   console.log(`  profile: ${result.profileName} (${result.profileId})`);
+  if (result.memberProfileId) {
+    console.log(`  member: ${result.memberProfileName} (${result.memberProfileId})`);
+  }
   console.log(`  family: ${result.familyName}`);
   console.log(`  window ending: ${result.asOf}`);
-  console.log("Debug sign-in: Continue (dev-token). Same asOf preserves route-visible counts.");
+  console.log("Debug sign-in: Continue (dev-token). Switch profile to MJ for member vitals.");
 } finally {
   await sql.end({ timeout: 5 });
 }
