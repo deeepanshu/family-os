@@ -3,6 +3,8 @@ import SwiftUI
 struct ProfileView: View {
     @ObservedObject var viewModel: HealthBootstrapViewModel
 
+    private var healthKit: HealthKitSyncStateViewModel { viewModel.healthKit }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -15,13 +17,37 @@ struct ProfileView: View {
                     }
                 }
 
+                HealthKitSettingsSections(viewModel: viewModel)
+
                 Section {
                     Button("Sign Out", role: .destructive) {
                         viewModel.signOut()
                     }
                 }
             }
-            .navigationTitle("Profile")
+            .scrollContentBackground(.hidden)
+            .background(Color(.systemGroupedBackground))
+            .safeAreaInset(edge: .top, spacing: 0) {
+                Text("Profile")
+                    .font(.largeTitle.weight(.bold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 6)
+                    .background(Color(.systemGroupedBackground))
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if let banner = healthKit.progressBanner {
+                    HealthKitSyncProgressBanner(title: banner.title, detail: banner.detail)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: healthKit.progressBanner)
+            .task {
+                await viewModel.loadHealthKitStatus()
+            }
         }
     }
 }
