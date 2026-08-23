@@ -355,7 +355,7 @@ final class HealthKitRunEngineTests: XCTestCase {
         XCTAssertEqual(action, .scheduleOnly)
     }
 
-    func testObserverWakeIgnoresHeartRate() {
+    func testObserverWakeRunsVitalsForHeartRate() {
         guard let hr = HKQuantityType.quantityType(forIdentifier: .heartRate) else {
             return XCTFail("Missing heart rate type")
         }
@@ -365,7 +365,7 @@ final class HealthKitRunEngineTests: XCTestCase {
             enabled: [.vitals],
             needingInitialImport: []
         )
-        XCTAssertEqual(action, .ignore)
+        XCTAssertEqual(action, .runMetricThenSchedule(.vitals))
     }
 
     func testBackgroundAlertPolicyIsCompletionOnly() {

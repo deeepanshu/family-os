@@ -43,21 +43,33 @@ extension HealthBootstrapViewModel {
                     to: window.to
                 )
             }
+            async let heartRate = optionalList {
+                try await client.listHeartRateDays(
+                    baseURL: connection.baseURL,
+                    accessToken: auth.accessToken,
+                    personId: personId,
+                    from: window.from,
+                    to: window.to
+                )
+            }
             let (
                 bloodPressureReadings,
                 sleepDays,
                 stepDays,
-                workoutReadings
-            ) = await (bloodPressure, sleep, steps, workouts)
+                workoutReadings,
+                heartRateDays
+            ) = await (bloodPressure, sleep, steps, workouts, heartRate)
             if let bloodPressureReadings { readings.bloodPressureReadings = bloodPressureReadings }
             if let sleepDays { readings.sleepDays = sleepDays }
             if let stepDays { readings.stepDays = stepDays }
             if let workoutReadings { readings.workouts = workoutReadings }
+            if let heartRateDays { readings.heartRateDays = heartRateDays }
             let loaded =
                 readings.bloodPressureReadings.count
                 + readings.sleepDays.count
                 + readings.stepDays.count
                 + readings.workouts.count
+                + readings.heartRateDays.count
             return "Loaded \(loaded) history items."
         }
     }
@@ -69,6 +81,7 @@ extension HealthBootstrapViewModel {
     func historyDays(filter: HistoryMetricFilter) -> [HistoryDay] {
         HistoryTimeline.days(
             bloodPressure: readings.bloodPressureReadings,
+            heartRate: readings.heartRateDays,
             sleep: readings.sleepDays,
             steps: readings.stepDays,
             workouts: readings.workouts,

@@ -1,7 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
-import { WORKOUT_EXERCISE_CATALOG, type HealthStepDayRecord, type HealthWorkoutRecord } from "@family-os/shared";
+import { WORKOUT_EXERCISE_CATALOG, type HealthDailyMetricRecord, type HealthStepDayRecord, type HealthWorkoutRecord } from "@family-os/shared";
 import { requireAuth, type AppVariables } from "../auth";
 import { HttpError } from "../errors";
 import type { HealthKitStore } from "../repositories/contracts";
@@ -132,6 +132,28 @@ export function createStepsRoutes(repository: HealthKitStore) {
     const hours = await repository.listStepHours(c.get("user").id, window.personId, start, end);
     return c.json({
       data: aggregateStepDays(hours, window.timezone, window.rangeStart, window.rangeEnd)
+    });
+  });
+  return routes;
+}
+
+export function createHeartRateRoutes(repository: HealthKitStore) {
+  const routes = new Hono<{ Variables: AppVariables }>();
+  routes.use("*", requireAuth());
+  routes.get("/", zValidator("query", query), async (c) => {
+    const parsed = c.req.valid("query");
+    const window = await resolveHistoryWindow(repository, c.get("user").id, parsed);
+    const days = await repository.listDailyMetrics(
+      c.get("user").id,
+      window.personId,
+      "heart_rate",
+      window.rangeStart,
+      window.rangeEnd
+    );
+    return c.json({
+      data: [...days].sort((a: HealthDailyMetricRecord, b: HealthDailyMetricRecord) =>
+        b.localDay.localeCompare(a.localDay)
+      )
     });
   });
   return routes;

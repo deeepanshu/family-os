@@ -713,16 +713,27 @@ export class PostgresHealthKitStore {
     const manifest = input.presentNaturalKeys.filter((key) => typeof key === "string" && key.length <= 256);
     switch (input.group) {
       case "vitals": {
-        const keys = manifest.filter((key) => key.startsWith("blood_pressure:"));
-        const rows = await tx`
+        const bpKeys = manifest.filter((key) => key.startsWith("blood_pressure:"));
+        const bpRows = await tx`
           delete from health_blood_pressure_readings
           where person_id = ${input.personId}
             and measured_at >= ${input.rangeStartAt}::timestamptz
             and measured_at <= ${input.rangeEndAt}::timestamptz
-            and not (('blood_pressure:' || source_sample_key::text) = any(${keys}))
+            and not (('blood_pressure:' || source_sample_key::text) = any(${bpKeys}))
           returning id
         `;
-        return rows.length;
+        const hrKeys = manifest.filter((key) => key.startsWith("daily_metric:heart_rate:"));
+        const hrRows = await tx`
+          delete from health_daily_metrics
+          where person_id = ${input.personId}
+            and metric_key = 'heart_rate'
+            and timezone_version = ${input.timezoneVersion}
+            and local_day >= (${input.rangeStartAt}::timestamptz at time zone ${input.healthTimezone})::date
+            and local_day <= (${input.rangeEndAt}::timestamptz at time zone ${input.healthTimezone})::date
+            and not (('daily_metric:heart_rate:' || local_day::text) = any(${hrKeys}))
+          returning id
+        `;
+        return bpRows.length + hrRows.length;
       }
       case "sleep": {
         const keys = manifest.filter((key) => key.startsWith("sleep_day:"));

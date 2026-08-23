@@ -194,7 +194,6 @@ struct HealthAPIClient {
             accessToken: accessToken
         )
     }
-
     func listWorkouts(
         baseURL: String,
         accessToken: String,
@@ -205,6 +204,20 @@ struct HealthAPIClient {
     ) async throws -> [WorkoutReading] {
         try await get(
             path: readingsPath("workouts", personId: personId, from: from, to: to, limit: limit),
+            baseURL: baseURL,
+            accessToken: accessToken
+        )
+    }
+
+    func listHeartRateDays(
+        baseURL: String,
+        accessToken: String,
+        personId: String,
+        from: String,
+        to: String
+    ) async throws -> [HeartRateDayReading] {
+        try await get(
+            path: readingsPath("heart-rate", personId: personId, from: from, to: to),
             baseURL: baseURL,
             accessToken: accessToken
         )

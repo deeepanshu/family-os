@@ -201,6 +201,34 @@ export function bloodPressureDeleteOp(sourceObjectKey: string): HealthKitSyncOp 
   };
 }
 
+export function dailyMetricOp(input: {
+  healthMetric: "heart_rate";
+  localDay: string;
+  averageValue: number;
+  minimumValue: number;
+  maximumValue: number;
+  latestValue: number;
+  sampleCount: number;
+}): HealthKitSyncOp {
+  return {
+    opId: crypto.randomUUID(),
+    naturalKey: `daily_metric:${input.healthMetric}:${input.localDay}`,
+    group: "vitals",
+    scopeKey: input.healthMetric,
+    op: "upsert",
+    payload: {
+      kind: "daily_metric",
+      healthMetric: input.healthMetric,
+      localDay: input.localDay,
+      averageValue: input.averageValue,
+      minimumValue: input.minimumValue,
+      maximumValue: input.maximumValue,
+      latestValue: input.latestValue,
+      sampleCount: input.sampleCount
+    }
+  };
+}
+
 export function workoutOp(input: {
   sourceSampleKey?: string;
   workoutType?: string;
@@ -209,6 +237,8 @@ export function workoutOp(input: {
   durationSeconds: number;
   activeEnergyKcal?: number;
   distanceMeters?: number;
+  swimmingStrokeCount?: number;
+  averageHeartRateBpm?: number;
 }): HealthKitSyncOp {
   const sourceSampleKey = input.sourceSampleKey ?? crypto.randomUUID();
   return {
@@ -225,7 +255,9 @@ export function workoutOp(input: {
       endedAtUtc: input.endedAtUtc,
       durationSeconds: input.durationSeconds,
       activeEnergyKcal: input.activeEnergyKcal,
-      distanceMeters: input.distanceMeters
+      distanceMeters: input.distanceMeters,
+      swimmingStrokeCount: input.swimmingStrokeCount,
+      averageHeartRateBpm: input.averageHeartRateBpm
     }
   };
 }

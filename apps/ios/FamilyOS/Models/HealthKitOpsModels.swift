@@ -44,6 +44,16 @@ enum HealthKitOpPayloadWire: Codable, Sendable {
         awakeMinutes: Int,
         inBedMinutes: Int
     )
+    case dailyMetric(
+        healthMetric: String,
+        localDay: String,
+        sumValue: Double?,
+        averageValue: Double?,
+        minimumValue: Double?,
+        maximumValue: Double?,
+        latestValue: Double?,
+        sampleCount: Int
+    )
     case workout(
         sourceSampleKey: String,
         workoutType: String,
@@ -74,6 +84,7 @@ enum HealthKitOpPayloadWire: Codable, Sendable {
         case hourStartUtc, count
         case sleepDay, totalMinutes, coreMinutes, deepMinutes, remMinutes
         case unspecifiedAsleepMinutes, awakeMinutes, inBedMinutes
+        case healthMetric, localDay, sumValue, averageValue, minimumValue, maximumValue, latestValue, sampleCount
         case sourceSampleKey, workoutType, startedAtUtc, endedAtUtc, durationSeconds
         case activeEnergyKcal, distanceMeters, averageHeartRateBpm, maximumHeartRateBpm, minimumHeartRateBpm
         case sourceName, sourceBundleId, deviceName, deviceManufacturer, isIndoor
@@ -108,6 +119,17 @@ enum HealthKitOpPayloadWire: Codable, Sendable {
                 unspecifiedAsleepMinutes: try container.decode(Int.self, forKey: .unspecifiedAsleepMinutes),
                 awakeMinutes: try container.decode(Int.self, forKey: .awakeMinutes),
                 inBedMinutes: try container.decode(Int.self, forKey: .inBedMinutes)
+            )
+        case "daily_metric":
+            self = .dailyMetric(
+                healthMetric: try container.decode(String.self, forKey: .healthMetric),
+                localDay: try container.decode(String.self, forKey: .localDay),
+                sumValue: try container.decodeIfPresent(Double.self, forKey: .sumValue),
+                averageValue: try container.decodeIfPresent(Double.self, forKey: .averageValue),
+                minimumValue: try container.decodeIfPresent(Double.self, forKey: .minimumValue),
+                maximumValue: try container.decodeIfPresent(Double.self, forKey: .maximumValue),
+                latestValue: try container.decodeIfPresent(Double.self, forKey: .latestValue),
+                sampleCount: try container.decode(Int.self, forKey: .sampleCount)
             )
         case "workout":
             self = .workout(
@@ -165,6 +187,18 @@ enum HealthKitOpPayloadWire: Codable, Sendable {
             try container.encode(unspecifiedAsleepMinutes, forKey: .unspecifiedAsleepMinutes)
             try container.encode(awakeMinutes, forKey: .awakeMinutes)
             try container.encode(inBedMinutes, forKey: .inBedMinutes)
+        case let .dailyMetric(
+            healthMetric, localDay, sumValue, averageValue, minimumValue, maximumValue, latestValue, sampleCount
+        ):
+            try container.encode("daily_metric", forKey: .kind)
+            try container.encode(healthMetric, forKey: .healthMetric)
+            try container.encode(localDay, forKey: .localDay)
+            try container.encodeIfPresent(sumValue, forKey: .sumValue)
+            try container.encodeIfPresent(averageValue, forKey: .averageValue)
+            try container.encodeIfPresent(minimumValue, forKey: .minimumValue)
+            try container.encodeIfPresent(maximumValue, forKey: .maximumValue)
+            try container.encodeIfPresent(latestValue, forKey: .latestValue)
+            try container.encode(sampleCount, forKey: .sampleCount)
         case let .workout(
             sourceSampleKey, workoutType, startedAtUtc, endedAtUtc, durationSeconds,
             activeEnergyKcal, distanceMeters, averageHeartRateBpm, maximumHeartRateBpm, minimumHeartRateBpm,

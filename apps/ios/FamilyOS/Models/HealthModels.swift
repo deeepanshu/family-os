@@ -163,6 +163,22 @@ struct StepDayReading: Decodable, Identifiable {
     var id: String { localDay }
 }
 
+struct HeartRateDayReading: Decodable, Identifiable {
+    let localDay: String
+    let averageValue: Double?
+    let minimumValue: Double?
+    let maximumValue: Double?
+    let latestValue: Double?
+    let sampleCount: Int
+    let unit: String?
+
+    var id: String { localDay }
+
+    var averageBpm: Int? {
+        averageValue.map { Int($0.rounded()) }
+    }
+}
+
 struct WorkoutSetLog: Codable, Identifiable, Hashable {
     var id = UUID()
     var reps: Int
@@ -246,6 +262,10 @@ struct WorkoutReading: Decodable, Identifiable {
         default:
             return false
         }
+    }
+
+    var isSwimmingWorkout: Bool {
+        workoutType == "swimming" || workoutType == "swim_bike_run"
     }
 }
 
@@ -396,6 +416,19 @@ extension HistoryItem {
                 subtitle: nil,
                 metrics: [HistoryMetricCell(label: "Count", value: HistoryTimeline.formatCount(day.count))]
             )
+        case let .heartRate(day):
+            var metrics: [HistoryMetricCell] = []
+            if let min = day.minimumValue, let max = day.maximumValue {
+                metrics.append(HistoryMetricCell(label: "Range", value: "\(Int(min.rounded()))–\(Int(max.rounded())) bpm"))
+            }
+            if day.sampleCount > 0 {
+                metrics.append(HistoryMetricCell(label: "Samples", value: HistoryTimeline.formatCount(day.sampleCount)))
+            }
+            return HistoryItemPresentation(
+                title: "Heart Rate",
+                subtitle: day.averageBpm.map { "\($0) bpm" },
+                metrics: metrics
+            )
         case let .workout(workout):
             return HistoryItemPresentation(
                 title: workout.historyTitle,
@@ -411,9 +444,11 @@ extension HistoryItem {
 enum HistoryMetricFilter: String, CaseIterable, Identifiable {
     case all
     case bloodPressure
+    case heartRate
     case sleep
     case steps
     case workouts
+    case swimming
 
     var id: String { rawValue }
 
@@ -421,15 +456,18 @@ enum HistoryMetricFilter: String, CaseIterable, Identifiable {
         switch self {
         case .all: return "All"
         case .bloodPressure: return "BP"
+        case .heartRate: return "HR"
         case .sleep: return "Sleep"
         case .steps: return "Steps"
         case .workouts: return "Workouts"
+        case .swimming: return "Swim"
         }
     }
 }
 
 enum HistoryItem: Identifiable {
     case bloodPressure(BloodPressureReading)
+    case heartRate(HeartRateDayReading)
     case workout(WorkoutReading)
     case sleep(SleepDayReading)
     case steps(StepDayReading)
@@ -437,6 +475,7 @@ enum HistoryItem: Identifiable {
     var id: String {
         switch self {
         case let .bloodPressure(reading): return "bp:\(reading.id)"
+        case let .heartRate(day): return "hr:\(day.localDay)"
         case let .workout(workout): return "workout:\(workout.id)"
         case let .sleep(day): return "sleep:\(day.sleepDay)"
         case let .steps(day): return "steps:\(day.localDay)"
@@ -446,7 +485,8 @@ enum HistoryItem: Identifiable {
     var metric: HistoryMetricFilter {
         switch self {
         case .bloodPressure: return .bloodPressure
-        case .workout: return .workouts
+        case .heartRate: return .heartRate
+        case let .workout(workout): return workout.isSwimmingWorkout ? .swimming : .workouts
         case .sleep: return .sleep
         case .steps: return .steps
         }
@@ -463,6 +503,7 @@ struct HistoryDay: Identifiable {
 enum HistoryTimeline {
     static func days(
         bloodPressure: [BloodPressureReading],
+        heartRate: [HeartRateDayReading],
         sleep: [SleepDayReading],
         steps: [StepDayReading],
         workouts: [WorkoutReading],
@@ -472,7 +513,7 @@ enum HistoryTimeline {
         var grouped: [String: [HistoryItem]] = [:]
 
         func append(_ day: String, _ item: HistoryItem) {
-            guard filter == .all || item.metric == filter else { return }
+            guard filter == .all || item.metric == filter || (filter == .workouts && item.metric == .swimming) else { return }
             grouped[day, default: []].append(item)
         }
 
@@ -489,6 +530,9 @@ enum HistoryTimeline {
         }
         for day in steps {
             append(day.localDay, .steps(day))
+        }
+        for day in heartRate {
+            append(day.localDay, .heartRate(day))
         }
 
         return grouped.keys.sorted(by: >).map { day in
@@ -595,10 +639,12 @@ enum HistoryTimeline {
             return (0, parseISO(reading.measuredAt)?.timeIntervalSince1970 ?? 0)
         case let .workout(workout):
             return (0, parseISO(workout.startedAtUtc)?.timeIntervalSince1970 ?? 0)
-        case .sleep:
+        case .heartRate:
             return (1, 0)
-        case .steps:
+        case .sleep:
             return (2, 0)
+        case .steps:
+            return (3, 0)
         }
     }
 }

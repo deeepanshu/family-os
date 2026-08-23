@@ -242,11 +242,11 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertNil(healthKit.progressBanner)
 
         healthKit.beginRun(metric: .vitals, kind: .initialImport)
-        XCTAssertEqual(healthKit.progressBanner?.title, "Importing Blood pressure")
+        XCTAssertEqual(healthKit.progressBanner?.title, "Importing Blood pressure & heart rate")
         XCTAssertEqual(healthKit.progressBanner?.detail, HealthKitRunStage.preparing.displayText)
 
         healthKit.updateActiveRunStage(.reading)
-        XCTAssertEqual(healthKit.progressBanner?.title, "Importing Blood pressure")
+        XCTAssertEqual(healthKit.progressBanner?.title, "Importing Blood pressure & heart rate")
         XCTAssertEqual(healthKit.progressBanner?.detail, HealthKitRunStage.reading.displayText)
 
         healthKit.endRun(metric: .vitals)
@@ -512,6 +512,7 @@ final class SoloFirstTests: XCTestCase {
                 makeBloodPressure(id: "bp-19", systolic: 120, diastolic: 80, measuredAt: "2026-08-19T01:12:00.000Z"),
                 makeBloodPressure(id: "bp-18", systolic: 118, diastolic: 76, measuredAt: "2026-08-18T14:04:00.000Z")
             ],
+            heartRate: [HeartRateDayReading(localDay: "2026-08-19", averageValue: 72, minimumValue: 58, maximumValue: 110, latestValue: 80, sampleCount: 12, unit: "bpm")],
             sleep: [makeSleepDay(sleepDay: "2026-08-19", totalMinutes: 432)],
             steps: [StepDayReading(localDay: "2026-08-19", count: 8432)],
             workouts: [
@@ -522,7 +523,7 @@ final class SoloFirstTests: XCTestCase {
         )
 
         XCTAssertEqual(days.map(\.localDay), ["2026-08-19", "2026-08-18"])
-        XCTAssertEqual(days[0].items.map(\.id), ["bp:bp-19", "workout:w1", "sleep:2026-08-19", "steps:2026-08-19"])
+        XCTAssertEqual(days[0].items.map(\.id), ["bp:bp-19", "workout:w1", "hr:2026-08-19", "sleep:2026-08-19", "steps:2026-08-19"])
         XCTAssertEqual(days[1].items.map(\.id), ["bp:bp-18"])
     }
 
@@ -532,6 +533,7 @@ final class SoloFirstTests: XCTestCase {
             bloodPressure: [
                 makeBloodPressure(id: "bp-19", systolic: 120, diastolic: 80, measuredAt: "2026-08-19T01:12:00.000Z")
             ],
+            heartRate: [HeartRateDayReading(localDay: "2026-08-19", averageValue: 72, minimumValue: 58, maximumValue: 110, latestValue: 80, sampleCount: 12, unit: "bpm")],
             sleep: [makeSleepDay(sleepDay: "2026-08-19", totalMinutes: 432)],
             steps: [StepDayReading(localDay: "2026-08-19", count: 8432)],
             workouts: [],
@@ -582,6 +584,9 @@ final class SoloFirstTests: XCTestCase {
             """,
             "/readings/workouts": """
             {"data":[{"id":"w1","workoutType":"running","startedAtUtc":"2026-08-19T00:40:00.000Z","endedAtUtc":"2026-08-19T01:12:00.000Z","durationSeconds":1920,"activeEnergyKcal":280,"distanceMeters":5000,"averageHeartRateBpm":148,"maximumHeartRateBpm":172,"minimumHeartRateBpm":112,"sourceName":"Apple Watch","isIndoor":false,"elevationAscendedMeters":42,"averageMETs":9.4}]}
+            """,
+            "/readings/heart-rate": """
+            {"data":[{"localDay":"2026-08-19","averageValue":72.4,"minimumValue":58,"maximumValue":110,"latestValue":80,"sampleCount":14,"unit":"bpm"}]}
             """
         ])
         viewModel.auth.accessToken = "dev-token"
@@ -595,6 +600,7 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertEqual(viewModel.readings.workouts.map(\.workoutType), ["running"])
         XCTAssertEqual(viewModel.readings.workouts.first?.averageHeartRateBpm, 148)
         XCTAssertEqual(viewModel.readings.workouts.first?.isIndoor, false)
+        XCTAssertEqual(viewModel.readings.heartRateDays.map(\.averageBpm), [72])
     }
 
     func testWorkoutHistoryCopyIncludesHeartRateAndExtras() {

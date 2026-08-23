@@ -8,6 +8,7 @@ final class HealthReadingsViewModel: ObservableObject {
     @Published var bloodPressureReadings: [BloodPressureReading] = []
     @Published var sleepDays: [SleepDayReading] = []
     @Published var stepDays: [StepDayReading] = []
+    @Published var heartRateDays: [HeartRateDayReading] = []
     @Published var workouts: [WorkoutReading] = []
     @Published var notificationRouteMessage: String?
 
@@ -15,6 +16,7 @@ final class HealthReadingsViewModel: ObservableObject {
         bloodPressureReadings = []
         sleepDays = []
         stepDays = []
+        heartRateDays = []
         workouts = []
         notificationRouteMessage = nil
     }
