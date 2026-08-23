@@ -686,6 +686,26 @@ describe("Postgres repository wiring", () => {
     await expect(sql`select id from people where linked_user_id = ${managerId}`).resolves.toEqual([]);
   });
 
+  it("deletes leftover personal families so auth.users can be removed", async () => {
+    const api = app();
+    const token = await jwtFor(managerId);
+    await setupSoloUser(api, token, "Deepanshu");
+    await setupHousehold(api, token, "Jain Family");
+    await sql`
+      insert into families (name, kind, created_by_user_id)
+      values ('Orphan personal', 'personal', ${managerId})
+    `;
+
+    const deleted = await api.request(`${HEALTH_API_PREFIX}/me`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    expect(deleted.status).toBe(204);
+
+    await expect(sql`select id from auth.users where id = ${managerId}`).resolves.toEqual([]);
+    await expect(sql`select id from families`).resolves.toEqual([]);
+  });
+
   it("reassigns a remaining household when the creator deletes their account", async () => {
     const api = app();
     const managerToken = await jwtFor(managerId);
