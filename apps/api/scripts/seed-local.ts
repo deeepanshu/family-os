@@ -29,7 +29,7 @@ try {
   }
   console.log(`  family: ${result.familyName}`);
   console.log(`  window ending: ${result.asOf}`);
-  console.log("Debug sign-in: Continue (dev-token). Switch profile to MJ for member vitals.");
+  console.log("Debug sign-in: Continue (dev-token). Switch profile to Jamie for member vitals.");
 } finally {
   await sql.end({ timeout: 5 });
 }
