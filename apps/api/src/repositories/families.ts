@@ -33,8 +33,9 @@ import type {
   HealthProfile,
   HealthSleepDayRecord,
   HealthStepHourRecord,
-  HealthWorkoutExerciseLog,
+  HealthWorkoutExerciseWrite,
   HealthWorkoutRecord,
+
   MarkHealthKitGroupReadyInput,
   McpCapability,
   McpConnectionGrant,
@@ -784,7 +785,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   async putHealthKitWorkoutExercises(
     actorUserId: string,
     workoutId: string,
-    exercises: HealthWorkoutExerciseLog[]
+    exercises: HealthWorkoutExerciseWrite[]
   ): Promise<HealthWorkoutRecord> {
     return this.healthKit.putHealthKitWorkoutExercises(actorUserId, workoutId, exercises);
   }

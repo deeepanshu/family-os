@@ -29,7 +29,9 @@ import type {
   HealthSleepDayRecord,
   HealthStepHourRecord,
   HealthWorkoutExerciseLog,
+  HealthWorkoutExerciseWrite,
   HealthWorkoutRecord,
+
   MarkHealthKitGroupReadyInput,
   NotificationDelivery,
   NotificationDevice,
@@ -286,7 +288,7 @@ export class PostgresFamilyRepository implements FamilyRepository {
   putHealthKitWorkoutExercises(
     actorUserId: string,
     workoutId: string,
-    exercises: HealthWorkoutExerciseLog[]
+    exercises: HealthWorkoutExerciseWrite[]
   ): Promise<HealthWorkoutRecord> {
     return this.healthKitStore.putHealthKitWorkoutExercises(actorUserId, workoutId, exercises);
   }

@@ -13,6 +13,8 @@ export * from "./healthkitCanonical";
 export * from "./healthkitOps";
 export * from "./healthkitEvents";
 export * from "./healthkitFixtures";
+export * from "./workoutExerciseCatalog";
+
 
 export type ApiEnvelope<T> = {
   data: T;
@@ -274,14 +276,21 @@ export function isStrengthWorkoutType(workoutType: string): workoutType is Stren
 }
 
 export type HealthWorkoutSetLog = {
+
   reps: number;
   weightKg?: number;
 };
 
-export type HealthWorkoutExerciseLog = {
-  name: string;
+export type HealthWorkoutExerciseWrite = {
+  exerciseId: string;
   sets: HealthWorkoutSetLog[];
 };
+
+export type HealthWorkoutExerciseLog = HealthWorkoutExerciseWrite & {
+  name: string;
+};
+
+
 
 
 export type HealthWorkoutRecord = {

@@ -288,7 +288,9 @@ describe("HealthMcpReadService", () => {
       })
     ]);
     expect(batch.status).toBe(200);
-    const exercises = [{ name: "Hip Thrusts", sets: [{ reps: 6, weightKg: 90 }] }];
+    const exercises = [{ exerciseId: "a0b3a1f0-34fa-53b0-87e4-73dbddf2eff9", sets: [{ reps: 6, weightKg: 90 }] }];
+    const saved = [{ exerciseId: "a0b3a1f0-34fa-53b0-87e4-73dbddf2eff9", name: "Hip Thrust", sets: [{ reps: 6, weightKg: 90 }] }];
+
     const put = await api.request(`${HEALTH_API_PREFIX}/readings/workouts/${strengthKey}/exercises`, {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -304,7 +306,8 @@ describe("HealthMcpReadService", () => {
     expect(workouts.viewType).toBe("workout_table");
     if (workouts.viewType === "workout_table") {
       const strength = workouts.workouts.find((row) => row.workoutType === "traditional_strength_training");
-      expect(strength?.exercises).toEqual(exercises);
+      expect(strength?.exercises).toEqual(saved);
+
     }
   });
 

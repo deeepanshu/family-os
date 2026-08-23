@@ -78,11 +78,15 @@ struct HistoryView: View {
                     workout: workout,
                     canEdit: !viewModel.isViewingAnotherMember,
                     formatTime: formatTime,
-                    formatMinutes: formatMinutes
+                    formatMinutes: formatMinutes,
+                    loadCatalog: { query in
+                        await viewModel.loadWorkoutExercises(query: query)
+                    }
                 ) { exercises in
                     await viewModel.saveWorkoutExercises(workoutId: workout.id, exercises: exercises)
                 }
             }
+
 
             .task {
                 await viewModel.loadProfiles()

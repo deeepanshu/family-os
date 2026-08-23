@@ -80,6 +80,7 @@ describe("Postgres RLS policies", () => {
         health_workout_sets,
         health_workout_exercises,
 
+
         people,
         family_invites,
         family_memberships,

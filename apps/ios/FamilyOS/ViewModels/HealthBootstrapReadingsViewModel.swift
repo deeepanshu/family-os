@@ -77,6 +77,15 @@ extension HealthBootstrapViewModel {
         )
     }
 
+    func loadWorkoutExercises(query: String? = nil) async -> [WorkoutExerciseCatalogEntry] {
+        (try? await client.listWorkoutExercises(
+            baseURL: connection.baseURL,
+            accessToken: auth.accessToken,
+            query: query
+        )) ?? []
+    }
+
+
     func saveWorkoutExercises(workoutId: String, exercises: [WorkoutExerciseLog]) async {
         await request(showsFeedback: true) {
             let saved = try await client.putWorkoutExercises(

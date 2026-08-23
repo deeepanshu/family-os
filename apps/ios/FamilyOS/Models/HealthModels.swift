@@ -180,13 +180,27 @@ struct WorkoutSetLog: Codable, Identifiable, Hashable {
 }
 
 
+struct WorkoutExerciseCatalogEntry: Decodable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let category: String
+    let equipment: [String]
+}
+
 struct WorkoutExerciseLog: Codable, Identifiable, Hashable {
     var id = UUID()
+    var exerciseId: String
     var name: String
     var sets: [WorkoutSetLog]
 
     enum CodingKeys: String, CodingKey {
-        case name, sets
+        case exerciseId, name, sets
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(exerciseId, forKey: .exerciseId)
+        try container.encode(sets, forKey: .sets)
     }
 }
 
@@ -209,6 +223,7 @@ struct WorkoutReading: Decodable, Identifiable {
         }
     }
 }
+
 
 
 enum HistoryMetricFilter: String, CaseIterable, Identifiable {

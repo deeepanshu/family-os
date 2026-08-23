@@ -127,6 +127,14 @@
       "when": 1787400000000,
       "tag": "0017_workout_exercise_logs",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1787500000000,
+      "tag": "0018_workout_exercise_catalog",
+      "breakpoints": true
     }
+
   ]
 }
