@@ -75,6 +75,7 @@ Start local Postgres and apply migrations:
 ```sh
 npm run db:up
 npm run db:migrate:local
+npm run db:seed:local
 ```
 
 Generate and apply database migrations through Drizzle Kit:

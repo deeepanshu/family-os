@@ -6,6 +6,7 @@ Run local Postgres with Colima/Docker and apply migrations:
 colima start --cpu 2 --memory 4 --disk 20 --runtime docker
 npm run db:up
 npm run db:migrate:local
+npm run db:seed:local
 ```
 
 Run the local Health API with the local Postgres user and the dev-token smoke-test auth path:
