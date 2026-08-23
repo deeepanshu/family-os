@@ -378,34 +378,12 @@ export const healthWorkouts = pgTable(
   ]
 );
 
-export const workoutExerciseCatalogDeprecated = pgTable(
-  "workout_exercise_catalog__DEPRECATED",
-  {
-    id: uuid("id").primaryKey(),
-    name: text("name").notNull(),
-    category: text("category").notNull(),
-    equipmentJson: jsonb("equipment_json").notNull().default([]),
-    source: text("source").notNull(),
-    sourceId: text("source_id").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
-  },
-  (table) => [
-    uniqueIndex("workout_exercise_catalog_source_id_idx").on(table.source, table.sourceId),
-    index("workout_exercise_catalog_category_name_idx").on(table.category, table.name),
-    check("workout_exercise_catalog_name_check", sql`char_length(${table.name}) between 1 and 80`),
-    check("workout_exercise_catalog_source_check", sql`${table.source} in ('wger')`)
-  ]
-);
-
-
 export const healthWorkoutExercises = pgTable(
   "health_workout_exercises",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     personId: uuid("person_id").notNull().references(() => people.id, { onDelete: "cascade" }),
     sourceSampleKey: uuid("source_sample_key").notNull(),
-    catalogIdDeprecated: uuid("catalog_id__DEPRECATED").references(() => workoutExerciseCatalogDeprecated.id),
     position: integer("position").notNull(),
     name: text("name").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

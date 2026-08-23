@@ -4,6 +4,7 @@ import type { AuditLogStore } from "./repositories/contracts";
 export const AUDIT_LOG_RETENTION_DAYS = 365;
 export const CRASHLYTICS_RETENTION_DAYS = 90;
 export const OPERATIONAL_LOG_RETENTION_DAYS = 30;
+export const APPLICATION_BACKUP_RETENTION_DAYS = 0;
 
 export const AUDIT_LOG_RETENTION_MS = AUDIT_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
