@@ -827,5 +827,37 @@ describe("Postgres repository wiring", () => {
     `;
     expect(audits).toHaveLength(1);
     expect(audits[0]?.family_id).toBeNull();
+
+    const repository = PostgresFamilyRepository.fromDatabaseUrl(databaseUrl, { syncLocalAuthUsers: true });
+    const retentionCheck = new Date("2026-08-23T00:00:00.000Z");
+    await sql`
+      update audit_logs
+      set created_at = ${new Date("2025-08-23T00:00:00.000Z")}
+      where action = 'account.deleted'
+        and resource_id = ${managerId}
+    `;
+    expect(await repository.purgeExpiredAuditLogs(retentionCheck)).toBe(0);
+    await expect(
+      sql`
+        select id from audit_logs
+        where action = 'account.deleted'
+          and resource_id = ${managerId}
+      `
+    ).resolves.toHaveLength(1);
+
+    await sql`
+      update audit_logs
+      set created_at = ${new Date("2025-08-22T00:00:00.000Z")}
+      where action = 'account.deleted'
+        and resource_id = ${managerId}
+    `;
+    expect(await repository.purgeExpiredAuditLogs(retentionCheck)).toBe(1);
+    await expect(
+      sql`
+        select id from audit_logs
+        where action = 'account.deleted'
+          and resource_id = ${managerId}
+      `
+    ).resolves.toHaveLength(0);
   });
 });

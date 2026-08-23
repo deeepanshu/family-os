@@ -52,7 +52,7 @@ describe("public legal pages", () => {
     expect(html).toContain("no automated backups");
     expect(html).toContain("0 days");
     expect(html).toContain("Supabase Auth");
-    expect(html).toContain("deprecated workout-exercise catalog");
+    expect(html).not.toContain("exercise catalog");
     expect(html).not.toContain("shared workout exercise catalog");
     expect(html).toContain("/terms");
     expect(html).toContain("do not sell");
@@ -101,7 +101,7 @@ describe("public legal pages", () => {
     expect(html).toContain("365 days");
     expect(html).toContain("deletion-pending");
     expect(html).toContain("family id is cleared");
-    expect(html).toContain("deprecated workout-exercise catalog");
+    expect(html).not.toContain("exercise catalog");
     expect(html).not.toContain("shared workout exercise catalog");
     expect(html).not.toContain("APNs device tokens");
   });
