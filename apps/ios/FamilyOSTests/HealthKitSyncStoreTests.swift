@@ -620,4 +620,36 @@ final class HealthKitSyncStoreTests: XCTestCase {
             ).isSwimmingWorkout
         )
     }
+
+    func testWipeSharedRemovesConfigurationAndPendingOps() throws {
+        addTeardownBlock { HealthKitSyncStore.wipeShared() }
+
+        let store = try HealthKitSyncStore.shared
+        try store.saveConfiguration(
+            userId: "user",
+            personId: "person",
+            installationId: "install",
+            healthTimezone: "UTC",
+            timezoneVersion: 1,
+            enabledGroups: ["vitals"]
+        )
+        try store.enqueue(
+            op: PendingOpRecord(
+                opId: UUID().uuidString.lowercased(),
+                naturalKey: "blood_pressure:\(UUID().uuidString.lowercased())",
+                groupKey: "vitals",
+                scopeKey: "blood_pressure",
+                op: "upsert",
+                payloadJSON: #"{"kind":"blood_pressure","sourceObjectKey":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","measuredAtUtc":"2026-08-23T08:00:00.000Z","systolic":120,"diastolic":80}"#
+            )
+        )
+        XCTAssertNotNil(try store.configuration())
+        XCTAssertEqual(try store.pendingCount(), 1)
+
+        HealthKitSyncStore.wipeShared()
+
+        let reopened = try HealthKitSyncStore.shared
+        XCTAssertNil(try reopened.configuration())
+        XCTAssertEqual(try reopened.pendingCount(), 0)
+    }
 }

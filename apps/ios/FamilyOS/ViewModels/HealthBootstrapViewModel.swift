@@ -157,6 +157,7 @@ final class HealthBootstrapViewModel: ObservableObject {
         defer { isDeletingAccount = false }
         do {
             try await client.deleteAccount(baseURL: connection.baseURL, accessToken: auth.accessToken)
+            HealthKitSyncStore.wipeShared()
             HealthKitInstallationId.clear(using: keychain)
             signOut()
             statusMessage = "Account deleted."

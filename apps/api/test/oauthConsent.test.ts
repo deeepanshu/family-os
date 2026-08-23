@@ -108,6 +108,9 @@ describe("OAuth consent", () => {
     expect(html).toContain('const OAUTH_PATH = "/health/api/oauth"');
     expect(html).toContain("Sign in to FamilyStack to continue");
     expect(html).toContain("FamilyStack health data");
+    expect(html).toContain("steps, blood pressure, sleep, and workouts");
+    expect(html).toContain("household members");
+    expect(html).toContain("own privacy terms");
     expect(html).not.toContain("Family OS");
   });
 

@@ -667,11 +667,31 @@ final class SoloFirstTests: XCTestCase {
     }
 
     func testDeleteAccountClearsSessionAfterSuccess() async throws {
+        addTeardownBlock { HealthKitSyncStore.wipeShared() }
         let viewModel = makeViewModelWithMock(["/me": "{}"])
         viewModel.auth.accessToken = "test-token"
         viewModel.auth.signedInUserId = "user-1"
         viewModel.family.currentFamilyName = "Jain Family"
         _ = try HealthKitInstallationId.current(using: viewModel.keychain)
+        let store = try HealthKitSyncStore.shared
+        try store.saveConfiguration(
+            userId: "user-1",
+            personId: "person-1",
+            installationId: "install-1",
+            healthTimezone: "UTC",
+            timezoneVersion: 1,
+            enabledGroups: ["vitals"]
+        )
+        try store.enqueue(
+            op: PendingOpRecord(
+                opId: UUID().uuidString.lowercased(),
+                naturalKey: "blood_pressure:\(UUID().uuidString.lowercased())",
+                groupKey: "vitals",
+                scopeKey: "blood_pressure",
+                op: "upsert",
+                payloadJSON: #"{"kind":"blood_pressure","sourceObjectKey":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","measuredAtUtc":"2026-08-23T08:00:00.000Z","systolic":118,"diastolic":76}"#
+            )
+        )
 
         await viewModel.deleteAccount()
 
@@ -682,17 +702,31 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertEqual(viewModel.statusMessage, "Account deleted.")
         XCTAssertFalse(viewModel.isError)
         XCTAssertFalse(viewModel.isDeletingAccount)
+        let wiped = try HealthKitSyncStore.shared
+        XCTAssertNil(try wiped.configuration())
+        XCTAssertEqual(try wiped.pendingCount(), 0)
     }
 
     func testDeleteAccountSurfacesAPIError() async throws {
+        addTeardownBlock { HealthKitSyncStore.wipeShared() }
         let viewModel = makeViewModelWithMock([:])
         viewModel.auth.accessToken = "test-token"
+        let store = try HealthKitSyncStore.shared
+        try store.saveConfiguration(
+            userId: "user-1",
+            personId: "person-1",
+            installationId: "install-1",
+            healthTimezone: "UTC",
+            timezoneVersion: 1,
+            enabledGroups: ["vitals"]
+        )
 
         await viewModel.deleteAccount()
 
         XCTAssertEqual(viewModel.auth.accessToken, "test-token")
         XCTAssertTrue(viewModel.isError)
         XCTAssertFalse(viewModel.isDeletingAccount)
+        XCTAssertNotNil(try HealthKitSyncStore.shared.configuration())
     }
 
     func testPublicSiteOriginStripsHealthAPIPrefix() {

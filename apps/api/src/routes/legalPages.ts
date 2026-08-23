@@ -87,14 +87,14 @@ export function renderPrivacyPolicyPage(origin: string): string {
       <li>Activity — step count</li>
       <li>Vitals — blood pressure (systolic/diastolic) and heart rate (including resting heart rate)</li>
       <li>Sleep — sleep analysis</li>
-      <li>Workouts — workout sessions, plus swimming distance and stroke count when present on the workout</li>
+      <li>Workouts — session metadata (type, start/end, duration, active energy, distance, heart-rate summary, source/device, indoor flag, elevation, average METs, flights climbed, pause/lap events, and multi-sport segments), plus swimming distance and stroke count when present. For strength workouts you can add exercise names, reps, and optional weights. We do not import GPS routes or per-second workout series.</li>
     </ul>
   </li>
   <li><strong>Not a product metric.</strong> Blood glucose / blood sugar is not an implemented FamilyStack metric. The app does not request or present glucose as a product feature.</li>
   <li><strong>Household.</strong> Family name, membership, and pending invites you create so relatives can join.</li>
   <li><strong>Reminders.</strong> Reminder content, schedule, and recipients you configure.</li>
-  <li><strong>Device notifications.</strong> An APNs device token so we can deliver reminder notifications you asked for.</li>
-  <li><strong>Optional assistant access.</strong> If you approve an OAuth consent for a third-party assistant (for example ChatGPT via MCP), we store that connection grant so the assistant can read health data you are already allowed to see.</li>
+  <li><strong>Device notifications.</strong> If you opt in, the app uses on-device local notifications for HealthKit sync alerts. This release does not register for remote (APNs) notifications or upload a device token.</li>
+  <li><strong>Optional assistant access.</strong> If you approve an OAuth consent for a third-party assistant (for example ChatGPT via MCP), we store that connection grant. The approved assistant can read stored steps, blood pressure, sleep, and workout data for profiles you are already allowed to see, including other household Self profiles. Strength-workout exercise entries (name, reps, optional weight) can be included. The assistant receives this data and handles it under its own privacy terms.</li>
   <li><strong>Diagnostics.</strong> Firebase Crashlytics receives crash and non-fatal reports. Reports may include a stable user id (UUID only — never email), operational stage names, and error codes. They do not include health readings, tokens, free-text notes, or raw sample payloads.</li>
 </ul>
 
@@ -102,7 +102,7 @@ export function renderPrivacyPolicyPage(origin: string): string {
 <ul>
   <li>Show you and your household their imported health history in FamilyStack.</li>
   <li>Sync HealthKit on the schedule and metric groups you enable.</li>
-  <li>Send reminder notifications you configured.</li>
+  <li>Show local HealthKit-sync alerts you opted into.</li>
   <li>Authenticate you and keep the household together.</li>
   <li>Honor an assistant connection you explicitly approved, until you revoke it or delete your account.</li>
   <li>Diagnose crashes and keep the service reliable.</li>
@@ -113,10 +113,10 @@ export function renderPrivacyPolicyPage(origin: string): string {
 <p>When you join or create a household, other active members of that household can see your profile and the health readings imported for your Self profile. They cannot see your Sign in with Apple credentials. Leaving the household or deleting your account hides you and your readings from former members.</p>
 
 <h2>Where data is stored</h2>
-<p>Account, profile, household, reminder, device-token, assistant-grant, and imported health records are stored on FamilyStack servers (Supabase Postgres, reached through the API on this host). Apple Health data remains on your device unless you enable HealthKit import. Crash diagnostics are processed by Google Firebase Crashlytics.</p>
+<p>Account, profile, household, reminder, assistant-grant, and imported health records are stored on FamilyStack servers (Supabase Postgres, reached through the API on this host). Apple Health data remains on your device unless you enable HealthKit import. Pending HealthKit operations sit in a local queue on this iPhone until they sync. Crash diagnostics are processed by Google Firebase Crashlytics.</p>
 
 <h2>Retention</h2>
-<p>We keep your developer records while your account is active. When you delete your account, we remove the records listed on the <a href="/account-deletion">account deletion</a> page. Audit log rows (including <code>account.deleted</code>) are retained for security and abuse prevention and do not contain health values or tokens. Health data that stays in Apple Health on your device is not a FamilyStack record and is not deleted by us.</p>
+<p>We keep your developer records while your account is active. When you delete your account, we remove the records listed on the <a href="/account-deletion">account deletion</a> page, including the on-device HealthKit sync queue. Audit log rows (including <code>account.deleted</code>) are retained for security and abuse prevention and do not contain health values or tokens. Health data that stays in Apple Health on your device is not a FamilyStack record and is not deleted by us.</p>
 
 <h2>Your choices</h2>
 <ul>
@@ -163,7 +163,7 @@ export function renderAccountDeletionPage(): string {
   <li>Open FamilyStack and sign in.</li>
   <li>Go to <strong>Profile</strong>.</li>
   <li>Tap <strong>Delete account</strong>.</li>
-  <li>Confirm the destructive prompt. The app calls the signed-in delete API, then clears local session tokens and the HealthKit installation id from the keychain.</li>
+  <li>Confirm the destructive prompt. The app calls the signed-in delete API, then wipes the on-device HealthKit sync store (Application Support/HealthKitSync/sync.sqlite, including pending operations, sync configuration, and group state) and clears local session tokens and the HealthKit installation id from the keychain.</li>
 </ol>
 <p>If you cannot open the app, email <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> from the address associated with your Sign in with Apple account and ask us to delete it.</p>
 
@@ -173,12 +173,12 @@ export function renderAccountDeletionPage(): string {
   <li>Your Self profile (<code>people</code> row).</li>
   <li>Your household membership. If you were the last member, the household is dissolved the same way as deleting the current family; other people’s remaining health is not wiped as a side effect.</li>
   <li>Health records keyed to your Self profile (steps, sleep, daily metrics, blood pressure, any blood-glucose rows if present, workouts and exercise/set children).</li>
-  <li>HealthKit install, settings, sync state, groups, and operation receipts for your profile.</li>
-  <li>APNs device tokens for your user.</li>
+  <li>HealthKit install, settings, sync state, groups, and operation receipts for your profile on the server.</li>
+  <li>The on-device FamilyStack HealthKit sync queue (pending operations, sync configuration, and group state).</li>
   <li>Assistant / MCP connection grants you approved.</li>
   <li>Reminders you created, plus their recipient and delivery rows.</li>
   <li>Pending household invites you created.</li>
-  <li>Your recipient rows on other people’s reminders (you stop getting those notifications).</li>
+  <li>Your recipient rows on other people’s reminders.</li>
 </ul>
 <p>After deletion, former household members cannot see you or your readings. The same sign-in can no longer access FamilyStack data.</p>
 
