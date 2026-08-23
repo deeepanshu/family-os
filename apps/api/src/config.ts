@@ -44,7 +44,7 @@ const envSchema = z.object({
    * (Grok, ChatGPT, etc. mint a new client id per connect).
    */
   MCP_ALLOWED_OAUTH_CLIENT_IDS: z.preprocess(emptyToUndefined, z.string().optional()),
-  MCP_RESOURCE_NAME: z.preprocess(emptyToUndefined, z.string().default("Family OS Health MCP")),
+  MCP_RESOURCE_NAME: z.preprocess(emptyToUndefined, z.string().default("FamilyStack Health MCP")),
   MCP_CONSENT_VERSION: z.preprocess(emptyToUndefined, z.string().default("2026-07-18")),
   MCP_TOOL_TIMEOUT_MS: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(10_000)),
   MCP_MAX_RESULT_CHARS: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(32_000)),

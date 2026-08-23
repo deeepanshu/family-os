@@ -27,7 +27,7 @@ function app(repo = new InMemoryFamilyRepository()) {
         SUPABASE_ANON_KEY: "test-anon-key",
         MCP_PUBLIC_ORIGIN: mcpOrigin,
         MCP_PUBLIC_PATH: mcpPath,
-        MCP_RESOURCE_NAME: "Family OS Health MCP"
+        MCP_RESOURCE_NAME: "FamilyStack Health MCP"
       },
       familyRepository: repo
     }),

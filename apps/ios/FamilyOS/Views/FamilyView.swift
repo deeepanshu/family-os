@@ -38,7 +38,7 @@ struct FamilyView: View {
 
     private var createFamilySection: some View {
         Section("Create a family") {
-            Text("You can use Family OS alone. Create a household when you want to invite someone who has the app.")
+            Text("You can use FamilyStack alone. Create a household when you want to invite someone who has the app.")
                 .foregroundStyle(.secondary)
             TextField("Family name", text: $viewModel.family.familyName)
             Button("Create Family") {
