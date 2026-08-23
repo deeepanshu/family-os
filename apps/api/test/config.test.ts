@@ -50,19 +50,20 @@ describe("configuration", () => {
         MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
         SUPABASE_URL: "https://project.supabase.co",
         SUPABASE_ANON_KEY: "anon-key",
-        MCP_ALLOWED_OAUTH_CLIENT_IDS: "chatgpt-prod"
+        SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
       })
     ).toThrow("HEALTH_API_REPOSITORY=memory is not allowed in production.");
   });
 
-  it("requires MCP public origin, Supabase URL, and anon key in production", () => {
+  it("requires MCP public origin, Supabase URL, anon key, and service role key in production", () => {
     expect(() =>
       loadConfig({
         NODE_ENV: "production",
         HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
         DATABASE_URL: "postgres://family_os:family_os@localhost:5432/family_os",
         SUPABASE_URL: "https://project.supabase.co",
-        SUPABASE_ANON_KEY: "anon-key"
+        SUPABASE_ANON_KEY: "anon-key",
+        SUPABASE_SERVICE_ROLE_KEY: "service-role-key"
       })
     ).toThrow("MCP_PUBLIC_ORIGIN must be configured in production.");
 
@@ -72,7 +73,8 @@ describe("configuration", () => {
         HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
         DATABASE_URL: "postgres://family_os:family_os@localhost:5432/family_os",
         MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
-        SUPABASE_ANON_KEY: "anon-key"
+        SUPABASE_ANON_KEY: "anon-key",
+        SUPABASE_SERVICE_ROLE_KEY: "service-role-key"
       })
     ).toThrow("SUPABASE_URL must be configured in production.");
 
@@ -82,9 +84,33 @@ describe("configuration", () => {
         HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
         DATABASE_URL: "postgres://family_os:family_os@localhost:5432/family_os",
         MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
-        SUPABASE_URL: "https://project.supabase.co"
+        SUPABASE_URL: "https://project.supabase.co",
+        SUPABASE_SERVICE_ROLE_KEY: "service-role-key"
       })
     ).toThrow("SUPABASE_ANON_KEY must be configured in production");
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
+        DATABASE_URL: "postgres://family_os:family_os@localhost:5432/family_os",
+        MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
+        SUPABASE_URL: "https://project.supabase.co",
+        SUPABASE_ANON_KEY: "anon-key"
+      })
+    ).toThrow("SUPABASE_SERVICE_ROLE_KEY must be configured in production");
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com",
+        DATABASE_URL: "postgres://family_os:family_os@localhost:5432/family_os",
+        MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
+        SUPABASE_URL: "https://project.supabase.co",
+        SUPABASE_ANON_KEY: "anon-key",
+        SUPABASE_SERVICE_ROLE_KEY: ""
+      })
+    ).toThrow("SUPABASE_SERVICE_ROLE_KEY must be configured in production");
 
     // Empty OAuth client allowlist is allowed (DCR clients mint a new id each connect).
     const open = loadConfig({
@@ -94,7 +120,8 @@ describe("configuration", () => {
       HEALTH_API_REPOSITORY: "postgres",
       MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
       SUPABASE_URL: "https://project.supabase.co",
-      SUPABASE_ANON_KEY: "anon-key"
+      SUPABASE_ANON_KEY: "anon-key",
+      SUPABASE_SERVICE_ROLE_KEY: "service-role-key"
     });
     expect(open.MCP_ALLOWED_OAUTH_CLIENT_IDS).toEqual([]);
   });
@@ -188,7 +215,7 @@ describe("configuration", () => {
       MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
       SUPABASE_URL: "https://project.supabase.co",
       SUPABASE_ANON_KEY: "anon-key",
-      MCP_ALLOWED_OAUTH_CLIENT_IDS: "chatgpt-prod"
+      SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
     });
     expect(secure.MCP_PUBLIC_ORIGIN).toBe("https://familyos.deepanshujain.me");
   });

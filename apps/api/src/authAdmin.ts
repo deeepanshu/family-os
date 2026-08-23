@@ -3,7 +3,8 @@ import { HttpError } from "./errors";
 
 /**
  * Hard-delete a Supabase Auth user via the Admin API.
- * No-ops when service role is not configured (memory tests / local without Auth).
+ * No-ops when service role is not configured outside production (memory tests /
+ * local without Auth). Production refuses to start without the key.
  * Treats 404 as success so DELETE /me stays idempotent.
  */
 export async function deleteSupabaseAuthUser(config: AppConfig, userId: string): Promise<void> {

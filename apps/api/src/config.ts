@@ -188,6 +188,9 @@ export function loadConfig(env: Record<string, unknown> = process.env): AppConfi
   if (config.NODE_ENV === "production" && !config.SUPABASE_ANON_KEY) {
     throw new Error("SUPABASE_ANON_KEY must be configured in production for the OAuth consent page.");
   }
+  if (config.NODE_ENV === "production" && !config.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error("SUPABASE_SERVICE_ROLE_KEY must be configured in production so account deletion can remove the Auth identity.");
+  }
   const repository = config.HEALTH_API_REPOSITORY ?? (config.NODE_ENV === "test" ? "memory" : "postgres");
   if (config.NODE_ENV === "production" && repository === "memory") {
     throw new Error("HEALTH_API_REPOSITORY=memory is not allowed in production.");
