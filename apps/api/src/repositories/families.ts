@@ -1233,6 +1233,11 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       this.deactivateMembership(current.family.id, actorUserId);
       if (others.length === 0) {
         this.revokePendingInvites(current.family.id);
+        for (const entry of this.auditLogs) {
+          if (entry.familyId === current.family.id) {
+            entry.familyId = null;
+          }
+        }
         this.families.delete(current.family.id);
       }
     }

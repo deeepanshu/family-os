@@ -228,6 +228,11 @@ describe("account deletion", () => {
     });
     expect(deleted.status).toBe(204);
     expect(repo.hasFamily(familyId)).toBe(false);
+    const deletionAudit = repo
+      .auditLogsForTests()
+      .filter((entry) => entry.action === "account.deleted" && entry.resourceId === managerId);
+    expect(deletionAudit).toHaveLength(1);
+    expect(deletionAudit[0]?.familyId).toBeNull();
 
     const otherToken = await jwtFor(memberId, "new@example.com");
     await setupSoloUser(api, otherToken, "New");
