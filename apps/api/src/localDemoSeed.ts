@@ -11,8 +11,8 @@ export const LOCAL_DEMO_MEMBER_USER_ID = "00000000-0000-4000-8000-000000000002";
 export const LOCAL_DEMO_INSTALLATION_ID = "00000000-0000-4000-8000-000000005eed";
 export const LOCAL_DEMO_MEMBER_INSTALLATION_ID = "00000000-0000-4000-8000-000000005ee2";
 export const LOCAL_DEMO_TIMEZONE = "UTC";
-export const LOCAL_DEMO_FAMILY_NAME = "Jain Family";
-export const LOCAL_DEMO_MEMBER_NAME = "MJ";
+export const LOCAL_DEMO_FAMILY_NAME = "Demo Family";
+export const LOCAL_DEMO_MEMBER_NAME = "Jamie";
 export const LOCAL_DEMO_DAY_COUNT = 14;
 
 const ENABLED_GROUPS = ["activity", "sleep", "vitals", "workouts"] as const satisfies readonly HealthKitConsentGroup[];
@@ -47,7 +47,7 @@ export async function seedLocalDemo(
 ): Promise<LocalDemoSeedResult> {
   const userId = options.userId ?? LOCAL_DEMO_USER_ID;
   const asOf = options.asOf ?? new Date();
-  const displayName = options.displayName ?? "Deepanshu";
+  const displayName = options.displayName ?? "Alex";
 
   await stores.families.bootstrap(userId);
   const profile = await stores.profiles.createSelfProfile(userId, displayName);
