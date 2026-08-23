@@ -327,10 +327,10 @@ export const HEALTHKIT_OP_RECEIPT_TTL_DAYS = 30;
 export const HEALTHKIT_SYNC_OVERLAP_MS = 24 * 60 * 60 * 1000;
 
 /**
- * The only consent groups with an implemented product surface in this release
- * (app labels: Blood pressure, Sleep, Workouts).
+ * Consent groups with an implemented product surface in this release
+ * (app labels: Activity, Vitals, Sleep, Workouts).
  */
-export const HEALTHKIT_PRODUCT_GROUPS = ["vitals", "sleep", "workouts"] as const satisfies readonly HealthKitConsentGroup[];
+export const HEALTHKIT_PRODUCT_GROUPS = ["activity", "vitals", "sleep", "workouts"] as const satisfies readonly HealthKitConsentGroup[];
 export type HealthKitProductGroup = (typeof HEALTHKIT_PRODUCT_GROUPS)[number];
 
 export function isHealthKitProductGroup(value: string): value is HealthKitProductGroup {

@@ -694,6 +694,17 @@ export class MemoryHealthKitEngine {
         }
         return deleted;
       }
+      case "activity": {
+        for (const [key, row] of this.stepHours) {
+          if (row.personId !== input.personId) continue;
+          if (row.hourStartUtc < input.rangeStartAt || row.hourStartUtc >= input.rangeEndAt) continue;
+          if (!manifest.has(`steps_hour:${row.hourStartUtc}`)) {
+            this.stepHours.delete(key);
+            deleted += 1;
+          }
+        }
+        return deleted;
+      }
       default:
         throw new HttpError(400, "run_kind_not_allowed", `Repair is not supported for group ${input.group}.`);
     }

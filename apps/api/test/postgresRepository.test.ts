@@ -4,7 +4,7 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { HEALTH_API_PREFIX } from "@family-os/shared";
 import { createApp } from "../src/app";
 import { PostgresFamilyRepository } from "../src/repositories/postgres";
-import { beginRun, completeRun, seedHealthKitReadyGroup } from "./healthKitTestHelpers";
+import { beginRun, completeRun, seedHealthKitReadyGroup, stepsHourOp } from "./healthKitTestHelpers";
 import { setupHousehold, setupSoloUser } from "./soloSetup";
 
 const databaseUrl = process.env.DATABASE_URL ?? "postgres://family_os:family_os@localhost:5432/family_os";
@@ -669,6 +669,108 @@ describe("Postgres repository wiring", () => {
     expect(rows).toEqual([
       expect.objectContaining({ sleepDay: "2026-07-25", totalMinutes: 480, timezoneVersion: 1 })
     ]);
+  });
+
+  it("deletes a postgres account including the local auth user", async () => {
+    const api = app();
+    const token = await jwtFor(managerId);
+    await setupSoloUser(api, token, "Deepanshu");
+
+    const deleted = await api.request(`${HEALTH_API_PREFIX}/me`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    expect(deleted.status).toBe(204);
+
+    await expect(sql`select id from auth.users where id = ${managerId}`).resolves.toEqual([]);
+    await expect(sql`select id from people where linked_user_id = ${managerId}`).resolves.toEqual([]);
+  });
+
+  it("reassigns a remaining household when the creator deletes their account", async () => {
+    const api = app();
+    const managerToken = await jwtFor(managerId);
+    const memberToken = await jwtFor(memberId, "member@example.com");
+    await setupSoloUser(api, managerToken, "Deepanshu");
+    await setupHousehold(api, managerToken, "Jain Family");
+    await setupSoloUser(api, memberToken, "Riya");
+    const invite = await (
+      await api.request(`${HEALTH_API_PREFIX}/invites`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json" },
+        body: JSON.stringify({})
+      })
+    ).json();
+    const accepted = await api.request(`${HEALTH_API_PREFIX}/invites/${invite.data.token}/accept`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${memberToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ relationshipLabel: "Father" })
+    });
+    expect(accepted.status).toBe(200);
+
+    const deleted = await api.request(`${HEALTH_API_PREFIX}/me`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${managerToken}` }
+    });
+    expect(deleted.status).toBe(204);
+
+    await expect(sql`select id from auth.users where id = ${managerId}`).resolves.toEqual([]);
+    const families = await sql`select created_by_user_id from families`;
+    expect(families).toEqual([{ created_by_user_id: memberId }]);
+    const members = await sql`select user_id from family_memberships where status = 'active'`;
+    expect(members).toEqual([{ user_id: memberId }]);
+  });
+
+  it("repair reconciliation deletes absent activity hours inside the window (postgres)", async () => {
+    const api = app();
+    const token = await jwtFor(managerId);
+    const { profileId } = await setupSoloUser(api, token, "Deepanshu");
+    const installationId = "53064303-35cf-4db0-a5d3-8af7d8f747e1";
+    const settings = await api.request(`${HEALTH_API_PREFIX}/healthkit/settings`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        personId: profileId,
+        enabledGroups: ["activity"],
+        healthTimezone: "UTC",
+        installationId,
+        consentVersion: "healthkit-v1"
+      })
+    });
+    expect(settings.status).toBe(200);
+
+    const utcHourDaysAgo = (days: number, hour = 10) => {
+      const date = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+      date.setUTCHours(hour, 0, 0, 0);
+      return date.toISOString();
+    };
+    const keepHour = utcHourDaysAgo(5);
+    const dropHour = utcHourDaysAgo(20);
+    const outsideHour = utcHourDaysAgo(100);
+    await seedHealthKitReadyGroup(api, token, profileId, installationId, "activity", [
+      stepsHourOp(keepHour, 100),
+      stepsHourOp(dropHour, 200),
+      stepsHourOp(outsideHour, 300)
+    ]);
+
+    const begin = await beginRun(api, token, profileId, installationId, "activity", "repair_import");
+    expect(begin.status).toBe(200);
+    const descriptor = (await begin.json()).data;
+    const complete = await completeRun(api, token, profileId, installationId, "activity", {
+      kind: "repair_import",
+      rangeStartAt: descriptor.rangeStartAt,
+      rangeEndAt: descriptor.rangeEndAt,
+      completeSnapshot: true,
+      presentNaturalKeys: [`steps_hour:${keepHour}`]
+    });
+    expect(complete.status).toBe(200);
+    expect((await complete.json()).data.deletedCount).toBe(1);
+
+    const remaining = await sql`
+      select hour_start_utc from health_step_hours where person_id = ${profileId} order by 1
+    `;
+    expect(remaining.map((row) => new Date(row.hour_start_utc).toISOString()).sort()).toEqual(
+      [keepHour, outsideHour].sort()
+    );
   });
 
 });

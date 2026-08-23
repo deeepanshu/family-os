@@ -12,7 +12,8 @@ import {
   failRun,
   postOps,
   seedHealthKitReadyGroup,
-  sleepDayOp
+  sleepDayOp,
+  stepsHourOp
 } from "./healthKitTestHelpers";
 import { setupSoloUser } from "./soloSetup";
 
@@ -101,6 +102,16 @@ function isoDaysAgo(days: number) {
 
 function dayDaysAgo(days: number) {
   return isoDaysAgo(days).slice(0, 10);
+}
+
+function utcHourDaysAgo(days: number, hour = 10) {
+  const date = new Date(Date.now() - days * DAY_MS);
+  date.setUTCHours(hour, 0, 0, 0);
+  return date.toISOString();
+}
+
+function hourAfter(iso: string) {
+  return new Date(Date.parse(iso) + 60 * 60 * 1000).toISOString();
 }
 
 describe("HealthKit run lifecycle", () => {
@@ -559,5 +570,41 @@ describe("HealthKit run lifecycle", () => {
     // Outside the 90-day repair window: untouched even though absent from the manifest.
     const stored = await repositories.healthKit.listSleepDays(userId, profileId, outsideDay, outsideDay);
     expect(stored.map((row) => row.sleepDay)).toEqual([outsideDay]);
+  });
+
+  it("repair reconciliation removes absent activity hours only inside the window", async () => {
+    const { api, repo } = app();
+    const { token, profileId } = await setup(api);
+    await putSettings(api, token, profileId, { enabledGroups: ["activity"] });
+
+    const keepHour = utcHourDaysAgo(4);
+    const dropHour = utcHourDaysAgo(30);
+    const outsideHour = utcHourDaysAgo(100);
+    await seedHealthKitReadyGroup(api, token, profileId, installationId, "activity", [
+      stepsHourOp(keepHour, 100),
+      stepsHourOp(dropHour, 200),
+      stepsHourOp(outsideHour, 300)
+    ]);
+
+    const begin = await beginRun(api, token, profileId, installationId, "activity", "repair_import");
+    expect(begin.status).toBe(200);
+    const descriptor = (await begin.json()).data;
+    const complete = await completeRun(api, token, profileId, installationId, "activity", {
+      kind: "repair_import",
+      rangeStartAt: descriptor.rangeStartAt,
+      rangeEndAt: descriptor.rangeEndAt,
+      completeSnapshot: true,
+      presentNaturalKeys: [`steps_hour:${keepHour}`]
+    });
+    expect(complete.status).toBe(200);
+    expect((await complete.json()).data.deletedCount).toBe(1);
+
+    const repositories = repositoriesFromFamilyRepository(repo);
+    const kept = await repositories.healthKit.listStepHours(userId, profileId, keepHour, hourAfter(keepHour));
+    expect(kept.map((row) => row.hourStartUtc)).toEqual([keepHour]);
+    const dropped = await repositories.healthKit.listStepHours(userId, profileId, dropHour, hourAfter(dropHour));
+    expect(dropped).toEqual([]);
+    const stored = await repositories.healthKit.listStepHours(userId, profileId, outsideHour, hourAfter(outsideHour));
+    expect(stored.map((row) => row.hourStartUtc)).toEqual([outsideHour]);
   });
 });
