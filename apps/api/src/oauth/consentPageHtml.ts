@@ -213,8 +213,8 @@ export function renderOAuthConsentPage(config: AppConfig): string {
         escapeHtml(RESOURCE_NAME) + ".</p>" +
         '<div class="label">What will be shared</div>' +
         "<ul>" +
-        "<li>Read-only health summaries (steps, sleep, blood pressure) for profiles you can already access in FamilyStack</li>" +
-        "<li>Data may be processed by the AI client (for example ChatGPT) to answer your questions</li>" +
+        "<li>Read-only stored health data (steps, blood pressure, sleep, and workouts) for profiles you can already access in FamilyStack, including household members. Strength workouts may include exercise names, reps, and optional weights you entered.</li>" +
+        "<li>The AI client (for example ChatGPT) receives this data and processes it under its own privacy terms to answer your questions</li>" +
         "<li>No write access, no medical advice, no raw HealthKit export</li>" +
         "</ul>" +
         '<div class="label">Client</div>' +

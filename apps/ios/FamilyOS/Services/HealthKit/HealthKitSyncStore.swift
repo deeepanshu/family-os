@@ -28,14 +28,43 @@ final class HealthKitSyncStore: @unchecked Sendable {
         }
     }
 
+    /// Deletes Application Support/HealthKitSync, including pending ops, config, and group state.
+    /// Safe if the store was never opened. File errors are logged, not thrown, so account
+    /// deletion can still clear the session after the server delete succeeded.
+    static func wipeShared() {
+        sharedLock.lock()
+        defer { sharedLock.unlock() }
+        if let existing = sharedInstance {
+            do {
+                try existing.dbQueue.close()
+            } catch {
+                CrashReporting.log("healthkit_store_close_failed \(error.localizedDescription)")
+            }
+            sharedInstance = nil
+        }
+        let dir = storeDirectoryURL()
+        if FileManager.default.fileExists(atPath: dir.path) {
+            do {
+                try FileManager.default.removeItem(at: dir)
+                CrashReporting.log("healthkit_store_wiped")
+            } catch {
+                CrashReporting.log("healthkit_store_wipe_failed \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private static func storeDirectoryURL() -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return base.appendingPathComponent("HealthKitSync", isDirectory: true)
+    }
+
     /// Test / explicit-path opener. Never registers as ``shared``.
     convenience init(path: String) throws {
         try self.init(fileURL: URL(fileURLWithPath: path))
     }
 
     private static func defaultStoreURL() throws -> URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = base.appendingPathComponent("HealthKitSync", isDirectory: true)
+        let dir = storeDirectoryURL()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let fileURL = dir.appendingPathComponent("sync.sqlite")
         try? FileManager.default.setAttributes(

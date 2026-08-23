@@ -29,10 +29,15 @@ describe("public legal pages", () => {
     expect(html).toContain("heart rate");
     expect(html).toContain("sleep analysis");
     expect(html).toContain("Workouts");
+    expect(html).toContain("exercise names");
+    expect(html).toContain("GPS routes");
     expect(html).toContain("does not request or present glucose");
     expect(html).toContain("Sign in with Apple");
     expect(html).toContain("Supabase");
-    expect(html).toContain("APNs");
+    expect(html).toContain("does not register for remote (APNs)");
+    expect(html).toContain("local notifications");
+    expect(html).toContain("household Self profiles");
+    expect(html).toContain("own privacy terms");
     expect(html).toContain("Crashlytics");
     expect(html).toContain("do not sell");
     expect(html).toContain("advertising");
@@ -72,8 +77,11 @@ describe("public legal pages", () => {
     expect(html).toContain("Delete account");
     expect(html).toContain("audit");
     expect(html).toContain("account.deleted");
+    expect(html).toContain("HealthKitSync/sync.sqlite");
+    expect(html).toContain("pending operations");
     expect(html).toContain("Apple Health");
     expect(html).toContain(SUPPORT_EMAIL);
+    expect(html).not.toContain("APNs device tokens");
   });
 
   it("does not require an Authorization header on any legal path", async () => {
