@@ -722,15 +722,17 @@ export class PostgresHealthKitStore {
             and not (('blood_pressure:' || source_sample_key::text) = any(${bpKeys}))
           returning id
         `;
-        const hrKeys = manifest.filter((key) => key.startsWith("daily_metric:heart_rate:"));
+        const dailyKeys = manifest.filter(
+          (key) => key.startsWith("daily_metric:heart_rate:") || key.startsWith("daily_metric:resting_heart_rate:")
+        );
         const hrRows = await tx`
           delete from health_daily_metrics
           where person_id = ${input.personId}
-            and metric_key = 'heart_rate'
+            and metric_key in ('heart_rate', 'resting_heart_rate')
             and timezone_version = ${input.timezoneVersion}
             and local_day >= (${input.rangeStartAt}::timestamptz at time zone ${input.healthTimezone})::date
             and local_day <= (${input.rangeEndAt}::timestamptz at time zone ${input.healthTimezone})::date
-            and not (('daily_metric:heart_rate:' || local_day::text) = any(${hrKeys}))
+            and not (('daily_metric:' || metric_key || ':' || local_day::text) = any(${dailyKeys}))
           returning id
         `;
         return bpRows.length + hrRows.length;

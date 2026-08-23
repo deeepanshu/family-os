@@ -657,10 +657,12 @@ export class MemoryHealthKitEngine {
         const startDay = localDayStringInTimezone(input.rangeStartAt, healthTimezone);
         const endDay = localDayStringInTimezone(input.rangeEndAt, healthTimezone);
         for (const [key, row] of this.dailyMetrics) {
-          if (row.personId !== input.personId || row.healthMetric !== "heart_rate") continue;
+          if (row.personId !== input.personId) continue;
+          if (row.healthMetric !== "heart_rate" && row.healthMetric !== "resting_heart_rate") continue;
           if (row.timezoneVersion !== input.timezoneVersion) continue;
           if (row.localDay < startDay || row.localDay > endDay) continue;
-          if (!manifest.has(`daily_metric:heart_rate:${row.localDay}`)) {
+          const expected = `daily_metric:${row.healthMetric}:${row.localDay}`;
+          if (!manifest.has(expected)) {
             this.dailyMetrics.delete(key);
             deleted += 1;
           }

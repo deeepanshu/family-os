@@ -517,10 +517,17 @@ struct HealthKitRunEngine: HealthKitRunning {
                     healthTimezone: healthTimezone
                 )
                 try HealthKitHeartRateSync.enqueueSamples(heartRate, into: syncStore)
+                let resting = try await HealthKitHeartRateSync.fetchRestingHeartRateDays(
+                    from: from,
+                    through: through,
+                    healthTimezone: healthTimezone
+                )
+                try HealthKitHeartRateSync.enqueueRestingSamples(resting, into: syncStore)
                 return HealthKitMetricFetchResult(
-                    fetchedCount: bloodPressure.count + heartRate.count,
+                    fetchedCount: bloodPressure.count + heartRate.count + resting.count,
                     presentNaturalKeys: bloodPressure.map { HealthKitBloodPressureSync.naturalKey(for: $0) }
                         + heartRate.map { HealthKitHeartRateSync.naturalKey(for: $0) }
+                        + resting.map { HealthKitHeartRateSync.restingNaturalKey(localDay: $0.localDay) }
                 )
             case .sleep:
                 let samples = try await HealthKitSleepDaySync.fetchSleepDays(

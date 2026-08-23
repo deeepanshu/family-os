@@ -143,17 +143,32 @@ export function createHeartRateRoutes(repository: HealthKitStore) {
   routes.get("/", zValidator("query", query), async (c) => {
     const parsed = c.req.valid("query");
     const window = await resolveHistoryWindow(repository, c.get("user").id, parsed);
-    const days = await repository.listDailyMetrics(
-      c.get("user").id,
-      window.personId,
-      "heart_rate",
-      window.rangeStart,
-      window.rangeEnd
+    const [days, restingDays] = await Promise.all([
+      repository.listDailyMetrics(
+        c.get("user").id,
+        window.personId,
+        "heart_rate",
+        window.rangeStart,
+        window.rangeEnd
+      ),
+      repository.listDailyMetrics(
+        c.get("user").id,
+        window.personId,
+        "resting_heart_rate",
+        window.rangeStart,
+        window.rangeEnd
+      )
+    ]);
+    const restingByDay: Record<string, number | undefined> = Object.fromEntries(
+      restingDays.map((row) => [row.localDay, row.latestValue ?? row.averageValue])
     );
     return c.json({
-      data: [...days].sort((a: HealthDailyMetricRecord, b: HealthDailyMetricRecord) =>
-        b.localDay.localeCompare(a.localDay)
-      )
+      data: [...days]
+        .sort((a: HealthDailyMetricRecord, b: HealthDailyMetricRecord) => b.localDay.localeCompare(a.localDay))
+        .map((row) => ({
+          ...row,
+          restingValue: restingByDay[row.localDay]
+        }))
     });
   });
   return routes;

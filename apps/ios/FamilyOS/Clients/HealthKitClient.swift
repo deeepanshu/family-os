@@ -112,6 +112,9 @@ struct HealthKitClient {
         if let heartRate = HKObjectType.quantityType(forIdentifier: .heartRate) {
             types.insert(heartRate)
         }
+        if let resting = HKObjectType.quantityType(forIdentifier: .restingHeartRate) {
+            types.insert(resting)
+        }
         return types
     }
 

@@ -349,16 +349,20 @@ final class SoloFirstTests: XCTestCase {
         let systolic = HKObjectType.quantityType(forIdentifier: .bloodPressureSystolic)
         let diastolic = HKObjectType.quantityType(forIdentifier: .bloodPressureDiastolic)
         let heartRate = HKObjectType.quantityType(forIdentifier: .heartRate)
+        let resting = HKObjectType.quantityType(forIdentifier: .restingHeartRate)
         let correlation = HKObjectType.correlationType(forIdentifier: .bloodPressure)
 
         XCTAssertEqual(bp.count, 2)
-        XCTAssertEqual(pulse.count, 1)
+        XCTAssertEqual(pulse.count, 2)
         XCTAssertEqual(combined, bp.union(pulse))
         if let systolic { XCTAssertTrue(bp.contains(systolic)) }
         if let diastolic { XCTAssertTrue(bp.contains(diastolic)) }
         if let heartRate {
             XCTAssertFalse(bp.contains(heartRate))
             XCTAssertTrue(pulse.contains(heartRate))
+        }
+        if let resting {
+            XCTAssertTrue(pulse.contains(resting))
         }
         if let correlation {
             XCTAssertFalse(bp.contains(correlation))
@@ -512,7 +516,7 @@ final class SoloFirstTests: XCTestCase {
                 makeBloodPressure(id: "bp-19", systolic: 120, diastolic: 80, measuredAt: "2026-08-19T01:12:00.000Z"),
                 makeBloodPressure(id: "bp-18", systolic: 118, diastolic: 76, measuredAt: "2026-08-18T14:04:00.000Z")
             ],
-            heartRate: [HeartRateDayReading(localDay: "2026-08-19", averageValue: 72, minimumValue: 58, maximumValue: 110, latestValue: 80, sampleCount: 12, unit: "bpm")],
+            heartRate: [HeartRateDayReading(localDay: "2026-08-19", averageValue: 72, minimumValue: 58, maximumValue: 110, latestValue: 80, sampleCount: 12, unit: "bpm", restingValue: 56)],
             sleep: [makeSleepDay(sleepDay: "2026-08-19", totalMinutes: 432)],
             steps: [StepDayReading(localDay: "2026-08-19", count: 8432)],
             workouts: [
@@ -523,26 +527,26 @@ final class SoloFirstTests: XCTestCase {
         )
 
         XCTAssertEqual(days.map(\.localDay), ["2026-08-19", "2026-08-18"])
-        XCTAssertEqual(days[0].items.map(\.id), ["bp:bp-19", "workout:w1", "hr:2026-08-19", "sleep:2026-08-19", "steps:2026-08-19"])
+        XCTAssertEqual(days[0].items.map(\.id), ["sleep:2026-08-19", "steps:2026-08-19", "bp:bp-19", "hr:2026-08-19", "workout:w1"])
         XCTAssertEqual(days[1].items.map(\.id), ["bp:bp-18"])
     }
 
-    func testHistoryTimelineBloodPressureFilterOmitsOtherMetrics() {
+    func testHistoryTimelineVitalsFilterKeepsBloodPressureAndHeartRate() {
         let bangkok = TimeZone(identifier: "Asia/Bangkok")!
         let days = HistoryTimeline.days(
             bloodPressure: [
                 makeBloodPressure(id: "bp-19", systolic: 120, diastolic: 80, measuredAt: "2026-08-19T01:12:00.000Z")
             ],
-            heartRate: [HeartRateDayReading(localDay: "2026-08-19", averageValue: 72, minimumValue: 58, maximumValue: 110, latestValue: 80, sampleCount: 12, unit: "bpm")],
+            heartRate: [HeartRateDayReading(localDay: "2026-08-19", averageValue: 72, minimumValue: 58, maximumValue: 110, latestValue: 80, sampleCount: 12, unit: "bpm", restingValue: 56)],
             sleep: [makeSleepDay(sleepDay: "2026-08-19", totalMinutes: 432)],
             steps: [StepDayReading(localDay: "2026-08-19", count: 8432)],
             workouts: [],
-            filter: .bloodPressure,
+            filter: .vitals,
             timeZone: bangkok
         )
 
         XCTAssertEqual(days.map(\.localDay), ["2026-08-19"])
-        XCTAssertEqual(days[0].items.map(\.id), ["bp:bp-19"])
+        XCTAssertEqual(days[0].items.map(\.id), ["bp:bp-19", "hr:2026-08-19"])
     }
 
     func testHistoryDateTitleUsesTodayYesterdayAndDayMonth() {
@@ -626,14 +630,15 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertEqual(
             presentation.metrics,
             [
+                HistoryMetricCell(label: "Min", value: "112 bpm"),
+                HistoryMetricCell(label: "Avg", value: "148 bpm"),
+                HistoryMetricCell(label: "Max", value: "172 bpm"),
                 HistoryMetricCell(label: "Time", value: "32m"),
                 HistoryMetricCell(label: "Active", value: "280 kcal"),
                 HistoryMetricCell(label: "Distance", value: "5.0 km"),
-                HistoryMetricCell(label: "Heart rate", value: "148 bpm", detail: "112–172"),
                 HistoryMetricCell(label: "Elev", value: "+42 m"),
                 HistoryMetricCell(label: "METs", value: "9.4"),
                 HistoryMetricCell(label: "Laps", value: "1"),
-                HistoryMetricCell(label: "Place", value: "Outdoor"),
                 HistoryMetricCell(label: "Source", value: "Watch")
             ]
         )

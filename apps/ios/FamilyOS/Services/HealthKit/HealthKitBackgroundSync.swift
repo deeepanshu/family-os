@@ -246,6 +246,9 @@ enum HealthKitBackgroundSync {
             if let hr = HKObjectType.quantityType(forIdentifier: .heartRate) {
                 types.append(hr)
             }
+            if let resting = HKObjectType.quantityType(forIdentifier: .restingHeartRate) {
+                types.append(resting)
+            }
         }
         if metrics.contains(.workouts) {
             types.append(HKObjectType.workoutType())
@@ -331,6 +334,9 @@ enum HealthKitBackgroundSync {
             return .vitals
         }
         if let hr = HKObjectType.quantityType(forIdentifier: .heartRate), sampleType == hr {
+            return .vitals
+        }
+        if let resting = HKObjectType.quantityType(forIdentifier: .restingHeartRate), sampleType == resting {
             return .vitals
         }
         if sampleType == HKObjectType.workoutType() {

@@ -22,6 +22,10 @@ enum HealthKitHeartRateSync {
         "daily_metric:heart_rate:\(sample.localDay)"
     }
 
+    static func restingNaturalKey(localDay: String) -> String {
+        "daily_metric:resting_heart_rate:\(localDay)"
+    }
+
     static func fetchHeartRateDays(
         from start: Date,
         through end: Date,
@@ -54,6 +58,34 @@ enum HealthKitHeartRateSync {
         let days = makeHeartRateDays(from: instants, healthTimezone: healthTimezone)
         CrashReporting.log("healthkit_heart_rate_day_count=\(days.count)")
         return days
+    }
+
+    static func fetchRestingHeartRateDays(
+        from start: Date,
+        through end: Date,
+        healthTimezone: String,
+        store: HKHealthStore = HKHealthStore()
+    ) async throws -> [HeartRateDaySample] {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-FamilyOSLocalSmoke") {
+            return []
+        }
+        #endif
+
+        guard let type = HKQuantityType.quantityType(forIdentifier: .restingHeartRate) else {
+            return []
+        }
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+        let samples: [HKQuantitySample] = try await querySamples(
+            store: store,
+            sampleType: type,
+            predicate: predicate
+        )
+        let unit = HKUnit.count().unitDivided(by: .minute())
+        let instants = samples.map { sample in
+            HeartRateInstant(date: sample.endDate, bpm: sample.quantity.doubleValue(for: unit))
+        }
+        return makeHeartRateDays(from: instants, healthTimezone: healthTimezone)
     }
 
     static func makeHeartRateDays(
@@ -116,6 +148,36 @@ enum HealthKitHeartRateSync {
                     naturalKey: naturalKey(for: sample),
                     groupKey: "vitals",
                     scopeKey: "heart_rate",
+                    op: "upsert",
+                    payloadJSON: String(data: data, encoding: .utf8)
+                )
+            )
+        }
+        try syncStore.enqueue(ops: ops)
+    }
+
+    static func enqueueRestingSamples(_ samples: [HeartRateDaySample], into syncStore: HealthKitSyncStore) throws {
+        let encoder = JSONEncoder()
+        var ops: [PendingOpRecord] = []
+        ops.reserveCapacity(samples.count)
+        for sample in samples {
+            let payload = HealthKitOpPayloadWire.dailyMetric(
+                healthMetric: "resting_heart_rate",
+                localDay: sample.localDay,
+                sumValue: nil,
+                averageValue: sample.averageValue,
+                minimumValue: sample.minimumValue,
+                maximumValue: sample.maximumValue,
+                latestValue: sample.latestValue,
+                sampleCount: sample.sampleCount
+            )
+            let data = try encoder.encode(payload)
+            ops.append(
+                PendingOpRecord(
+                    opId: UUID().uuidString.lowercased(),
+                    naturalKey: restingNaturalKey(localDay: sample.localDay),
+                    groupKey: "vitals",
+                    scopeKey: "resting_heart_rate",
                     op: "upsert",
                     payloadJSON: String(data: data, encoding: .utf8)
                 )
