@@ -378,8 +378,8 @@ export const healthWorkouts = pgTable(
   ]
 );
 
-export const workoutExerciseCatalog = pgTable(
-  "workout_exercise_catalog",
+export const workoutExerciseCatalogDeprecated = pgTable(
+  "workout_exercise_catalog__DEPRECATED",
   {
     id: uuid("id").primaryKey(),
     name: text("name").notNull(),
@@ -405,7 +405,7 @@ export const healthWorkoutExercises = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     personId: uuid("person_id").notNull().references(() => people.id, { onDelete: "cascade" }),
     sourceSampleKey: uuid("source_sample_key").notNull(),
-    catalogId: uuid("catalog_id").references(() => workoutExerciseCatalog.id),
+    catalogIdDeprecated: uuid("catalog_id__DEPRECATED").references(() => workoutExerciseCatalogDeprecated.id),
     position: integer("position").notNull(),
     name: text("name").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
