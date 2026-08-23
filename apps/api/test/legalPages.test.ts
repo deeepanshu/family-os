@@ -39,6 +39,7 @@ describe("public legal pages", () => {
     expect(html).toContain(SUPPORT_EMAIL);
     expect(html).toContain("http://127.0.0.1:3001");
     expect(html).not.toContain("Family OS");
+    expect(html).not.toContain("live.com");
   });
 
   it("redirects /privacy-policy to /privacy", async () => {

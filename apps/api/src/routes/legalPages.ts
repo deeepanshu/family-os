@@ -3,7 +3,7 @@ import type { AppConfig } from "../config";
 import { escapeHtml } from "../html";
 import { mcpPublicOrigin } from "../mcp/publicUrl";
 
-export const SUPPORT_EMAIL = "deepanshujain1234@live.com";
+export const SUPPORT_EMAIL = "support@deepanshujain.me";
 
 const EFFECTIVE_DATE = "August 23, 2026";
 
