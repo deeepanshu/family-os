@@ -21,6 +21,7 @@ struct ContentView: View {
             }
         }
         .task {
+            viewModel.retryPendingHealthKitQueueWipe()
             if viewModel.hasAccessToken {
                 await viewModel.startup()
             }

@@ -22,6 +22,7 @@ struct ProfileView: View {
 
                 Section("Legal") {
                     Link("Privacy Policy", destination: legalURL("/privacy"))
+                    Link("Terms of Use", destination: legalURL("/terms"))
                     Link("Account deletion", destination: legalURL("/account-deletion"))
                 }
 

@@ -226,6 +226,7 @@ export interface NotificationDeliveryStore {
 export interface AuditLogStore {
   listAuditLogs(actorUserId: string, limit?: number): Promise<AuditLog[]>;
   recordAudit(input: RecordAuditInput): Promise<void>;
+  purgeExpiredAuditLogs(now?: Date): Promise<number>;
 }
 
 export type AppRepositories = {

@@ -18,6 +18,8 @@ final class HealthBootstrapViewModel: ObservableObject {
     @Published var startupError: Error?
     @Published var pendingInvitePreview: PublicInvitePreview?
     @Published var isDeletingAccount = false
+    static let localHealthKitQueueWipeFailedMessage =
+        "Account deleted on the server, but the HealthKit queue on this iPhone could not be removed. FamilyStack will retry the next time you open the app."
     let client: HealthAPIClient
     let healthKitClient: HealthKitClient
     let authClient: SupabaseAuthClient
@@ -157,12 +159,18 @@ final class HealthBootstrapViewModel: ObservableObject {
         defer { isDeletingAccount = false }
         do {
             try await client.deleteAccount(baseURL: connection.baseURL, accessToken: auth.accessToken)
-            HealthKitSyncStore.wipeShared()
+            let wiped = HealthKitSyncStore.wipeShared()
             HealthKitInstallationId.clear(using: keychain)
             signOut()
-            statusMessage = "Account deleted."
-            isError = false
-            reportActionResult(statusMessage)
+            if wiped {
+                statusMessage = "Account deleted."
+                isError = false
+                reportActionResult(statusMessage)
+            } else {
+                statusMessage = Self.localHealthKitQueueWipeFailedMessage
+                isError = true
+                reportActionFailure(statusMessage)
+            }
         } catch {
             isError = true
             statusMessage = error.localizedDescription
@@ -201,6 +209,7 @@ final class HealthBootstrapViewModel: ObservableObject {
     }
 
     func startup() async {
+        retryPendingHealthKitQueueWipe()
         guard hasAccessToken else {
             isStartingUp = false
             needsProfileSetup = false
@@ -224,6 +233,14 @@ final class HealthBootstrapViewModel: ObservableObject {
             statusMessage = error.localizedDescription
             isError = true
         }
+    }
+
+    func retryPendingHealthKitQueueWipe() {
+        guard HealthKitSyncStore.wipePending else { return }
+        if HealthKitSyncStore.wipeShared() { return }
+        isError = true
+        statusMessage = Self.localHealthKitQueueWipeFailedMessage
+        reportActionFailure(statusMessage)
     }
 
     func createSelfProfile(displayName: String) async {

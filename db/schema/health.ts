@@ -547,7 +547,8 @@ export const auditLogs = pgTable(
   },
   (table) => [
     index("audit_logs_family_created_idx").on(table.familyId, table.createdAt),
-    index("audit_logs_resource_idx").on(table.resourceType, table.resourceId)
+    index("audit_logs_resource_idx").on(table.resourceType, table.resourceId),
+    index("audit_logs_created_at_idx").on(table.createdAt)
   ]
 );
 
