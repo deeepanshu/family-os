@@ -1049,11 +1049,10 @@ export class PostgresHealthKitStore {
       `;
       for (const [exerciseIndex, exercise] of normalized.entries()) {
         const [inserted] = await tx`
-          insert into health_workout_exercises (person_id, source_sample_key, "catalog_id__DEPRECATED", position, name)
+          insert into health_workout_exercises (person_id, source_sample_key, position, name)
           values (
             ${row.person_id},
             ${row.source_sample_key},
-            ${null},
             ${exerciseIndex},
             ${exercise.name}
           )

@@ -58,6 +58,7 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, @preconcur
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         CrashReporting.configure()
+        _ = HealthKitSyncStore.retryPendingWipe()
         UNUserNotificationCenter.current().delegate = self
         // Nonisolated BG registration — never own handlers on a @MainActor coordinator.
         HealthKitBackgroundSync.registerBackgroundTask()

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { auditLogCutoff } from "../retention";
 
 import type {
   AuditLog,
@@ -1072,6 +1073,23 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       .slice(0, limit);
   }
 
+  async purgeExpiredAuditLogs(now = new Date()): Promise<number> {
+    const cutoff = auditLogCutoff(now).getTime();
+    const remaining = this.auditLogs.filter((entry) => Date.parse(entry.createdAt) >= cutoff);
+    const removed = this.auditLogs.length - remaining.length;
+    this.auditLogs.length = 0;
+    this.auditLogs.push(...remaining);
+    return removed;
+  }
+
+  insertAuditLogForTests(entry: AuditLog): void {
+    this.auditLogs.push(entry);
+  }
+
+  auditLogsForTests(): readonly AuditLog[] {
+    return this.auditLogs;
+  }
+
   private buildRecipients(userIds: string[], familyId: string, reminderId: string): ReminderRecipient[] {
     const uniqueIds = [...new Set(userIds)];
     if (uniqueIds.length === 0) {
@@ -1215,6 +1233,11 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       this.deactivateMembership(current.family.id, actorUserId);
       if (others.length === 0) {
         this.revokePendingInvites(current.family.id);
+        for (const entry of this.auditLogs) {
+          if (entry.familyId === current.family.id) {
+            entry.familyId = null;
+          }
+        }
         this.families.delete(current.family.id);
       }
     }

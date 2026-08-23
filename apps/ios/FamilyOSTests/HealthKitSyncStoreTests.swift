@@ -622,7 +622,7 @@ final class HealthKitSyncStoreTests: XCTestCase {
     }
 
     func testWipeSharedRemovesConfigurationAndPendingOps() throws {
-        addTeardownBlock { HealthKitSyncStore.wipeShared() }
+        addTeardownBlock { resetHealthKitWipeTestState() }
 
         let store = try HealthKitSyncStore.shared
         try store.saveConfiguration(
@@ -646,10 +646,71 @@ final class HealthKitSyncStoreTests: XCTestCase {
         XCTAssertNotNil(try store.configuration())
         XCTAssertEqual(try store.pendingCount(), 1)
 
-        HealthKitSyncStore.wipeShared()
+        XCTAssertTrue(HealthKitSyncStore.wipeShared())
+        XCTAssertFalse(HealthKitSyncStore.wipePending)
 
         let reopened = try HealthKitSyncStore.shared
         XCTAssertNil(try reopened.configuration())
         XCTAssertEqual(try reopened.pendingCount(), 0)
     }
+
+    func testWipeSharedFailureSetsPendingMarker() throws {
+        addTeardownBlock { resetHealthKitWipeTestState() }
+
+        let store = try HealthKitSyncStore.shared
+        try store.saveConfiguration(
+            userId: "user",
+            personId: "person",
+            installationId: "install",
+            healthTimezone: "UTC",
+            timezoneVersion: 1,
+            enabledGroups: ["vitals"]
+        )
+        HealthKitSyncStore.fileManager = RefusingFileManager()
+
+        XCTAssertFalse(HealthKitSyncStore.wipeShared())
+        XCTAssertTrue(HealthKitSyncStore.wipePending)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: HealthKitSyncStore.storeDirectoryURL().path)
+        )
+    }
+
+    func testRetryPendingWipeSucceedsAfterFailure() throws {
+        addTeardownBlock { resetHealthKitWipeTestState() }
+
+        let store = try HealthKitSyncStore.shared
+        try store.saveConfiguration(
+            userId: "user",
+            personId: "person",
+            installationId: "install",
+            healthTimezone: "UTC",
+            timezoneVersion: 1,
+            enabledGroups: ["vitals"]
+        )
+        HealthKitSyncStore.fileManager = RefusingFileManager()
+        XCTAssertFalse(HealthKitSyncStore.wipeShared())
+
+        HealthKitSyncStore.fileManager = .default
+        XCTAssertTrue(HealthKitSyncStore.retryPendingWipe())
+        XCTAssertFalse(HealthKitSyncStore.wipePending)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: HealthKitSyncStore.storeDirectoryURL().path)
+        )
+    }
+}
+
+final class RefusingFileManager: FileManager {
+    override func removeItem(at url: URL) throws {
+        throw NSError(
+            domain: NSPOSIXErrorDomain,
+            code: Int(EPERM),
+            userInfo: [NSLocalizedDescriptionKey: "refused"]
+        )
+    }
+}
+
+func resetHealthKitWipeTestState() {
+    HealthKitSyncStore.fileManager = .default
+    HealthKitSyncStore.wipePending = false
+    HealthKitSyncStore.wipeShared()
 }

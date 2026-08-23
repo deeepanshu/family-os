@@ -13,6 +13,8 @@ final class HealthKitSyncStore: @unchecked Sendable {
     private static let sharedLock = NSLock()
     /// Guarded by ``sharedLock``.
     nonisolated(unsafe) private static var sharedInstance: HealthKitSyncStore?
+    nonisolated(unsafe) static var fileManager: FileManager = .default
+    static let wipePendingDefaultsKey = "familyOS.healthKitDeletionPending"
 
     /// Process-wide store for Application Support `HealthKitSync/sync.sqlite`.
     static var shared: HealthKitSyncStore {
@@ -29,9 +31,10 @@ final class HealthKitSyncStore: @unchecked Sendable {
     }
 
     /// Deletes Application Support/HealthKitSync, including pending ops, config, and group state.
-    /// Safe if the store was never opened. File errors are logged, not thrown, so account
-    /// deletion can still clear the session after the server delete succeeded.
-    static func wipeShared() {
+    /// Safe if the store was never opened. Returns false and sets ``wipePending`` when the
+    /// directory cannot be removed so account deletion can retry instead of reporting success.
+    @discardableResult
+    static func wipeShared() -> Bool {
         sharedLock.lock()
         defer { sharedLock.unlock() }
         if let existing = sharedInstance {
@@ -43,20 +46,47 @@ final class HealthKitSyncStore: @unchecked Sendable {
             sharedInstance = nil
         }
         let dir = storeDirectoryURL()
-        if FileManager.default.fileExists(atPath: dir.path) {
+        if fileManager.fileExists(atPath: dir.path) {
             do {
-                try FileManager.default.removeItem(at: dir)
+                try fileManager.removeItem(at: dir)
                 CrashReporting.log("healthkit_store_wiped")
             } catch {
                 CrashReporting.log("healthkit_store_wipe_failed \(error.localizedDescription)")
+                wipePending = true
+                return false
+            }
+        }
+        if fileManager.fileExists(atPath: dir.path) {
+            wipePending = true
+            return false
+        }
+        wipePending = false
+        return true
+    }
+
+    static var wipePending: Bool {
+        get { UserDefaults.standard.bool(forKey: wipePendingDefaultsKey) }
+        set {
+            if newValue {
+                UserDefaults.standard.set(true, forKey: wipePendingDefaultsKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: wipePendingDefaultsKey)
             }
         }
     }
 
-    private static func storeDirectoryURL() -> URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+    @discardableResult
+    static func retryPendingWipe() -> Bool {
+        guard wipePending else { return true }
+        return wipeShared()
+    }
+
+    static func storeDirectoryURL() -> URL {
+        let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return base.appendingPathComponent("HealthKitSync", isDirectory: true)
     }
+
+
 
     /// Test / explicit-path opener. Never registers as ``shared``.
     convenience init(path: String) throws {

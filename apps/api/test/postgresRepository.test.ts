@@ -793,4 +793,71 @@ describe("Postgres repository wiring", () => {
     );
   });
 
+  it("keeps account.deleted after last-member household dissolve", async () => {
+    const api = app();
+    const token = await jwtFor(managerId, "last-member@example.com");
+    await setupSoloUser(api, token, "Deepanshu");
+    await setupHousehold(api, token, "Jain Family");
+
+    const before = await (
+      await api.request(`${HEALTH_API_PREFIX}/families/current`, {
+        headers: { authorization: `Bearer ${token}` }
+      })
+    ).json();
+    const family = before.data?.family;
+    if (!family || typeof family !== "object" || !("id" in family) || typeof family.id !== "string") {
+      throw new Error("expected current family id");
+    }
+    const familyId = family.id;
+
+    const deleted = await api.request(`${HEALTH_API_PREFIX}/me`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    expect(deleted.status).toBe(204);
+
+    const remainingFamilies = await sql`select id from families where id = ${familyId}`;
+    expect(remainingFamilies).toHaveLength(0);
+
+    const audits = await sql`
+      select action, resource_id, family_id
+      from audit_logs
+      where action = 'account.deleted'
+        and resource_id = ${managerId}
+    `;
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.family_id).toBeNull();
+
+    const repository = PostgresFamilyRepository.fromDatabaseUrl(databaseUrl, { syncLocalAuthUsers: true });
+    const retentionCheck = new Date("2026-08-23T00:00:00.000Z");
+    await sql`
+      update audit_logs
+      set created_at = ${new Date("2025-08-23T00:00:00.000Z")}
+      where action = 'account.deleted'
+        and resource_id = ${managerId}
+    `;
+    expect(await repository.purgeExpiredAuditLogs(retentionCheck)).toBe(0);
+    await expect(
+      sql`
+        select id from audit_logs
+        where action = 'account.deleted'
+          and resource_id = ${managerId}
+      `
+    ).resolves.toHaveLength(1);
+
+    await sql`
+      update audit_logs
+      set created_at = ${new Date("2025-08-22T00:00:00.000Z")}
+      where action = 'account.deleted'
+        and resource_id = ${managerId}
+    `;
+    expect(await repository.purgeExpiredAuditLogs(retentionCheck)).toBe(1);
+    await expect(
+      sql`
+        select id from audit_logs
+        where action = 'account.deleted'
+          and resource_id = ${managerId}
+      `
+    ).resolves.toHaveLength(0);
+  });
 });

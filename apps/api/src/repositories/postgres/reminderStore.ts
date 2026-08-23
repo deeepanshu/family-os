@@ -1,4 +1,5 @@
 import type { AuditLog, NotificationDelivery, NotificationDevice, Reminder, ReminderRecipient } from "@family-os/shared";
+import { auditLogCutoff } from "../../retention";
 import { HttpError } from "../../errors";
 import type { CreateReminderInput, RegisterDeviceInput, UpdateReminderInput } from "../families";
 import { PostgresRepositoryContext } from "./context";
@@ -273,6 +274,15 @@ export class PostgresReminderStore {
       limit ${limit}
     `;
     return rows.map(mapAuditLog);
+  }
+
+  async purgeExpiredAuditLogs(now = new Date()): Promise<number> {
+    const cutoff = auditLogCutoff(now);
+    const result = await this.context.sql`
+      delete from audit_logs
+      where created_at < ${cutoff}
+    `;
+    return Number(result.count ?? 0);
   }
 
   async recordAudit(input: {
