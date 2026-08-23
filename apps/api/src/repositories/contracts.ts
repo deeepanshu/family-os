@@ -87,6 +87,8 @@ export interface ProfileStore {
   getSelfProfile(actorUserId: string): Promise<HealthProfile | null>;
   updateProfile(actorUserId: string, profileId: string, input: UpdateProfileInput): Promise<HealthProfile>;
   deleteProfile(actorUserId: string, profileId: string): Promise<void>;
+  deleteAccount(actorUserId: string): Promise<void>;
+  isAccountDeleted(userId: string): boolean | Promise<boolean>;
 }
 
 export interface ReadingStore {

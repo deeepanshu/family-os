@@ -665,6 +665,33 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertNil(steps.subtitle)
         XCTAssertEqual(steps.metrics, [HistoryMetricCell(label: "Count", value: "8,432")])
     }
+
+    func testDeleteAccountClearsSessionAfterSuccess() async throws {
+        let viewModel = makeViewModelWithMock(["/me": "{}"])
+        viewModel.auth.accessToken = "test-token"
+        viewModel.auth.signedInUserId = "user-1"
+        viewModel.family.currentFamilyName = "Jain Family"
+
+        await viewModel.deleteAccount()
+
+        XCTAssertEqual(viewModel.auth.accessToken, "")
+        XCTAssertNil(viewModel.auth.signedInUserId)
+        XCTAssertNil(viewModel.family.currentFamilyName)
+        XCTAssertEqual(viewModel.statusMessage, "Account deleted.")
+        XCTAssertFalse(viewModel.isError)
+        XCTAssertFalse(viewModel.isDeletingAccount)
+    }
+
+    func testDeleteAccountSurfacesAPIError() async throws {
+        let viewModel = makeViewModelWithMock([:])
+        viewModel.auth.accessToken = "test-token"
+
+        await viewModel.deleteAccount()
+
+        XCTAssertEqual(viewModel.auth.accessToken, "test-token")
+        XCTAssertTrue(viewModel.isError)
+        XCTAssertFalse(viewModel.isDeletingAccount)
+    }
 }
 
 private func makeProfile(

@@ -4,7 +4,7 @@ import type { CreateFamilyInput, CreateInviteInput, CreateProfileInput, UpdatePr
 import { currentInviteStatus, hashToken, PostgresRepositoryContext } from "./context";
 import { toIso } from "./dateUtils";
 import { mapFamily, mapInvite, mapMembership, mapProfile } from "./mappers";
-import { requireRow } from "./types";
+import { requireRow, type PgExecutor } from "./types";
 
 export class PostgresFamilyStore {
   constructor(private readonly context: PostgresRepositoryContext) {}
@@ -251,6 +251,9 @@ export class PostgresFamilyStore {
   }
 
   async createSelfProfile(actorUserId: string, displayName: string): Promise<HealthProfile> {
+    if (await this.isAccountDeleted(actorUserId)) {
+      throw new HttpError(401, "account_deleted", "This account has been deleted.");
+    }
     await this.context.syncAuthUser(actorUserId);
     const existing = await this.getSelfProfile(actorUserId);
     if (existing) {
@@ -517,5 +520,76 @@ export class PostgresFamilyStore {
 
   async deleteProfile(actorUserId: string, profileId: string): Promise<void> {
     await this.updateProfile(actorUserId, profileId, { status: "inactive" });
+  }
+
+  async isAccountDeleted(userId: string): Promise<boolean> {
+    const [row] = await this.context.sql`
+      select 1
+      from audit_logs
+      where action = 'account.deleted'
+        and resource_type = 'account'
+        and resource_id = ${userId}
+      limit 1
+    `;
+    return Boolean(row);
+  }
+
+  async deleteAccount(actorUserId: string): Promise<void> {
+    if (await this.isAccountDeleted(actorUserId)) {
+      return;
+    }
+
+    const current = await this.context.getCurrentFamily(actorUserId);
+    const self = await this.getSelfProfile(actorUserId);
+
+    await this.context.sql.begin(async (tx: PgExecutor) => {
+      await this.context.audit(
+        {
+          familyId: current?.family.id ?? null,
+          actorUserId,
+          action: "account.deleted",
+          resourceType: "account",
+          resourceId: actorUserId
+        },
+        tx
+      );
+
+      await tx`delete from reminders where created_by_user_id = ${actorUserId}`;
+      await tx`delete from reminder_recipients where user_id = ${actorUserId}`;
+      await tx`delete from notification_deliveries where recipient_user_id = ${actorUserId}`;
+      await tx`delete from notification_devices where user_id = ${actorUserId}`;
+      await tx`delete from mcp_connection_grants where user_id = ${actorUserId}`;
+      await tx`
+        update family_invites
+        set status = 'revoked', share_token = null, updated_at = now()
+        where invited_by_user_id = ${actorUserId}
+          and status = 'pending'
+      `;
+
+      if (self) {
+        await tx`
+          update reminders
+          set subject_person_id = null, updated_at = now()
+          where subject_person_id = ${self.id}
+        `;
+        await tx`delete from people where id = ${self.id}`;
+      }
+
+      if (current) {
+        const [others] = await tx`
+          select count(*)::int as count
+          from family_memberships
+          where family_id = ${current.family.id}
+            and status = 'active'
+            and user_id <> ${actorUserId}
+        `;
+        await this.deactivateMembership(tx, current.family.id, actorUserId);
+        if (!others || Number(others.count) === 0) {
+          await this.revokePendingInvites(tx, current.family.id);
+        }
+      }
+
+      await this.context.deleteLocalAuthUser(actorUserId, tx);
+    });
   }
 }

@@ -79,6 +79,7 @@ export function createApp(options: AppOptions = {}) {
 
   app.use("*", async (c, next) => {
     c.set("config", config);
+    c.set("isAccountDeleted", (userId: string) => repositories.profiles.isAccountDeleted(userId));
     await next();
   });
   app.use("*", requestLoggingMiddleware());
@@ -100,7 +101,7 @@ export function createApp(options: AppOptions = {}) {
   });
 
   health.route("/bootstrap", createBootstrapRoutes(repositories.families, config));
-  health.route("/me", createMeRoutes(repositories.profiles));
+  health.route("/me", createMeRoutes(repositories.profiles, config));
   health.route("/families", createFamilyRoutes(repositories.families, config));
   health.route("/invites", createInviteRoutes(repositories.invites, config));
   health.route("/people", createPeopleRoutes(repositories.profiles));

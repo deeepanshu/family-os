@@ -14,4 +14,8 @@ enum HealthKitInstallationId {
         try keychain.set(created, for: keychainKey)
         return created
     }
+
+    static func clear(using keychain: KeychainStore = KeychainStore()) {
+        keychain.remove(keychainKey)
+    }
 }

@@ -142,6 +142,10 @@ struct HealthAPIClient {
         try await delete(path: "families/current", baseURL: baseURL, accessToken: accessToken)
     }
 
+    func deleteAccount(baseURL: String, accessToken: String) async throws {
+        try await delete(path: "me", baseURL: baseURL, accessToken: accessToken)
+    }
+
     func listProfiles(baseURL: String, accessToken: String) async throws -> [HealthProfile] {
         try await get(path: "people", baseURL: baseURL, accessToken: accessToken)
     }
