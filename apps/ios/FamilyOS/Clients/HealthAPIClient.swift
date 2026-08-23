@@ -223,26 +223,6 @@ struct HealthAPIClient {
         )
     }
 
-    func listWorkoutExercises(
-        baseURL: String,
-        accessToken: String,
-        query: String? = nil,
-        category: String? = nil
-    ) async throws -> [WorkoutExerciseCatalogEntry] {
-        var path = "readings/workouts/exercises"
-        var parts: [String] = []
-        if let query, !query.isEmpty {
-            parts.append("q=\(query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query)")
-        }
-        if let category, !category.isEmpty {
-            parts.append("category=\(category.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? category)")
-        }
-        if !parts.isEmpty {
-            path += "?\(parts.joined(separator: "&"))"
-        }
-        return try await get(path: path, baseURL: baseURL, accessToken: accessToken)
-    }
-
 
     func putWorkoutExercises(
         baseURL: String,

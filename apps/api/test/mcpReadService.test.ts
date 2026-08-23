@@ -288,8 +288,8 @@ describe("HealthMcpReadService", () => {
       })
     ]);
     expect(batch.status).toBe(200);
-    const exercises = [{ exerciseId: "a0b3a1f0-34fa-53b0-87e4-73dbddf2eff9", sets: [{ reps: 6, weightKg: 90 }] }];
-    const saved = [{ exerciseId: "a0b3a1f0-34fa-53b0-87e4-73dbddf2eff9", name: "Hip Thrust", sets: [{ reps: 6, weightKg: 90 }] }];
+    const exercises = [{ name: "Hip Thrust", sets: [{ reps: 6, weightKg: 90 }] }];
+    const saved = [{ name: "Hip Thrust", sets: [{ reps: 6, weightKg: 90 }] }];
 
     const put = await api.request(`${HEALTH_API_PREFIX}/readings/workouts/${strengthKey}/exercises`, {
       method: "PUT",

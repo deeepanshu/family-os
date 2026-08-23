@@ -17,8 +17,6 @@ export const LOCAL_DEMO_DAY_COUNT = 14;
 
 const ENABLED_GROUPS = ["activity", "sleep", "vitals", "workouts"] as const satisfies readonly HealthKitConsentGroup[];
 
-const BENCH_PRESS_ID = "0954030e-f513-5027-aa84-5c684425dee8";
-const ARNOLD_PRESS_ID = "7af0dfcb-ea31-5b61-9bec-a745c9a9ff9b";
 
 const STRENGTH_START_HOUR = 18;
 const RUN_START_HOUR = 7;
@@ -110,7 +108,7 @@ export async function seedLocalDemo(
   }
   await stores.healthKit.putHealthKitWorkoutExercises(userId, strength.id, [
     {
-      exerciseId: BENCH_PRESS_ID,
+      name: "Bench Press",
       sets: [
         { reps: 8, weightKg: 60 },
         { reps: 8, weightKg: 60 },
@@ -118,7 +116,7 @@ export async function seedLocalDemo(
       ]
     },
     {
-      exerciseId: ARNOLD_PRESS_ID,
+      name: "Arnold Press",
       sets: [
         { reps: 10, weightKg: 14 },
         { reps: 10, weightKg: 14 },

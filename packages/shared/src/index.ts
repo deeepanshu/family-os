@@ -13,7 +13,6 @@ export * from "./healthkitCanonical";
 export * from "./healthkitOps";
 export * from "./healthkitEvents";
 export * from "./healthkitFixtures";
-export * from "./workoutExerciseCatalog";
 
 
 export type ApiEnvelope<T> = {
@@ -282,13 +281,11 @@ export type HealthWorkoutSetLog = {
 };
 
 export type HealthWorkoutExerciseWrite = {
-  exerciseId: string;
+  name: string;
   sets: HealthWorkoutSetLog[];
 };
 
-export type HealthWorkoutExerciseLog = HealthWorkoutExerciseWrite & {
-  name: string;
-};
+export type HealthWorkoutExerciseLog = HealthWorkoutExerciseWrite;
 
 
 

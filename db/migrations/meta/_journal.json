@@ -134,6 +134,13 @@
       "when": 1787500000000,
       "tag": "0018_workout_exercise_catalog",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1787530000000,
+      "tag": "0019_deprecate_wger_catalog",
+      "breakpoints": true
     }
 
   ]

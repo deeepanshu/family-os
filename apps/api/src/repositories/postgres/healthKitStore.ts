@@ -1035,11 +1035,11 @@ export class PostgresHealthKitStore {
       `;
       for (const [exerciseIndex, exercise] of normalized.entries()) {
         const [inserted] = await tx`
-          insert into health_workout_exercises (person_id, source_sample_key, catalog_id, position, name)
+          insert into health_workout_exercises (person_id, source_sample_key, "catalog_id__DEPRECATED", position, name)
           values (
             ${row.person_id},
             ${row.source_sample_key},
-            ${exercise.exerciseId},
+            ${null},
             ${exerciseIndex},
             ${exercise.name}
           )
@@ -1105,7 +1105,6 @@ export class PostgresHealthKitStore {
       select
         e.source_sample_key,
         e.position as exercise_position,
-        e.catalog_id,
         e.name,
         s.position as set_position,
         s.reps,
@@ -1122,7 +1121,6 @@ export class PostgresHealthKitStore {
       let exercise = byExercise.get(exerciseKey);
       if (!exercise) {
         exercise = {
-          exerciseId: row.catalog_id as string,
           name: row.name as string,
           sets: []
         };
