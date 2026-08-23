@@ -9,7 +9,8 @@
     "test": "vitest run",
     "test:unit": "vitest run --exclude test/postgresRepository.test.ts",
     "test:integration": "vitest run test/postgresRepository.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "seed:local": "bun scripts/seed-local.ts"
   },
   "dependencies": {
     "@family-os/shared": "*",
