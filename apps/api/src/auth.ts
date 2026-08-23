@@ -1,3 +1,4 @@
+import { HEALTH_API_PREFIX } from "@family-os/shared";
 import { createRemoteJWKSet, decodeJwt, decodeProtectedHeader, jwtVerify, type JWTPayload } from "jose";
 import { createMiddleware } from "hono/factory";
 import type { AppConfig } from "./config";
@@ -12,6 +13,7 @@ export type AuthUser = {
 export type AppVariables = {
   config: AppConfig;
   user: AuthUser;
+  isAccountDeleted?: (userId: string) => boolean | Promise<boolean>;
 };
 
 export type VerifiedAuth = {
@@ -43,6 +45,10 @@ export function requireAuth() {
     }
 
     const verified = await verifyBearerToken(token, config, { audience: "authenticated" });
+    const isDeleted = c.get("isAccountDeleted");
+    if (isDeleted && (await isDeleted(verified.userId)) && !isDeleteMeRequest(c.req.method, c.req.path)) {
+      throw new HttpError(401, "account_deleted", "This account has been deleted.");
+    }
     c.set("user", {
       id: verified.userId,
       email: verified.email,
@@ -50,6 +56,12 @@ export function requireAuth() {
     });
     await next();
   });
+}
+
+function isDeleteMeRequest(method: string, path: string): boolean {
+  if (method !== "DELETE") return false;
+  const normalized = path.replace(/\/+$/, "") || "/";
+  return normalized === `${HEALTH_API_PREFIX}/me` || normalized === "/me";
 }
 
 export async function verifyBearerToken(

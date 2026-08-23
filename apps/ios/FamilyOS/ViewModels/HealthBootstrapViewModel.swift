@@ -17,7 +17,7 @@ final class HealthBootstrapViewModel: ObservableObject {
     @Published var needsProfileSetup = false
     @Published var startupError: Error?
     @Published var pendingInvitePreview: PublicInvitePreview?
-
+    @Published var isDeletingAccount = false
     let client: HealthAPIClient
     let healthKitClient: HealthKitClient
     let authClient: SupabaseAuthClient
@@ -147,6 +147,26 @@ final class HealthBootstrapViewModel: ObservableObject {
         statusMessage = "Signed out."
         isError = false
         reportActionResult(statusMessage)
+    }
+
+    func deleteAccount() async {
+        guard !isDeletingAccount else { return }
+        isDeletingAccount = true
+        isError = false
+        statusMessage = "Deleting account…"
+        defer { isDeletingAccount = false }
+        do {
+            try await client.deleteAccount(baseURL: connection.baseURL, accessToken: auth.accessToken)
+            HealthKitInstallationId.clear(using: keychain)
+            signOut()
+            statusMessage = "Account deleted."
+            isError = false
+            reportActionResult(statusMessage)
+        } catch {
+            isError = true
+            statusMessage = error.localizedDescription
+            reportActionFailure(statusMessage)
+        }
     }
 
     var pendingInviteToken: String? {

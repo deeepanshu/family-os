@@ -155,6 +155,14 @@ export class PostgresFamilyRepository implements FamilyRepository {
     return this.familyStore.deleteProfile(actorUserId, profileId);
   }
 
+  deleteAccount(actorUserId: string): Promise<void> {
+    return this.familyStore.deleteAccount(actorUserId);
+  }
+
+  isAccountDeleted(userId: string): Promise<boolean> {
+    return this.familyStore.isAccountDeleted(userId);
+  }
+
   listBloodPressure(actorUserId: string, personId?: string, limit?: number): Promise<BloodPressureReading[]> {
     return this.readingStore.listBloodPressure(actorUserId, personId, limit);
   }

@@ -81,7 +81,7 @@ struct ContentView: View {
             Image(systemName: "exclamationmark.triangle")
                 .font(.largeTitle)
                 .foregroundStyle(.orange)
-            Text("Could not start Family OS")
+            Text("Could not start FamilyStack")
                 .font(.headline)
             Text(viewModel.statusMessage)
                 .foregroundStyle(.secondary)

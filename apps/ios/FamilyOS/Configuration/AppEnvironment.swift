@@ -45,3 +45,23 @@ struct AppEnvironment {
         return trimmed
     }
 }
+
+enum FamilyOSPublicSite {
+    static func origin(fromAPIBaseURL baseURL: String) -> URL {
+        guard var url = URL(string: baseURL) else {
+            return URL(string: "https://familyos.deepanshujain.me")!
+        }
+        let trimmedPath = url.path.hasSuffix("/") ? String(url.path.dropLast()) : url.path
+        if trimmedPath.hasSuffix("/health/api/v1") {
+            url.deleteLastPathComponent()
+            url.deleteLastPathComponent()
+            url.deleteLastPathComponent()
+        }
+        return url
+    }
+
+    static func url(path: String, apiBaseURL: String) -> URL {
+        let relative = path.hasPrefix("/") ? String(path.dropFirst()) : path
+        return origin(fromAPIBaseURL: apiBaseURL).appendingPathComponent(relative)
+    }
+}

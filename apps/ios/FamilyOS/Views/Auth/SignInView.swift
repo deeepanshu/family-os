@@ -9,9 +9,9 @@ struct SignInView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 30) {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Family OS")
+                        Text("FamilyStack")
                             .font(.largeTitle.bold())
-                        Text("Track family health privately, starting with blood pressure and blood sugar.")
+                        Text("Track family health privately — Activity, Vitals (blood pressure and heart rate), Sleep, and Workouts.")
                             .font(.body)
                             .foregroundStyle(.secondary)
                     }

@@ -15,6 +15,7 @@ const envSchema = z.object({
   SUPABASE_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
   SUPABASE_ANON_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
   SUPABASE_JWT_SECRET: z.preprocess(emptyToUndefined, z.string().optional()),
+  SUPABASE_SERVICE_ROLE_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
   HEALTH_API_ENABLE_DEV_AUTH: z.preprocess(emptyToUndefined, z.coerce.boolean().default(false)),
   HEALTH_API_DEV_AUTH_USER_ID: z.preprocess(emptyToUndefined, z.string().uuid().optional()),
   HEALTH_API_CORS_ORIGIN: z.preprocess(emptyToUndefined, z.string().optional()),
@@ -44,7 +45,7 @@ const envSchema = z.object({
    * (Grok, ChatGPT, etc. mint a new client id per connect).
    */
   MCP_ALLOWED_OAUTH_CLIENT_IDS: z.preprocess(emptyToUndefined, z.string().optional()),
-  MCP_RESOURCE_NAME: z.preprocess(emptyToUndefined, z.string().default("Family OS Health MCP")),
+  MCP_RESOURCE_NAME: z.preprocess(emptyToUndefined, z.string().default("FamilyStack Health MCP")),
   MCP_CONSENT_VERSION: z.preprocess(emptyToUndefined, z.string().default("2026-07-18")),
   MCP_TOOL_TIMEOUT_MS: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(10_000)),
   MCP_MAX_RESULT_CHARS: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(32_000)),

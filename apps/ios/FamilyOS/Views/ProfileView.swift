@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ProfileView: View {
     @ObservedObject var viewModel: HealthBootstrapViewModel
+    @State private var confirmDeleteAccount = false
 
     private var healthKit: HealthKitSyncStateViewModel { viewModel.healthKit }
 
@@ -19,9 +20,29 @@ struct ProfileView: View {
 
                 HealthKitSettingsSections(viewModel: viewModel)
 
+                Section("Legal") {
+                    Link("Privacy Policy", destination: legalURL("/privacy"))
+                    Link("Account deletion", destination: legalURL("/account-deletion"))
+                }
+
                 Section {
                     Button("Sign Out", role: .destructive) {
                         viewModel.signOut()
+                    }
+                    .disabled(viewModel.isDeletingAccount)
+                }
+
+                Section {
+                    if viewModel.isDeletingAccount {
+                        HStack {
+                            ProgressView()
+                            Text("Deleting account…")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Button("Delete account", role: .destructive) {
+                            confirmDeleteAccount = true
+                        }
                     }
                 }
             }
@@ -45,9 +66,20 @@ struct ProfileView: View {
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: healthKit.progressBanner)
+            .confirmationDialog("Delete account?", isPresented: $confirmDeleteAccount, titleVisibility: .visible) {
+                Button("Delete account", role: .destructive) {
+                    Task { await viewModel.deleteAccount() }
+                }
+            } message: {
+                Text("This permanently deletes your FamilyStack account and the health data stored on our servers. Apple Health on this iPhone is not removed. This cannot be undone.")
+            }
             .task {
                 await viewModel.loadHealthKitStatus()
             }
         }
+    }
+
+    private func legalURL(_ path: String) -> URL {
+        FamilyOSPublicSite.url(path: path, apiBaseURL: viewModel.connection.baseURL)
     }
 }

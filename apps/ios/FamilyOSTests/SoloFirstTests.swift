@@ -665,6 +665,46 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertNil(steps.subtitle)
         XCTAssertEqual(steps.metrics, [HistoryMetricCell(label: "Count", value: "8,432")])
     }
+
+    func testDeleteAccountClearsSessionAfterSuccess() async throws {
+        let viewModel = makeViewModelWithMock(["/me": "{}"])
+        viewModel.auth.accessToken = "test-token"
+        viewModel.auth.signedInUserId = "user-1"
+        viewModel.family.currentFamilyName = "Jain Family"
+        _ = try HealthKitInstallationId.current(using: viewModel.keychain)
+
+        await viewModel.deleteAccount()
+
+        XCTAssertEqual(viewModel.auth.accessToken, "")
+        XCTAssertNil(viewModel.auth.signedInUserId)
+        XCTAssertNil(viewModel.family.currentFamilyName)
+        XCTAssertNil(HealthKitInstallationId.existing(using: viewModel.keychain))
+        XCTAssertEqual(viewModel.statusMessage, "Account deleted.")
+        XCTAssertFalse(viewModel.isError)
+        XCTAssertFalse(viewModel.isDeletingAccount)
+    }
+
+    func testDeleteAccountSurfacesAPIError() async throws {
+        let viewModel = makeViewModelWithMock([:])
+        viewModel.auth.accessToken = "test-token"
+
+        await viewModel.deleteAccount()
+
+        XCTAssertEqual(viewModel.auth.accessToken, "test-token")
+        XCTAssertTrue(viewModel.isError)
+        XCTAssertFalse(viewModel.isDeletingAccount)
+    }
+
+    func testPublicSiteOriginStripsHealthAPIPrefix() {
+        XCTAssertEqual(
+            FamilyOSPublicSite.origin(fromAPIBaseURL: "http://localhost:3001/health/api/v1").absoluteString,
+            "http://localhost:3001/"
+        )
+        XCTAssertEqual(
+            FamilyOSPublicSite.url(path: "/privacy", apiBaseURL: "https://familyos.deepanshujain.me/health/api/v1").absoluteString,
+            "https://familyos.deepanshujain.me/privacy"
+        )
+    }
 }
 
 private func makeProfile(

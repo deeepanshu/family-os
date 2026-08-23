@@ -97,7 +97,7 @@ struct HealthKitSettingsSections: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: { metric in
-            Text("Re-imports the last 90 days and removes Family OS items in that period that no longer exist in Apple Health.")
+            Text("Re-imports the last 90 days and removes FamilyStack items in that period that no longer exist in Apple Health.")
         }
     }
 

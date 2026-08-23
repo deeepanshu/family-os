@@ -140,7 +140,7 @@ extension HealthBootstrapViewModel {
         }
         switch action {
         case "open_add_blood_glucose":
-            readings.notificationRouteMessage = "Open HealthKit sync to update glucose data."
+            readings.notificationRouteMessage = "Opened a health reminder."
             statusMessage = readings.notificationRouteMessage ?? statusMessage
         case "open_add_blood_pressure":
             readings.notificationRouteMessage = "Opened BP logging from reminder."
@@ -149,7 +149,7 @@ extension HealthBootstrapViewModel {
             readings.notificationRouteMessage = "Opened reminder details."
             statusMessage = readings.notificationRouteMessage ?? statusMessage
         default:
-            readings.notificationRouteMessage = "Opened Family OS notification."
+            readings.notificationRouteMessage = "Opened FamilyStack notification."
             statusMessage = readings.notificationRouteMessage ?? statusMessage
         }
     }
