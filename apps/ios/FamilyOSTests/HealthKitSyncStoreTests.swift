@@ -504,4 +504,120 @@ final class HealthKitSyncStoreTests: XCTestCase {
         // Must not pollute vitals group state when rejecting a sleep op.
         XCTAssertNotEqual(try store.groupStatus("vitals"), "error")
     }
+
+    func testHeartRateDayPayloadEnqueueAndEncode() throws {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("healthkit-hr-test-\(UUID().uuidString).sqlite")
+            .path
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let store = try HealthKitSyncStore(path: path)
+        let samples = [
+            HealthKitHeartRateSync.HeartRateDaySample(
+                localDay: "2026-08-19",
+                averageValue: 72.4,
+                minimumValue: 58,
+                maximumValue: 110,
+                latestValue: 80,
+                sampleCount: 14
+            )
+        ]
+
+        try HealthKitHeartRateSync.enqueueSamples(samples, into: store)
+
+        let batch = try store.claimBatch(limit: 10)
+        XCTAssertEqual(batch.count, 1)
+        XCTAssertEqual(batch[0].naturalKey, "daily_metric:heart_rate:2026-08-19")
+        XCTAssertEqual(batch[0].groupKey, "vitals")
+        XCTAssertEqual(batch[0].scopeKey, "heart_rate")
+
+        let data = try XCTUnwrap(batch[0].payloadJSON?.data(using: .utf8))
+        let payload = try JSONDecoder().decode(HealthKitOpPayloadWire.self, from: data)
+        guard case let .dailyMetric(healthMetric, localDay, _, average, minimum, maximum, latest, sampleCount) = payload else {
+            return XCTFail("Expected daily_metric payload")
+        }
+        XCTAssertEqual(healthMetric, "heart_rate")
+        XCTAssertEqual(localDay, "2026-08-19")
+        XCTAssertEqual(average, 72.4)
+        XCTAssertEqual(minimum, 58)
+        XCTAssertEqual(maximum, 110)
+        XCTAssertEqual(latest, 80)
+        XCTAssertEqual(sampleCount, 14)
+    }
+
+    func testHeartRateAggregatesLocalDaysAndSkipsInvalidSamples() throws {
+        let first = try XCTUnwrap(HealthKitRunEngine.parseISODate("2026-08-19T10:00:00.000Z"))
+        let second = try XCTUnwrap(HealthKitRunEngine.parseISODate("2026-08-19T18:00:00.000Z"))
+        let nextDay = try XCTUnwrap(HealthKitRunEngine.parseISODate("2026-08-20T01:00:00.000Z"))
+
+        let days = HealthKitHeartRateSync.makeHeartRateDays(
+            from: [
+                .init(date: first, bpm: 60),
+                .init(date: second, bpm: 80),
+                .init(date: first, bpm: .nan),
+                .init(date: nextDay, bpm: 90)
+            ],
+            healthTimezone: "UTC"
+        )
+
+        XCTAssertEqual(days.map(\.localDay), ["2026-08-19", "2026-08-20"])
+        XCTAssertEqual(days[0].sampleCount, 2)
+        XCTAssertEqual(days[0].minimumValue, 60)
+        XCTAssertEqual(days[0].maximumValue, 80)
+        XCTAssertEqual(days[0].averageValue, 70)
+        XCTAssertEqual(days[0].latestValue, 80)
+        XCTAssertEqual(days[1].sampleCount, 1)
+        XCTAssertEqual(days[1].latestValue, 90)
+    }
+
+    func testSwimmingWorkoutFilterMatchesSwimTypes() {
+        XCTAssertTrue(
+            WorkoutReading(
+                id: "s1",
+                workoutType: "swimming",
+                startedAtUtc: "2026-08-19T01:00:00.000Z",
+                endedAtUtc: "2026-08-19T01:30:00.000Z",
+                durationSeconds: 1800,
+                activeEnergyKcal: 220,
+                distanceMeters: 1500,
+                averageHeartRateBpm: 140,
+                maximumHeartRateBpm: nil,
+                minimumHeartRateBpm: nil,
+                sourceName: nil,
+                deviceName: nil,
+                isIndoor: nil,
+                elevationAscendedMeters: nil,
+                averageMETs: nil,
+                swimmingStrokeCount: 620,
+                totalFlightsClimbed: nil,
+                events: nil,
+                activities: nil,
+                exercises: nil
+            ).isSwimmingWorkout
+        )
+        XCTAssertFalse(
+            WorkoutReading(
+                id: "r1",
+                workoutType: "running",
+                startedAtUtc: "2026-08-19T01:00:00.000Z",
+                endedAtUtc: "2026-08-19T01:30:00.000Z",
+                durationSeconds: 1800,
+                activeEnergyKcal: 220,
+                distanceMeters: 5000,
+                averageHeartRateBpm: nil,
+                maximumHeartRateBpm: nil,
+                minimumHeartRateBpm: nil,
+                sourceName: nil,
+                deviceName: nil,
+                isIndoor: nil,
+                elevationAscendedMeters: nil,
+                averageMETs: nil,
+                swimmingStrokeCount: nil,
+                totalFlightsClimbed: nil,
+                events: nil,
+                activities: nil,
+                exercises: nil
+            ).isSwimmingWorkout
+        )
+    }
 }

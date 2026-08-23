@@ -116,9 +116,8 @@ struct HistoryView: View {
     private var emptyCopy: String {
         switch filter {
         case .all: return "No history yet."
-        case .bloodPressure: return "No blood pressure readings yet."
+        case .vitals: return "No vitals yet."
         case .sleep: return "No sleep days yet."
-        case .steps: return "No step days yet."
         case .workouts: return "No workouts yet."
         }
     }
@@ -127,6 +126,7 @@ struct HistoryView: View {
         guard viewModel.hasSelectedProfile else { return }
         await viewModel.loadHistory()
     }
+
 
     private func formatMinutes(_ total: Int) -> String {
         HistoryTimeline.formatMinutes(total)

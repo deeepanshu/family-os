@@ -9,7 +9,7 @@ import { createInviteRoutes } from "./routes/invites";
 import { createInviteLandingRoutes } from "./routes/inviteLanding";
 import { createPeopleRoutes } from "./routes/people";
 import { createBloodPressureRoutes } from "./routes/bloodPressure";
-import { createSleepRoutes, createStepsRoutes, createWorkoutRoutes } from "./routes/historyReadings";
+import { createHeartRateRoutes, createSleepRoutes, createStepsRoutes, createWorkoutRoutes } from "./routes/historyReadings";
 import { createHealthKitRoutes } from "./routes/healthKit";
 import { createReminderRoutes } from "./routes/reminders";
 import { createDeviceRoutes } from "./routes/devices";
@@ -108,6 +108,7 @@ export function createApp(options: AppOptions = {}) {
   health.route("/readings/sleep", createSleepRoutes(repositories.healthKit));
   health.route("/readings/steps", createStepsRoutes(repositories.healthKit));
   health.route("/readings/workouts", createWorkoutRoutes(repositories.healthKit));
+  health.route("/readings/heart-rate", createHeartRateRoutes(repositories.healthKit));
   health.route("/healthkit", createHealthKitRoutes(repositories.healthKit));
   health.route("/reminders", createReminderRoutes(repositories.reminders));
   health.route("/devices", createDeviceRoutes(repositories.devices));

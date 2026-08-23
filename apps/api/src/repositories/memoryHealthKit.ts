@@ -653,6 +653,20 @@ export class MemoryHealthKitEngine {
             deleted += 1;
           }
         }
+        const healthTimezone = this.profileSettings.get(input.personId)?.healthTimezone ?? "UTC";
+        const startDay = localDayStringInTimezone(input.rangeStartAt, healthTimezone);
+        const endDay = localDayStringInTimezone(input.rangeEndAt, healthTimezone);
+        for (const [key, row] of this.dailyMetrics) {
+          if (row.personId !== input.personId) continue;
+          if (row.healthMetric !== "heart_rate" && row.healthMetric !== "resting_heart_rate") continue;
+          if (row.timezoneVersion !== input.timezoneVersion) continue;
+          if (row.localDay < startDay || row.localDay > endDay) continue;
+          const expected = `daily_metric:${row.healthMetric}:${row.localDay}`;
+          if (!manifest.has(expected)) {
+            this.dailyMetrics.delete(key);
+            deleted += 1;
+          }
+        }
         return deleted;
       }
       case "sleep": {

@@ -163,6 +163,27 @@ struct StepDayReading: Decodable, Identifiable {
     var id: String { localDay }
 }
 
+struct HeartRateDayReading: Decodable, Identifiable {
+    let localDay: String
+    let averageValue: Double?
+    let minimumValue: Double?
+    let maximumValue: Double?
+    let latestValue: Double?
+    let sampleCount: Int
+    let unit: String?
+    let restingValue: Double?
+
+    var id: String { localDay }
+
+    var averageBpm: Int? {
+        averageValue.map { Int($0.rounded()) }
+    }
+
+    var restingBpm: Int? {
+        restingValue.map { Int($0.rounded()) }
+    }
+}
+
 struct WorkoutSetLog: Codable, Identifiable, Hashable {
     var id = UUID()
     var reps: Int
@@ -247,6 +268,10 @@ struct WorkoutReading: Decodable, Identifiable {
             return false
         }
     }
+
+    var isSwimmingWorkout: Bool {
+        workoutType == "swimming" || workoutType == "swim_bike_run"
+    }
 }
 
 struct HistoryMetricCell: Equatable, Identifiable {
@@ -279,27 +304,25 @@ extension WorkoutReading {
     }
 
     var historyMetrics: [HistoryMetricCell] {
-        var metrics = [
-            HistoryMetricCell(label: "Time", value: HistoryTimeline.formatDuration(seconds: durationSeconds))
-        ]
+        var metrics: [HistoryMetricCell] = []
+        if let min = minimumHeartRateBpm {
+            metrics.append(HistoryMetricCell(label: "Min", value: "\(Int(min.rounded())) bpm"))
+        }
+        if let avg = averageHeartRateBpm {
+            metrics.append(HistoryMetricCell(label: "Avg", value: "\(Int(avg.rounded())) bpm"))
+        }
+        if let max = maximumHeartRateBpm {
+            metrics.append(HistoryMetricCell(label: "Max", value: "\(Int(max.rounded())) bpm"))
+        }
+        metrics.append(HistoryMetricCell(label: "Time", value: HistoryTimeline.formatDuration(seconds: durationSeconds)))
         if let kcal = activeEnergyKcal {
             metrics.append(HistoryMetricCell(label: "Active", value: "\(Int(kcal.rounded())) kcal"))
         }
         if let meters = distanceMeters {
             metrics.append(HistoryMetricCell(label: "Distance", value: HistoryTimeline.formatDistance(meters: meters)))
         }
-        if let avg = averageHeartRateBpm {
-            let range: String?
-            if let min = minimumHeartRateBpm, let max = maximumHeartRateBpm {
-                range = "\(Int(min.rounded()))–\(Int(max.rounded()))"
-            } else if let max = maximumHeartRateBpm {
-                range = "max \(Int(max.rounded()))"
-            } else {
-                range = nil
-            }
-            metrics.append(HistoryMetricCell(label: "Heart rate", value: "\(Int(avg.rounded())) bpm", detail: range))
-        } else if let max = maximumHeartRateBpm {
-            metrics.append(HistoryMetricCell(label: "Heart rate", value: "max \(Int(max.rounded())) bpm"))
+        if let strokes = swimmingStrokeCount, strokes > 0 {
+            metrics.append(HistoryMetricCell(label: "Strokes", value: HistoryTimeline.formatCount(strokes)))
         }
         if let elevation = elevationAscendedMeters, elevation > 0 {
             metrics.append(HistoryMetricCell(label: "Elev", value: String(format: "+%.0f m", elevation)))
@@ -307,21 +330,12 @@ extension WorkoutReading {
         if let mets = averageMETs {
             metrics.append(HistoryMetricCell(label: "METs", value: String(format: "%.1f", mets)))
         }
-        if let strokes = swimmingStrokeCount, strokes > 0 {
-            metrics.append(HistoryMetricCell(label: "Strokes", value: HistoryTimeline.formatCount(strokes)))
-        }
-        if let flights = totalFlightsClimbed, flights > 0 {
-            metrics.append(HistoryMetricCell(label: "Flights", value: "\(flights)"))
-        }
         let laps = events?.filter { $0.type == "lap" }.count ?? 0
         if laps > 0 {
             metrics.append(HistoryMetricCell(label: "Laps", value: "\(laps)"))
         }
         if let activities, activities.count > 1 {
             metrics.append(HistoryMetricCell(label: "Segments", value: "\(activities.count)"))
-        }
-        if let indoor = isIndoor {
-            metrics.append(HistoryMetricCell(label: "Place", value: indoor ? "Indoor" : "Outdoor"))
         }
         if let first = exercises?.first {
             let extra = (exercises?.count ?? 1) > 1 ? " +\((exercises?.count ?? 1) - 1)" : ""
@@ -396,6 +410,25 @@ extension HistoryItem {
                 subtitle: nil,
                 metrics: [HistoryMetricCell(label: "Count", value: HistoryTimeline.formatCount(day.count))]
             )
+        case let .heartRate(day):
+            var metrics: [HistoryMetricCell] = []
+            if let min = day.minimumValue {
+                metrics.append(HistoryMetricCell(label: "Min", value: "\(Int(min.rounded())) bpm"))
+            }
+            if let avg = day.averageValue {
+                metrics.append(HistoryMetricCell(label: "Avg", value: "\(Int(avg.rounded())) bpm"))
+            }
+            if let max = day.maximumValue {
+                metrics.append(HistoryMetricCell(label: "Max", value: "\(Int(max.rounded())) bpm"))
+            }
+            if let resting = day.restingBpm {
+                metrics.append(HistoryMetricCell(label: "Resting", value: "\(resting) bpm"))
+            }
+            return HistoryItemPresentation(
+                title: "Heart Rate",
+                subtitle: nil,
+                metrics: metrics
+            )
         case let .workout(workout):
             return HistoryItemPresentation(
                 title: workout.historyTitle,
@@ -410,9 +443,8 @@ extension HistoryItem {
 
 enum HistoryMetricFilter: String, CaseIterable, Identifiable {
     case all
-    case bloodPressure
+    case vitals
     case sleep
-    case steps
     case workouts
 
     var id: String { rawValue }
@@ -420,9 +452,8 @@ enum HistoryMetricFilter: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .all: return "All"
-        case .bloodPressure: return "BP"
+        case .vitals: return "Vitals"
         case .sleep: return "Sleep"
-        case .steps: return "Steps"
         case .workouts: return "Workouts"
         }
     }
@@ -430,6 +461,7 @@ enum HistoryMetricFilter: String, CaseIterable, Identifiable {
 
 enum HistoryItem: Identifiable {
     case bloodPressure(BloodPressureReading)
+    case heartRate(HeartRateDayReading)
     case workout(WorkoutReading)
     case sleep(SleepDayReading)
     case steps(StepDayReading)
@@ -437,6 +469,7 @@ enum HistoryItem: Identifiable {
     var id: String {
         switch self {
         case let .bloodPressure(reading): return "bp:\(reading.id)"
+        case let .heartRate(day): return "hr:\(day.localDay)"
         case let .workout(workout): return "workout:\(workout.id)"
         case let .sleep(day): return "sleep:\(day.sleepDay)"
         case let .steps(day): return "steps:\(day.localDay)"
@@ -445,10 +478,9 @@ enum HistoryItem: Identifiable {
 
     var metric: HistoryMetricFilter {
         switch self {
-        case .bloodPressure: return .bloodPressure
-        case .workout: return .workouts
+        case .bloodPressure, .heartRate: return .vitals
         case .sleep: return .sleep
-        case .steps: return .steps
+        case .workout, .steps: return .workouts
         }
     }
 }
@@ -463,6 +495,7 @@ struct HistoryDay: Identifiable {
 enum HistoryTimeline {
     static func days(
         bloodPressure: [BloodPressureReading],
+        heartRate: [HeartRateDayReading],
         sleep: [SleepDayReading],
         steps: [StepDayReading],
         workouts: [WorkoutReading],
@@ -489,6 +522,9 @@ enum HistoryTimeline {
         }
         for day in steps {
             append(day.localDay, .steps(day))
+        }
+        for day in heartRate {
+            append(day.localDay, .heartRate(day))
         }
 
         return grouped.keys.sorted(by: >).map { day in
@@ -591,14 +627,16 @@ enum HistoryTimeline {
 
     private static func sortKey(_ item: HistoryItem) -> (rank: Int, time: TimeInterval) {
         switch item {
-        case let .bloodPressure(reading):
-            return (0, parseISO(reading.measuredAt)?.timeIntervalSince1970 ?? 0)
-        case let .workout(workout):
-            return (0, parseISO(workout.startedAtUtc)?.timeIntervalSince1970 ?? 0)
         case .sleep:
-            return (1, 0)
+            return (0, 0)
         case .steps:
-            return (2, 0)
+            return (1, 0)
+        case let .bloodPressure(reading):
+            return (2, parseISO(reading.measuredAt)?.timeIntervalSince1970 ?? 0)
+        case .heartRate:
+            return (3, 0)
+        case let .workout(workout):
+            return (4, parseISO(workout.startedAtUtc)?.timeIntervalSince1970 ?? 0)
         }
     }
 }

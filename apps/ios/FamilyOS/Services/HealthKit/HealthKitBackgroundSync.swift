@@ -169,14 +169,6 @@ enum HealthKitBackgroundSync {
             CrashReporting.log("healthkit_bg_delivery_disabled type=\(type.identifier)")
         }
 
-        // Heart rate was previously observed under vitals but is not uploaded yet.
-        if let hr = HKObjectType.quantityType(forIdentifier: .heartRate) {
-            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                healthStore.disableBackgroundDelivery(for: hr) { _, _ in
-                    cont.resume()
-                }
-            }
-        }
 
         for type in wantedTypes {
             do {
@@ -250,6 +242,12 @@ enum HealthKitBackgroundSync {
             }
             if let dia = HKObjectType.quantityType(forIdentifier: .bloodPressureDiastolic) {
                 types.append(dia)
+            }
+            if let hr = HKObjectType.quantityType(forIdentifier: .heartRate) {
+                types.append(hr)
+            }
+            if let resting = HKObjectType.quantityType(forIdentifier: .restingHeartRate) {
+                types.append(resting)
             }
         }
         if metrics.contains(.workouts) {
@@ -333,6 +331,12 @@ enum HealthKitBackgroundSync {
             return .vitals
         }
         if let dia = HKObjectType.quantityType(forIdentifier: .bloodPressureDiastolic), sampleType == dia {
+            return .vitals
+        }
+        if let hr = HKObjectType.quantityType(forIdentifier: .heartRate), sampleType == hr {
+            return .vitals
+        }
+        if let resting = HKObjectType.quantityType(forIdentifier: .restingHeartRate), sampleType == resting {
             return .vitals
         }
         if sampleType == HKObjectType.workoutType() {

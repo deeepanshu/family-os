@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { HEALTH_API_PREFIX } from "@family-os/shared";
 import { createApp } from "../src/app";
 import { InMemoryFamilyRepository } from "../src/repositories/families";
-import { postOps, seedHealthKitReadyGroup, sleepDayOp, stepsHourOp, workoutOp } from "./healthKitTestHelpers";
+import { dailyMetricOp, postOps, seedHealthKitReadyGroup, sleepDayOp, stepsHourOp, workoutOp } from "./healthKitTestHelpers";
 
 
 const jwtSecret = "test-supabase-jwt-secret-with-enough-length";
@@ -60,7 +60,7 @@ async function setupSyncedProfile() {
     body: JSON.stringify({
       personId: profileId,
       consentVersion: "1",
-      enabledGroups: ["activity", "sleep", "workouts"],
+      enabledGroups: ["activity", "sleep", "workouts", "vitals"],
       healthTimezone: "Asia/Bangkok",
       installationId
     })
@@ -81,6 +81,28 @@ async function setupSyncedProfile() {
       endedAtUtc: "2026-08-19T02:12:00.000Z",
       durationSeconds: 1920,
       activeEnergyKcal: 280
+    }),
+    workoutOp({
+      sourceSampleKey: "f9758548-5fab-4e47-a4ac-9a05693bea71",
+      workoutType: "swimming",
+      startedAtUtc: "2026-08-18T02:00:00.000Z",
+      endedAtUtc: "2026-08-18T02:40:00.000Z",
+      durationSeconds: 2400,
+      activeEnergyKcal: 310,
+      distanceMeters: 1500,
+      swimmingStrokeCount: 620,
+      averageHeartRateBpm: 140
+    })
+  ]);
+  await seedHealthKitReadyGroup(api, token, profileId, installationId, "vitals", [
+    dailyMetricOp({
+      healthMetric: "heart_rate",
+      localDay: "2026-08-19",
+      averageValue: 72.4,
+      minimumValue: 58,
+      maximumValue: 110,
+      latestValue: 80,
+      sampleCount: 14
     })
   ]);
   return { api, token, profileId };
@@ -133,6 +155,44 @@ describe("history reading lists", () => {
       durationSeconds: 1920,
       activeEnergyKcal: 280,
       startedAtUtc: "2026-08-19T01:40:00.000Z"
+    });
+  });
+
+  it("lists heart rate days newest first", async () => {
+    const { api, token, profileId } = await setupSyncedProfile();
+    const res = await api.request(
+      `${HEALTH_API_PREFIX}/readings/heart-rate?personId=${profileId}&from=2026-08-01&to=2026-08-20`,
+      { headers: { authorization: `Bearer ${token}` } }
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data).toEqual([
+      expect.objectContaining({
+        healthMetric: "heart_rate",
+        localDay: "2026-08-19",
+        averageValue: 72.4,
+        minimumValue: 58,
+        maximumValue: 110,
+        latestValue: 80,
+        sampleCount: 14
+      })
+    ]);
+  });
+
+  it("returns swimming workout strokes and distance", async () => {
+    const { api, token, profileId } = await setupSyncedProfile();
+    const res = await api.request(
+      `${HEALTH_API_PREFIX}/readings/workouts?personId=${profileId}&from=2026-08-18&to=2026-08-18`,
+      { headers: { authorization: `Bearer ${token}` } }
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]).toMatchObject({
+      workoutType: "swimming",
+      distanceMeters: 1500,
+      swimmingStrokeCount: 620,
+      averageHeartRateBpm: 140
     });
   });
 

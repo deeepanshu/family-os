@@ -66,7 +66,7 @@ extension ReadingRow where Extra == EmptyView {
 
 private struct HistoryMetricGrid: View {
     let metrics: [HistoryMetricCell]
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8, alignment: .topLeading), count: 4)
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8, alignment: .topLeading), count: 3)
 
     var body: some View {
         LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
@@ -79,6 +79,8 @@ private struct HistoryMetricGrid: View {
                     Text(metric.value)
                         .font(.subheadline.weight(.semibold))
                         .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     if let detail = metric.detail, !detail.isEmpty {
                         Text(detail)
                             .font(.system(size: 10, weight: .medium))

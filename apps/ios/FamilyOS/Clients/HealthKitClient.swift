@@ -112,11 +112,21 @@ struct HealthKitClient {
         if let heartRate = HKObjectType.quantityType(forIdentifier: .heartRate) {
             types.insert(heartRate)
         }
+        if let resting = HKObjectType.quantityType(forIdentifier: .restingHeartRate) {
+            types.insert(resting)
+        }
         return types
     }
 
     static func workoutReadTypes() -> Set<HKObjectType> {
-        [HKObjectType.workoutType()]
+        var types: Set<HKObjectType> = [HKObjectType.workoutType()]
+        if let strokes = HKObjectType.quantityType(forIdentifier: .swimmingStrokeCount) {
+            types.insert(strokes)
+        }
+        if let distance = HKObjectType.quantityType(forIdentifier: .distanceSwimming) {
+            types.insert(distance)
+        }
+        return types
     }
 
     static func sleepReadTypes() -> Set<HKObjectType> {

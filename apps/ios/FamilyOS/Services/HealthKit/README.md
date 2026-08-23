@@ -1,13 +1,12 @@
 # HealthKit (iOS)
 
-**Status:** correctness-first rewrite — BP + sleep + workouts + foreground steps; background incremental sync for BP / sleep / workouts.
-
+**Status:** correctness-first rewrite — BP + daily heart rate + sleep + workouts + foreground steps; background incremental sync for BP / heart rate / sleep / workouts.
 Source of truth for this slice: `docs/HEALTHKIT_BACKGROUND_SYNC_RELIABILITY_PLAN.md`
 
 ## Architecture
 
 ```
-HealthKit samples (BP / sleepAnalysis / HKWorkout / step hours)
+HealthKit samples (BP / heartRate days / sleepAnalysis / HKWorkout / step hours)
   → natural-key ops
   → SQLite pending_ops
   → HealthKitSyncWorker POST /healthkit/ops:batch
@@ -28,6 +27,7 @@ Background: `HealthKitBackgroundSync` (observers + `enableBackgroundDelivery` + 
 | `HealthKitSyncStore.swift` | Single GRDB DB (`pending_ops`, config, group_state) |
 | `HealthKitSyncWorker.swift` | Serialized drain of pending ops only |
 | `HealthKitBloodPressureSync.swift` | BP query + enqueue |
+| `HealthKitHeartRateSync.swift` | Daily heart-rate statistics + enqueue |
 | `HealthKitSleepDaySync.swift` | Sleep day totals + enqueue |
 | `HealthKitWorkoutSync.swift` | All-type workouts (fat summary + events + activities) |
 | `HealthKitStepsSync.swift` | UTC hourly steps (foreground first) |
@@ -38,16 +38,16 @@ Background: `HealthKitBackgroundSync` (observers + `enableBackgroundDelivery` + 
 ## Background policy
 
 - Incremental `kind: sync` only. Never import, never repair, never delete.
-- Allowlist: vitals (BP), sleep, workouts. Activity/steps stay foreground-only.
+- Allowlist: vitals (BP + daily heart rate), sleep, workouts. Activity/steps stay foreground-only.
 - Observer ack first, then at most one metric, ~25s, `waitSeconds: 0`. If the app is active, observers only schedule.
 - Opening the app runs `runBoundedSync(reason: "become_active")` then leftover drain.
 - Session refresh is `HealthSessionRefresher` (Keychain). Background refresh failure does not sign the user out.
-- Heart rate is not observed until vitals uploads it.
+- Heart-rate observers wake the vitals group after daily upload exists.
 - Opt-in lock-screen notification after a non-empty observer / processing / refresh sync.
 
 ## Current scope
 
-- Foreground Import / Sync / Repair for vitals (BP), sleep, workouts, and activity (steps)
+- Foreground Import / Sync / Repair for vitals (BP + heart rate), sleep, workouts, and activity (steps)
 - Local queue until server ACK
 - Idempotent `op_id` + natural-key upsert
 - Background delivery + processing + app-refresh (soft-fail)
