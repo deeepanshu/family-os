@@ -121,7 +121,7 @@ extension HealthBootstrapViewModel {
         return (formatter.string(from: start), formatter.string(from: today))
     }
 
-    private func optionalList<T>(_ work: () async throws -> [T]) async -> [T]? {
+    private func optionalList<T: Sendable>(_ work: () async throws -> [T]) async -> [T]? {
         try? await work()
     }
 
