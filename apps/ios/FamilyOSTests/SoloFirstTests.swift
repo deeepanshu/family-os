@@ -667,7 +667,7 @@ final class SoloFirstTests: XCTestCase {
     }
 
     func testDeleteAccountClearsSessionAfterSuccess() async throws {
-        addTeardownBlock { resetSoloHealthKitWipeTestState() }
+        addTeardownBlock { resetHealthKitWipeTestState() }
         let viewModel = makeViewModelWithMock(["/me": "{}"])
         viewModel.auth.accessToken = "test-token"
         viewModel.auth.signedInUserId = "user-1"
@@ -709,7 +709,7 @@ final class SoloFirstTests: XCTestCase {
     }
 
     func testDeleteAccountSurfacesAPIError() async throws {
-        addTeardownBlock { resetSoloHealthKitWipeTestState() }
+        addTeardownBlock { resetHealthKitWipeTestState() }
         let viewModel = makeViewModelWithMock([:])
         viewModel.auth.accessToken = "test-token"
         let store = try HealthKitSyncStore.shared
@@ -732,7 +732,7 @@ final class SoloFirstTests: XCTestCase {
     }
 
     func testDeleteAccountSurfacesLocalWipeFailure() async throws {
-        addTeardownBlock { resetSoloHealthKitWipeTestState() }
+        addTeardownBlock { resetHealthKitWipeTestState() }
         let viewModel = makeViewModelWithMock(["/me": "{}"])
         viewModel.auth.accessToken = "test-token"
         viewModel.auth.signedInUserId = "user-1"
@@ -745,7 +745,7 @@ final class SoloFirstTests: XCTestCase {
             timezoneVersion: 1,
             enabledGroups: ["vitals"]
         )
-        HealthKitSyncStore.fileManager = SoloRefusingFileManager()
+        HealthKitSyncStore.fileManager = RefusingFileManager()
 
         await viewModel.deleteAccount()
 
@@ -759,7 +759,7 @@ final class SoloFirstTests: XCTestCase {
     }
 
     func testStartupRetriesPendingHealthKitWipe() async throws {
-        addTeardownBlock { resetSoloHealthKitWipeTestState() }
+        addTeardownBlock { resetHealthKitWipeTestState() }
         HealthKitSyncStore.wipePending = true
         let viewModel = HealthBootstrapViewModel()
 
@@ -979,20 +979,4 @@ private func makeViewModelWithMock(_ handlers: [String: String]) -> HealthBootst
         defaults: UserDefaults(suiteName: nil)!
     )
     return HealthBootstrapViewModel(dependencies: dependencies)
-}
-
-private final class SoloRefusingFileManager: FileManager {
-    override func removeItem(at url: URL) throws {
-        throw NSError(
-            domain: NSPOSIXErrorDomain,
-            code: Int(EPERM),
-            userInfo: [NSLocalizedDescriptionKey: "refused"]
-        )
-    }
-}
-
-private func resetSoloHealthKitWipeTestState() {
-    HealthKitSyncStore.fileManager = .default
-    HealthKitSyncStore.wipePending = false
-    HealthKitSyncStore.wipeShared()
 }

@@ -699,7 +699,7 @@ final class HealthKitSyncStoreTests: XCTestCase {
     }
 }
 
-private final class RefusingFileManager: FileManager {
+final class RefusingFileManager: FileManager {
     override func removeItem(at url: URL) throws {
         throw NSError(
             domain: NSPOSIXErrorDomain,
@@ -709,7 +709,7 @@ private final class RefusingFileManager: FileManager {
     }
 }
 
-private func resetHealthKitWipeTestState() {
+func resetHealthKitWipeTestState() {
     HealthKitSyncStore.fileManager = .default
     HealthKitSyncStore.wipePending = false
     HealthKitSyncStore.wipeShared()

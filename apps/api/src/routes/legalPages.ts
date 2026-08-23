@@ -119,7 +119,7 @@ export function renderPrivacyPolicyPage(origin: string): string {
 <p>When you join or create a household, other active members of that household can see your profile, the health readings imported for your Self profile, and shared reminder content, schedules, and who receives each reminder. The API returns those reminders and their recipient lists to active household members. They cannot see your Sign in with Apple credentials. Leaving the household or deleting your account hides you, your readings, and your reminder recipient rows from former members.</p>
 
 <h2>Where data is stored</h2>
-<p>Account, profile, household, reminder, assistant-grant, and imported health records are stored on FamilyStack servers (Supabase Postgres, reached through the API on this host). Apple Health data remains on your device unless you enable HealthKit import. Pending HealthKit operations sit in a local queue on this iPhone until they sync. Crash diagnostics are processed by Google Firebase Crashlytics.</p>
+<p>Account, profile, household, reminder, assistant-grant, and imported health records are stored on FamilyStack servers (Postgres reached through the API on this host). Sign-in identity is stored in Supabase Auth. Apple Health data remains on your device unless you enable HealthKit import. Pending HealthKit operations sit in a local queue on this iPhone until they sync. Crash diagnostics are processed by Google Firebase Crashlytics.</p>
 
 <h2>Website and network data</h2>
 <p>The public FamilyStack site and API at ${escapeHtml(origin)} are reached through Cloudflare. Cloudflare may process IP address, request time, path, status, user agent, and similar request metadata to route traffic and protect the service from abuse. FamilyStack pages do not set first-party cookies. We do not use non-essential cookies, advertising cookies, or third-party website analytics. If Cloudflare sets a security cookie to distinguish humans from bots, it is used only for that purpose and is not used for advertising.</p>
@@ -127,10 +127,10 @@ export function renderPrivacyPolicyPage(origin: string): string {
 <h2>Retention</h2>
 <p>We keep your records while your account is active. When you delete your account, we remove the records listed on the <a href="/account-deletion">account deletion</a> page, including the on-device HealthKit sync queue.</p>
 <ul>
-  <li><strong>Audit logs</strong> (including <code>account.deleted</code>) are kept for ${AUDIT_LOG_RETENTION_DAYS} days for security and abuse prevention, then deleted. They do not contain health values or tokens.</li>
+  <li><strong>Audit logs</strong> (including <code>account.deleted</code>) are kept for ${AUDIT_LOG_RETENTION_DAYS} days for security and abuse prevention, then deleted. They do not contain health values or tokens. Deleting a last-member household nulls the audit row’s family id; the row itself is kept for that period.</li>
   <li><strong>Crash diagnostics</strong> in Firebase Crashlytics are kept for ${CRASHLYTICS_RETENTION_DAYS} days.</li>
   <li><strong>Operational logs</strong> (request method, path, status, duration, user agent, and request id — not health values, tokens, or IP addresses we store ourselves) are kept for ${OPERATIONAL_LOG_RETENTION_DAYS} days.</li>
-  <li>We do not operate a separate long-lived backup of deleted health records.</li>
+  <li>We do not run automated backups or point-in-time recovery of FamilyStack application records. Manual operator dumps, if taken, are not a retained product archive of deleted accounts. After we delete your Supabase Auth identity, any residual Auth copies follow Supabase’s then-current backup policy.</li>
 </ul>
 <p>Health data that stays in Apple Health on your device is not a FamilyStack record and is not deleted by us.</p>
 
@@ -230,9 +230,8 @@ export function renderAccountDeletionPage(): string {
 
 <h2>What is retained</h2>
 <ul>
-  <li><strong>Audit logs</strong>, including an <code>account.deleted</code> row written before identity is wiped. These rows use the existing audit shape (action, resource, actor id if still present, metadata without health values or tokens). They are kept for ${AUDIT_LOG_RETENTION_DAYS} days for security and abuse prevention, then deleted.</li>
+  <li><strong>Audit logs</strong>, including an <code>account.deleted</code> row written before identity is wiped. These rows use the existing audit shape (action, resource, actor id if still present, metadata without health values or tokens). They are kept for ${AUDIT_LOG_RETENTION_DAYS} days for security and abuse prevention, then deleted. If you were the last household member, the household is removed and the audit row’s family id is cleared; the row is still kept for that period.</li>
   <li>Other members’ profiles, health, devices, grants, and reminders they own.</li>
-  <li>The shared workout exercise catalog (not user-owned).</li>
   <li>Historical accepted, revoked, or expired invites you created. Pending invites are removed.</li>
   <li>Apple Health data on your iPhone. FamilyStack only reads HealthKit; deleting the account does not delete Apple Health samples on the device.</li>
 </ul>
