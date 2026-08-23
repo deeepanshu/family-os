@@ -152,10 +152,9 @@
     {
       "idx": 21,
       "version": "7",
-      "when": 1787580001000,
+      "when": 1787500416654,
       "tag": "0021_remove_deprecated_wger_catalog",
       "breakpoints": true
     }
-
   ]
 }
