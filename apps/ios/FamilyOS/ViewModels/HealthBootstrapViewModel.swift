@@ -216,6 +216,10 @@ final class HealthBootstrapViewModel: ObservableObject {
             applyBootstrap(bootstrap)
             await loadPendingInvitePreview()
         } catch {
+            if let api = error as? HealthAPIError, case .badStatus(let status, _, _) = api, status == 401 {
+                signOut()
+                return
+            }
             startupError = error
             statusMessage = error.localizedDescription
             isError = true

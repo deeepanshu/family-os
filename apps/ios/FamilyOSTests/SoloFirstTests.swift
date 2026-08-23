@@ -729,6 +729,22 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertNotNil(try HealthKitSyncStore.shared.configuration())
     }
 
+    func testStartupAccountDeletedSignsOut() async {
+        MockURLProtocol.statusByPath = ["/bootstrap": 401]
+        let viewModel = makeViewModelWithMock([
+            "/bootstrap": #"{"error":{"code":"account_deleted","message":"This account has been deleted."}}"#
+        ])
+        viewModel.auth.accessToken = "test-token"
+        viewModel.auth.signedInUserId = "user-1"
+
+        await viewModel.startup()
+
+        XCTAssertEqual(viewModel.auth.accessToken, "")
+        XCTAssertNil(viewModel.auth.signedInUserId)
+        XCTAssertNil(viewModel.startupError)
+        MockURLProtocol.statusByPath = [:]
+    }
+
     func testPublicSiteOriginStripsHealthAPIPrefix() {
         XCTAssertEqual(
             FamilyOSPublicSite.origin(fromAPIBaseURL: "http://localhost:3001/health/api/v1").absoluteString,
@@ -872,6 +888,7 @@ private func makeBootstrapResponse(
 
 private final class MockURLProtocol: URLProtocol {
     nonisolated(unsafe) static var handlers: [String: Data] = [:]
+    nonisolated(unsafe) static var statusByPath: [String: Int] = [:]
 
     override class func canInit(with request: URLRequest) -> Bool {
         true
@@ -891,7 +908,8 @@ private final class MockURLProtocol: URLProtocol {
             client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
             return
         }
-        let urlResponse = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+        let status = MockURLProtocol.statusByPath[path] ?? 200
+        let urlResponse = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
         client?.urlProtocol(self, didReceive: urlResponse, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: data)
         client?.urlProtocolDidFinishLoading(self)

@@ -180,7 +180,7 @@ export function renderAccountDeletionPage(): string {
   <li>Pending household invites you created.</li>
   <li>Your recipient rows on other people’s reminders.</li>
 </ul>
-<p>After deletion, former household members cannot see you or your readings. The same sign-in can no longer access FamilyStack data.</p>
+<p>After deletion, former household members cannot see you or your readings. Signing in again with the same Apple ID starts a new empty FamilyStack account. Previous FamilyStack records stay deleted.</p>
 
 <h2>What is retained</h2>
 <ul>
