@@ -198,6 +198,7 @@ Runtime hardening knobs:
 - `HEALTH_API_REPOSITORY` defaults to `memory` for tests and `postgres` otherwise. Production rejects `memory`.
 - `HEALTH_API_SYNC_LOCAL_AUTH_USERS` defaults to `true` for non-production Postgres runs and `false` in production.
 - `HEALTH_API_CORS_ORIGIN` defaults to `*` outside production for local app/API smoke tests. Production must set an explicit origin.
+- `SUPABASE_SERVICE_ROLE_KEY` is required in production so account deletion can remove the Auth identity. Missing or blank fails startup.
 - `HEALTH_API_RATE_LIMIT_WINDOW_MS` defaults to `60000`.
 - `HEALTH_API_RATE_LIMIT_MAX_WRITES` defaults to `120` writes per window per bearer token, falling back to IP when no bearer token is present.
 - `HEALTH_API_RATE_LIMIT_MAX_BUCKETS` defaults to `10000` in-memory buckets per API process. The Phase 1 limiter is process-local; multi-process deployments need a shared limiter.
