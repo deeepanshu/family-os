@@ -14,7 +14,20 @@ struct FamilyView: View {
                     memberFamilySection
                 }
             }
-            .navigationTitle(viewModel.family.canManageFamily ? "Manage Family" : "Family")
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(Color(.systemGroupedBackground))
+            .safeAreaInset(edge: .top, spacing: 0) {
+                Text(viewModel.family.canManageFamily ? "Manage Family" : "Family")
+                    .font(.largeTitle.weight(.bold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 6)
+                    .background(Color(.systemGroupedBackground))
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar)
             .task {
                 await viewModel.loadCurrentFamily()
                 await viewModel.loadProfiles()

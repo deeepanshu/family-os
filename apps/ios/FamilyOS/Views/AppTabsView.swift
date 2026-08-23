@@ -5,11 +5,8 @@ struct AppTabsView: View {
 
     var body: some View {
         TabView {
-            HealthKitSyncView(viewModel: viewModel)
-                .tabItem { Label("Health Data", systemImage: "heart.fill") }
-
             HistoryView(viewModel: viewModel)
-                .tabItem { Label("History", systemImage: "clock") }
+                .tabItem { Label("Health", systemImage: "heart.fill") }
 
             FamilyView(viewModel: viewModel)
                 .tabItem { Label(viewModel.family.canManageFamily ? "Manage Family" : "Family", systemImage: "house") }
