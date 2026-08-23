@@ -1,3 +1,4 @@
+import { HEALTH_API_PREFIX } from "@family-os/shared";
 import { createRemoteJWKSet, decodeJwt, decodeProtectedHeader, jwtVerify, type JWTPayload } from "jose";
 import { createMiddleware } from "hono/factory";
 import type { AppConfig } from "./config";
@@ -60,7 +61,7 @@ export function requireAuth() {
 function isDeleteMeRequest(method: string, path: string): boolean {
   if (method !== "DELETE") return false;
   const normalized = path.replace(/\/+$/, "") || "/";
-  return normalized === "/me" || normalized.endsWith("/me") || normalized === "/";
+  return normalized === `${HEALTH_API_PREFIX}/me` || normalized === "/me";
 }
 
 export async function verifyBearerToken(

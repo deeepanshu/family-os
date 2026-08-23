@@ -2,19 +2,12 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { InviteStore } from "../repositories/contracts";
+import { escapeHtml } from "../html";
 import { HttpError } from "../errors";
 
 const tokenSchema = z.object({
   token: z.string().min(16).max(256)
 });
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
 
 export function renderInviteLandingPage(input: {
   familyName: string;

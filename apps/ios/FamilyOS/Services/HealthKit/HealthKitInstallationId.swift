@@ -15,6 +15,13 @@ enum HealthKitInstallationId {
         return created
     }
 
+    static func existing(using keychain: KeychainStore = KeychainStore()) -> String? {
+        guard let value = try? keychain.string(for: keychainKey), !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
+
     static func clear(using keychain: KeychainStore = KeychainStore()) {
         keychain.remove(keychainKey)
     }

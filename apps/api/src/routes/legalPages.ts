@@ -1,17 +1,12 @@
 import { Hono } from "hono";
+import type { AppConfig } from "../config";
+import { escapeHtml } from "../html";
+import { mcpPublicOrigin } from "../mcp/publicUrl";
 
 export const SUPPORT_EMAIL = "deepanshujain1234@live.com";
-export const PUBLIC_ORIGIN = "https://familyos.deepanshujain.me";
 
 const EFFECTIVE_DATE = "August 23, 2026";
 
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
 
 function legalPage(title: string, bodyHtml: string): string {
   return `<!DOCTYPE html>
@@ -74,11 +69,11 @@ function legalPage(title: string, bodyHtml: string): string {
 </html>`;
 }
 
-export function renderPrivacyPolicyPage(): string {
+export function renderPrivacyPolicyPage(origin: string): string {
   return legalPage(
     "Privacy Policy",
     `<p class="meta">Effective ${EFFECTIVE_DATE}. Product name: FamilyStack.</p>
-<p>FamilyStack is a household health app. This policy describes how the iOS app and the FamilyStack API at ${escapeHtml(PUBLIC_ORIGIN)} handle information. It matches shipped behavior, not future features.</p>
+<p>FamilyStack is a household health app. This policy describes how the iOS app and the FamilyStack API at ${escapeHtml(origin)} handle information. It matches shipped behavior, not future features.</p>
 
 <h2>Who we are</h2>
 <p>FamilyStack is operated by Deepanshu Jain. Questions: <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>. See also <a href="/support">Support</a>.</p>
@@ -201,12 +196,13 @@ export function renderAccountDeletionPage(): string {
   );
 }
 
-export function createLegalPageRoutes() {
+export function createLegalPageRoutes(config: AppConfig) {
   const legal = new Hono();
+  const origin = mcpPublicOrigin(config);
 
   legal.get("/privacy", (c) => {
     c.header("content-type", "text/html; charset=utf-8");
-    return c.body(renderPrivacyPolicyPage());
+    return c.body(renderPrivacyPolicyPage(origin));
   });
   legal.get("/privacy-policy", (c) => c.redirect("/privacy", 302));
   legal.get("/support", (c) => {

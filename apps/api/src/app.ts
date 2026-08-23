@@ -122,7 +122,7 @@ export function createApp(options: AppOptions = {}) {
   app.route(mcpPublicPath(config), createMcpRoutes({ config, repositories }));
   app.route(mcpOAuthPath(config), createOAuthConsentRoutes({ config, mcpConnections: repositories.mcpConnections }));
   app.route("/invite", createInviteLandingRoutes(repositories.invites));
-  app.route("/", createLegalPageRoutes());
+  app.route("/", createLegalPageRoutes(config));
   app.route(HEALTH_API_PREFIX, health);
 
   app.notFound((c) =>

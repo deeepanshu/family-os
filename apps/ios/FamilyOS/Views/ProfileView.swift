@@ -80,6 +80,6 @@ struct ProfileView: View {
     }
 
     private func legalURL(_ path: String) -> URL {
-        URL(string: "https://familyos.deepanshujain.me\(path)")!
+        FamilyOSPublicSite.url(path: path, apiBaseURL: viewModel.connection.baseURL)
     }
 }

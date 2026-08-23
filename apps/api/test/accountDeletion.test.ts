@@ -13,7 +13,13 @@ const memberId = "00000000-0000-4000-8000-000000000402";
 const managerInstallationId = "53064303-35cf-4db0-a5d3-8af7d8f747e1";
 const memberInstallationId = "63064303-35cf-4db0-a5d3-8af7d8f747e2";
 
-function app(options: { serviceRoleKey?: string; fetchImpl?: typeof fetch } = {}) {
+function app(
+  options: {
+    serviceRoleKey?: string;
+    fetchImpl?: typeof fetch;
+    familyRepository?: InMemoryFamilyRepository;
+  } = {}
+) {
   if (options.fetchImpl) {
     vi.stubGlobal("fetch", options.fetchImpl);
   }
@@ -26,7 +32,7 @@ function app(options: { serviceRoleKey?: string; fetchImpl?: typeof fetch } = {}
       SUPABASE_URL: supabaseUrl,
       ...(options.serviceRoleKey ? { SUPABASE_SERVICE_ROLE_KEY: options.serviceRoleKey } : {})
     },
-    familyRepository: new InMemoryFamilyRepository()
+    familyRepository: options.familyRepository ?? new InMemoryFamilyRepository()
   });
 }
 
@@ -194,16 +200,28 @@ describe("account deletion", () => {
   });
 
   it("dissolves a household when the last member deletes their account", async () => {
-    const api = app();
+    const repo = new InMemoryFamilyRepository();
+    const api = app({ familyRepository: repo });
     const token = await jwtFor(managerId);
     await setupSoloUser(api, token, "Deepanshu");
     await setupHousehold(api, token, "Jain Family");
+    const before = await (
+      await api.request(`${HEALTH_API_PREFIX}/families/current`, {
+        headers: { authorization: `Bearer ${token}` }
+      })
+    ).json();
+    const family = before.data?.family;
+    if (!family || typeof family !== "object" || !("id" in family) || typeof family.id !== "string") {
+      throw new Error("expected current family id");
+    }
+    const familyId = family.id;
 
     const deleted = await api.request(`${HEALTH_API_PREFIX}/me`, {
       method: "DELETE",
       headers: { authorization: `Bearer ${token}` }
     });
     expect(deleted.status).toBe(204);
+    expect(repo.hasFamily(familyId)).toBe(false);
 
     const otherToken = await jwtFor(memberId, "new@example.com");
     await setupSoloUser(api, otherToken, "New");
@@ -236,6 +254,31 @@ describe("account deletion", () => {
       })
     ).json();
     expect(people.data).toEqual([]);
+  });
+
+  it("rejects other writes from a deleted account but keeps DELETE /me idempotent", async () => {
+    const api = app();
+    const token = await jwtFor(managerId);
+    const { profileId } = await setupSoloUser(api, token, "Deepanshu");
+
+    const deleted = await api.request(`${HEALTH_API_PREFIX}/me`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    expect(deleted.status).toBe(204);
+
+    const soft = await api.request(`${HEALTH_API_PREFIX}/people/${profileId}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    expect(soft.status).toBe(401);
+    await expect(soft.json()).resolves.toMatchObject({ error: { code: "account_deleted" } });
+
+    const second = await api.request(`${HEALTH_API_PREFIX}/me`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    expect(second.status).toBe(204);
   });
 
   it("calls Auth admin delete when a service role key is configured", async () => {

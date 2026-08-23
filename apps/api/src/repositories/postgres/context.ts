@@ -187,9 +187,8 @@ export class PostgresRepositoryContext {
     `;
   }
 
-  async syncAuthUser(userId: string) {
-    if (!this.options.syncLocalAuthUsers) return;
-    const [deleted] = await this.sql`
+  async isAccountDeleted(userId: string, tx: PgExecutor = this.sql): Promise<boolean> {
+    const [row] = await tx`
       select 1
       from audit_logs
       where action = 'account.deleted'
@@ -197,7 +196,12 @@ export class PostgresRepositoryContext {
         and resource_id = ${userId}
       limit 1
     `;
-    if (deleted) return;
+    return Boolean(row);
+  }
+
+  async syncAuthUser(userId: string) {
+    if (!this.options.syncLocalAuthUsers) return;
+    if (await this.isAccountDeleted(userId)) return;
     await this.sql`insert into auth.users (id) values (${userId}) on conflict (id) do nothing`;
   }
 

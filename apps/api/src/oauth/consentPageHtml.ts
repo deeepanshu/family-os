@@ -1,4 +1,5 @@
 import type { AppConfig } from "../config";
+import { escapeHtml } from "../html";
 import { mcpOAuthPath } from "../mcp/publicUrl";
 
 /**
@@ -303,13 +304,4 @@ export function renderOAuthConsentPage(config: AppConfig): string {
   </script>
 </body>
 </html>`;
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
 }

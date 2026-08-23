@@ -37,6 +37,7 @@ describe("public legal pages", () => {
     expect(html).toContain("do not sell");
     expect(html).toContain("advertising");
     expect(html).toContain(SUPPORT_EMAIL);
+    expect(html).toContain("http://127.0.0.1:3001");
     expect(html).not.toContain("Family OS");
   });
 

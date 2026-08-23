@@ -1218,6 +1218,10 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     }
   }
 
+  hasFamily(familyId: string): boolean {
+    return this.families.has(familyId);
+  }
+
 }
 
 function defined<T extends object>(input: T): Partial<T> {

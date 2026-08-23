@@ -523,15 +523,7 @@ export class PostgresFamilyStore {
   }
 
   async isAccountDeleted(userId: string): Promise<boolean> {
-    const [row] = await this.context.sql`
-      select 1
-      from audit_logs
-      where action = 'account.deleted'
-        and resource_type = 'account'
-        and resource_id = ${userId}
-      limit 1
-    `;
-    return Boolean(row);
+    return this.context.isAccountDeleted(userId);
   }
 
   async deleteAccount(actorUserId: string): Promise<void> {
@@ -586,6 +578,7 @@ export class PostgresFamilyStore {
         await this.deactivateMembership(tx, current.family.id, actorUserId);
         if (!others || Number(others.count) === 0) {
           await this.revokePendingInvites(tx, current.family.id);
+          await tx`delete from families where id = ${current.family.id}`;
         }
       }
 
