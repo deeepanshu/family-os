@@ -188,6 +188,15 @@ export class PostgresRepositoryContext {
   }
 
   async isAccountDeleted(userId: string, tx: PgExecutor = this.sql): Promise<boolean> {
+    const [self] = await tx`
+      select 1
+      from people
+      where linked_user_id = ${userId}
+        and relationship_label = 'Self'
+        and status = 'active'
+      limit 1
+    `;
+    if (self) return false;
     const [row] = await tx`
       select 1
       from audit_logs
@@ -201,7 +210,6 @@ export class PostgresRepositoryContext {
 
   async syncAuthUser(userId: string) {
     if (!this.options.syncLocalAuthUsers) return;
-    if (await this.isAccountDeleted(userId)) return;
     await this.sql`insert into auth.users (id) values (${userId}) on conflict (id) do nothing`;
   }
 

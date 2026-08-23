@@ -80,7 +80,6 @@ export function createApp(options: AppOptions = {}) {
 
   app.use("*", async (c, next) => {
     c.set("config", config);
-    c.set("isAccountDeleted", (userId: string) => repositories.profiles.isAccountDeleted(userId));
     await next();
   });
   app.use("*", requestLoggingMiddleware());

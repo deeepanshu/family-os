@@ -251,9 +251,6 @@ export class PostgresFamilyStore {
   }
 
   async createSelfProfile(actorUserId: string, displayName: string): Promise<HealthProfile> {
-    if (await this.isAccountDeleted(actorUserId)) {
-      throw new HttpError(401, "account_deleted", "This account has been deleted.");
-    }
     await this.context.syncAuthUser(actorUserId);
     const existing = await this.getSelfProfile(actorUserId);
     if (existing) {

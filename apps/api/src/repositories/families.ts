@@ -373,9 +373,6 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   }
 
   async createSelfProfile(actorUserId: string, displayName: string): Promise<HealthProfile> {
-    if (this.deletedUserIds.has(actorUserId)) {
-      throw new HttpError(401, "account_deleted", "This account has been deleted.");
-    }
     const existing = await this.getSelfProfile(actorUserId);
     if (existing) {
       return existing;
@@ -1148,11 +1145,16 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   }
 
   isAccountDeleted(userId: string): boolean {
+    const hasSelf = [...this.profiles.values()].some(
+      (profile) =>
+        profile.linkedUserId === userId && profile.relationshipLabel === "Self" && profile.status === "active"
+    );
+    if (hasSelf) return false;
     return this.deletedUserIds.has(userId);
   }
 
   async deleteAccount(actorUserId: string): Promise<void> {
-    if (this.deletedUserIds.has(actorUserId)) {
+    if (this.isAccountDeleted(actorUserId)) {
       return;
     }
 

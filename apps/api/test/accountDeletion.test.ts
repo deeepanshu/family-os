@@ -87,7 +87,7 @@ describe("account deletion", () => {
     vi.unstubAllGlobals();
   });
 
-  it("deletes the account with 204 and rejects later access", async () => {
+  it("deletes the account with 204 and lets the same sign-in start fresh", async () => {
     const api = app();
     const token = await jwtFor(managerId);
     const { profileId } = await setupSoloUser(api, token, "Deepanshu");
@@ -108,23 +108,29 @@ describe("account deletion", () => {
     const session = await api.request(`${HEALTH_API_PREFIX}/me`, {
       headers: { authorization: `Bearer ${token}` }
     });
-    expect(session.status).toBe(401);
-    await expect(session.json()).resolves.toMatchObject({
-      error: { code: "account_deleted" }
-    });
+    expect(session.status).toBe(200);
+
+    const oldReadings = await api.request(
+      `${HEALTH_API_PREFIX}/readings/blood-pressure?personId=${profileId}`,
+      { headers: { authorization: `Bearer ${token}` } }
+    );
+    expect(oldReadings.status).toBe(404);
 
     const recreate = await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ displayName: "Back" })
     });
-    expect(recreate.status).toBe(401);
+    expect(recreate.status).toBe(201);
 
     const bootstrap = await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}` }
     });
-    expect(bootstrap.status).toBe(401);
+    expect(bootstrap.status).toBe(200);
+    await expect(bootstrap.json()).resolves.toMatchObject({
+      data: { needsProfileSetup: false, selfProfile: { displayName: "Back" } }
+    });
 
     const second = await api.request(`${HEALTH_API_PREFIX}/me`, {
       method: "DELETE",
@@ -256,7 +262,7 @@ describe("account deletion", () => {
     expect(people.data).toEqual([]);
   });
 
-  it("rejects other writes from a deleted account but keeps DELETE /me idempotent", async () => {
+  it("cannot read wiped rows after delete and keeps DELETE /me idempotent", async () => {
     const api = app();
     const token = await jwtFor(managerId);
     const { profileId } = await setupSoloUser(api, token, "Deepanshu");
@@ -271,8 +277,7 @@ describe("account deletion", () => {
       method: "DELETE",
       headers: { authorization: `Bearer ${token}` }
     });
-    expect(soft.status).toBe(401);
-    await expect(soft.json()).resolves.toMatchObject({ error: { code: "account_deleted" } });
+    expect(soft.status).toBe(404);
 
     const second = await api.request(`${HEALTH_API_PREFIX}/me`, {
       method: "DELETE",
