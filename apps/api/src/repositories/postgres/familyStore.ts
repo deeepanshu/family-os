@@ -532,7 +532,6 @@ export class PostgresFamilyStore {
     }
 
     const current = await this.context.getCurrentFamily(actorUserId);
-    const self = await this.getSelfProfile(actorUserId);
 
     await this.context.sql.begin(async (tx: PgExecutor) => {
       await this.context.audit(
@@ -558,14 +557,21 @@ export class PostgresFamilyStore {
           and status = 'pending'
       `;
 
-      if (self) {
-        await tx`
-          update reminders
-          set subject_person_id = null, updated_at = now()
-          where subject_person_id = ${self.id}
-        `;
-        await tx`delete from people where id = ${self.id}`;
-      }
+      await tx`
+        update reminders
+        set subject_person_id = null, updated_at = now()
+        where subject_person_id in (
+          select id from people where linked_user_id = ${actorUserId}
+        )
+      `;
+      await tx`delete from people where created_by_user_id = ${actorUserId} and linked_user_id is null`;
+      await tx`delete from people where linked_user_id = ${actorUserId}`;
+      await tx`
+        update people
+        set created_by_user_id = linked_user_id, updated_at = now()
+        where created_by_user_id = ${actorUserId}
+          and linked_user_id is not null
+      `;
 
       if (current) {
         const [others] = await tx`
@@ -575,12 +581,51 @@ export class PostgresFamilyStore {
             and status = 'active'
             and user_id <> ${actorUserId}
         `;
-        await this.deactivateMembership(tx, current.family.id, actorUserId);
         if (!others || Number(others.count) === 0) {
           await this.revokePendingInvites(tx, current.family.id);
           await tx`delete from families where id = ${current.family.id}`;
         }
       }
+
+      const createdFamilies = await tx`
+        select id from families where created_by_user_id = ${actorUserId}
+      `;
+      for (const family of createdFamilies) {
+        const [successor] = await tx`
+          select user_id
+          from family_memberships
+          where family_id = ${family.id}
+            and status = 'active'
+            and user_id <> ${actorUserId}
+          order by created_at
+          limit 1
+        `;
+        if (successor) {
+          await tx`
+            update families
+            set created_by_user_id = ${successor.user_id}, updated_at = now()
+            where id = ${family.id}
+          `;
+        } else {
+          await this.revokePendingInvites(tx, family.id);
+          await tx`delete from families where id = ${family.id}`;
+        }
+      }
+
+      await tx`delete from family_memberships where user_id = ${actorUserId}`;
+      await tx`
+        update family_invites as invite
+        set invited_by_user_id = family.created_by_user_id, updated_at = now()
+        from families as family
+        where invite.family_id = family.id
+          and invite.invited_by_user_id = ${actorUserId}
+      `;
+      await tx`
+        update family_invites
+        set accepted_by_user_id = null, updated_at = now()
+        where accepted_by_user_id = ${actorUserId}
+      `;
+      await tx`update audit_logs set actor_user_id = null where actor_user_id = ${actorUserId}`;
 
       await this.context.deleteLocalAuthUser(actorUserId, tx);
     });

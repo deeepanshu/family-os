@@ -762,6 +762,20 @@ export class PostgresHealthKitStore {
         `;
         return rows.length;
       }
+      case "activity": {
+        const hourStarts = manifest
+          .filter((key) => key.startsWith("steps_hour:"))
+          .map((key) => key.slice("steps_hour:".length));
+        const rows = await tx`
+          delete from health_step_hours
+          where person_id = ${input.personId}
+            and hour_start_utc >= ${input.rangeStartAt}::timestamptz
+            and hour_start_utc < ${input.rangeEndAt}::timestamptz
+            and not (hour_start_utc = any(${hourStarts}::timestamptz[]))
+          returning id
+        `;
+        return rows.length;
+      }
       default:
         throw new HttpError(400, "run_kind_not_allowed", `Repair is not supported for group ${input.group}.`);
     }
