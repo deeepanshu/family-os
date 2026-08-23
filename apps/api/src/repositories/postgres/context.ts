@@ -189,7 +189,21 @@ export class PostgresRepositoryContext {
 
   async syncAuthUser(userId: string) {
     if (!this.options.syncLocalAuthUsers) return;
+    const [deleted] = await this.sql`
+      select 1
+      from audit_logs
+      where action = 'account.deleted'
+        and resource_type = 'account'
+        and resource_id = ${userId}
+      limit 1
+    `;
+    if (deleted) return;
     await this.sql`insert into auth.users (id) values (${userId}) on conflict (id) do nothing`;
+  }
+
+  async deleteLocalAuthUser(userId: string, tx: PgExecutor = this.sql) {
+    if (!this.options.syncLocalAuthUsers) return;
+    await tx`delete from auth.users where id = ${userId}`;
   }
 
   async syncAuthUsers(userIds: string[]) {

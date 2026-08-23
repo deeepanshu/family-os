@@ -1182,6 +1182,34 @@ export class MemoryHealthKitEngine {
       groups
     };
   }
+
+  deleteAllForPerson(personId: string) {
+    const drop = (map: Map<string, { personId?: string }>) => {
+      for (const [key, value] of map) {
+        if (value.personId === personId) {
+          map.delete(key);
+        }
+      }
+    };
+    drop(this.profileSettings);
+    drop(this.syncState);
+    drop(this.installations);
+    drop(this.stepHours);
+    drop(this.sleepDays);
+    drop(this.dailyMetrics);
+    drop(this.glucose);
+    drop(this.workouts);
+    for (const key of [...this.groupEnabled.keys()]) {
+      if (key.startsWith(`${personId}:`)) {
+        this.groupEnabled.delete(key);
+      }
+    }
+    for (const key of [...this.opReceipts]) {
+      if (key.includes(personId)) {
+        this.opReceipts.delete(key);
+      }
+    }
+  }
 }
 
 /** In-memory counterpart of the postgres `at time zone` day conversion. */
