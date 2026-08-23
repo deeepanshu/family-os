@@ -3,6 +3,7 @@ import type { AppConfig } from "../config";
 import { escapeHtml } from "../html";
 import { mcpPublicOrigin } from "../mcp/publicUrl";
 import {
+  APPLICATION_BACKUP_RETENTION_DAYS,
   AUDIT_LOG_RETENTION_DAYS,
   CRASHLYTICS_RETENTION_DAYS,
   OPERATIONAL_LOG_RETENTION_DAYS
@@ -130,7 +131,8 @@ export function renderPrivacyPolicyPage(origin: string): string {
   <li><strong>Audit logs</strong> (including <code>account.deleted</code>) are kept for ${AUDIT_LOG_RETENTION_DAYS} days for security and abuse prevention, then deleted. They do not contain health values or tokens. Deleting a last-member household nulls the audit row’s family id; the row itself is kept for that period.</li>
   <li><strong>Crash diagnostics</strong> in Firebase Crashlytics are kept for ${CRASHLYTICS_RETENTION_DAYS} days.</li>
   <li><strong>Operational logs</strong> (request method, path, status, duration, user agent, and request id — not health values, tokens, or IP addresses we store ourselves) are kept for ${OPERATIONAL_LOG_RETENTION_DAYS} days.</li>
-  <li>We do not run automated backups or point-in-time recovery of FamilyStack application records. Manual operator dumps, if taken, are not a retained product archive of deleted accounts. After we delete your Supabase Auth identity, any residual Auth copies follow Supabase’s then-current backup policy.</li>
+  <li><strong>Application backups.</strong> FamilyStack application Postgres has no automated backups and no point-in-time recovery (${APPLICATION_BACKUP_RETENTION_DAYS} days). We do not keep operator dumps as a product archive. Sign-in identity is stored in a Supabase Auth project that does not hold health tables. We delete that Auth user on account deletion and have not enabled Auth point-in-time recovery. We do not keep a separate Auth archive.</li>
+  <li><strong>Legacy exercise catalog.</strong> A deprecated workout-exercise catalog from an earlier release is kept only so historic strength-workout entries that referenced it remain readable. It is not used for new entries.</li>
 </ul>
 <p>Health data that stays in Apple Health on your device is not a FamilyStack record and is not deleted by us.</p>
 
@@ -232,6 +234,7 @@ export function renderAccountDeletionPage(): string {
 <ul>
   <li><strong>Audit logs</strong>, including an <code>account.deleted</code> row written before identity is wiped. These rows use the existing audit shape (action, resource, actor id if still present, metadata without health values or tokens). They are kept for ${AUDIT_LOG_RETENTION_DAYS} days for security and abuse prevention, then deleted. If you were the last household member, the household is removed and the audit row’s family id is cleared; the row is still kept for that period.</li>
   <li>Other members’ profiles, health, devices, grants, and reminders they own.</li>
+  <li>A deprecated workout-exercise catalog kept only so historic strength-workout entries that referenced it remain readable. It is not used for new entries.</li>
   <li>Historical accepted, revoked, or expired invites you created. Pending invites are removed.</li>
   <li>Apple Health data on your iPhone. FamilyStack only reads HealthKit; deleting the account does not delete Apple Health samples on the device.</li>
 </ul>

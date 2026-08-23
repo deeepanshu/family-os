@@ -793,4 +793,39 @@ describe("Postgres repository wiring", () => {
     );
   });
 
+  it("keeps account.deleted after last-member household dissolve", async () => {
+    const api = app();
+    const token = await jwtFor(managerId, "last-member@example.com");
+    await setupSoloUser(api, token, "Deepanshu");
+    await setupHousehold(api, token, "Jain Family");
+
+    const before = await (
+      await api.request(`${HEALTH_API_PREFIX}/families/current`, {
+        headers: { authorization: `Bearer ${token}` }
+      })
+    ).json();
+    const family = before.data?.family;
+    if (!family || typeof family !== "object" || !("id" in family) || typeof family.id !== "string") {
+      throw new Error("expected current family id");
+    }
+    const familyId = family.id;
+
+    const deleted = await api.request(`${HEALTH_API_PREFIX}/me`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    expect(deleted.status).toBe(204);
+
+    const remainingFamilies = await sql`select id from families where id = ${familyId}`;
+    expect(remainingFamilies).toHaveLength(0);
+
+    const audits = await sql`
+      select action, resource_id, family_id
+      from audit_logs
+      where action = 'account.deleted'
+        and resource_id = ${managerId}
+    `;
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.family_id).toBeNull();
+  });
 });
