@@ -369,4 +369,8 @@ export class PostgresFamilyRepository implements FamilyRepository {
   listAuditLogs(actorUserId: string, limit?: number): Promise<AuditLog[]> {
     return this.reminderStore.listAuditLogs(actorUserId, limit);
   }
+
+  purgeExpiredAuditLogs(now?: Date): Promise<number> {
+    return this.reminderStore.purgeExpiredAuditLogs(now);
+  }
 }

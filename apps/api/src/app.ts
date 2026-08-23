@@ -25,6 +25,7 @@ import type { AppRepositories } from "./repositories/contracts";
 import { createMcpRoutes, createMcpWellKnownRoutes } from "./mcp/routes";
 import { mcpOAuthPath, mcpPublicPath } from "./mcp/publicUrl";
 import { configureOtelLogs, logError, logInfo } from "./logging/otelLogs";
+import { startAuditLogRetention } from "./retention";
 import { flushOtelMetrics } from "./logging/otelMetrics";
 
 export type AppOptions = {
@@ -75,6 +76,7 @@ export function createApp(options: AppOptions = {}) {
       ? { repositories: repositoriesFromFamilyRepository(options.familyRepository) }
       : createDependencies(config);
   const repositories = dependencies.repositories;
+  startAuditLogRetention(repositories.auditLogs, config.NODE_ENV);
   const app = new Hono<{ Variables: AppVariables }>();
   const health = new Hono<{ Variables: AppVariables }>();
 

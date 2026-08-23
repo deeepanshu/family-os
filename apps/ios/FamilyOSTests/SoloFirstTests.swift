@@ -667,7 +667,7 @@ final class SoloFirstTests: XCTestCase {
     }
 
     func testDeleteAccountClearsSessionAfterSuccess() async throws {
-        addTeardownBlock { HealthKitSyncStore.wipeShared() }
+        addTeardownBlock { resetSoloHealthKitWipeTestState() }
         let viewModel = makeViewModelWithMock(["/me": "{}"])
         viewModel.auth.accessToken = "test-token"
         viewModel.auth.signedInUserId = "user-1"
@@ -705,10 +705,11 @@ final class SoloFirstTests: XCTestCase {
         let wiped = try HealthKitSyncStore.shared
         XCTAssertNil(try wiped.configuration())
         XCTAssertEqual(try wiped.pendingCount(), 0)
+        XCTAssertFalse(HealthKitSyncStore.wipePending)
     }
 
     func testDeleteAccountSurfacesAPIError() async throws {
-        addTeardownBlock { HealthKitSyncStore.wipeShared() }
+        addTeardownBlock { resetSoloHealthKitWipeTestState() }
         let viewModel = makeViewModelWithMock([:])
         viewModel.auth.accessToken = "test-token"
         let store = try HealthKitSyncStore.shared
@@ -727,6 +728,45 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertTrue(viewModel.isError)
         XCTAssertFalse(viewModel.isDeletingAccount)
         XCTAssertNotNil(try HealthKitSyncStore.shared.configuration())
+        XCTAssertFalse(HealthKitSyncStore.wipePending)
+    }
+
+    func testDeleteAccountSurfacesLocalWipeFailure() async throws {
+        addTeardownBlock { resetSoloHealthKitWipeTestState() }
+        let viewModel = makeViewModelWithMock(["/me": "{}"])
+        viewModel.auth.accessToken = "test-token"
+        viewModel.auth.signedInUserId = "user-1"
+        let store = try HealthKitSyncStore.shared
+        try store.saveConfiguration(
+            userId: "user-1",
+            personId: "person-1",
+            installationId: "install-1",
+            healthTimezone: "UTC",
+            timezoneVersion: 1,
+            enabledGroups: ["vitals"]
+        )
+        HealthKitSyncStore.fileManager = SoloRefusingFileManager()
+
+        await viewModel.deleteAccount()
+
+        XCTAssertEqual(viewModel.auth.accessToken, "")
+        XCTAssertNil(viewModel.auth.signedInUserId)
+        XCTAssertTrue(viewModel.isError)
+        XCTAssertEqual(viewModel.statusMessage, HealthBootstrapViewModel.localHealthKitQueueWipeFailedMessage)
+        XCTAssertEqual(viewModel.actionFeedback?.message, HealthBootstrapViewModel.localHealthKitQueueWipeFailedMessage)
+        XCTAssertEqual(viewModel.actionFeedback?.isError, true)
+        XCTAssertTrue(HealthKitSyncStore.wipePending)
+    }
+
+    func testStartupRetriesPendingHealthKitWipe() async throws {
+        addTeardownBlock { resetSoloHealthKitWipeTestState() }
+        HealthKitSyncStore.wipePending = true
+        let viewModel = HealthBootstrapViewModel()
+
+        await viewModel.startup()
+
+        XCTAssertFalse(HealthKitSyncStore.wipePending)
+        XCTAssertFalse(viewModel.isError)
     }
 
     func testStartupAccountDeletedSignsOut() async {
@@ -753,6 +793,10 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertEqual(
             FamilyOSPublicSite.url(path: "/privacy", apiBaseURL: "https://familyos.deepanshujain.me/health/api/v1").absoluteString,
             "https://familyos.deepanshujain.me/privacy"
+        )
+        XCTAssertEqual(
+            FamilyOSPublicSite.url(path: "/terms", apiBaseURL: "https://familyos.deepanshujain.me/health/api/v1").absoluteString,
+            "https://familyos.deepanshujain.me/terms"
         )
     }
 }
@@ -935,4 +979,20 @@ private func makeViewModelWithMock(_ handlers: [String: String]) -> HealthBootst
         defaults: UserDefaults(suiteName: nil)!
     )
     return HealthBootstrapViewModel(dependencies: dependencies)
+}
+
+private final class SoloRefusingFileManager: FileManager {
+    override func removeItem(at url: URL) throws {
+        throw NSError(
+            domain: NSPOSIXErrorDomain,
+            code: Int(EPERM),
+            userInfo: [NSLocalizedDescriptionKey: "refused"]
+        )
+    }
+}
+
+private func resetSoloHealthKitWipeTestState() {
+    HealthKitSyncStore.fileManager = .default
+    HealthKitSyncStore.wipePending = false
+    HealthKitSyncStore.wipeShared()
 }
