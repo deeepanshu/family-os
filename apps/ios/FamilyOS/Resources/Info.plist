@@ -53,9 +53,9 @@
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.lifestyle</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>FamilyStack reads HealthKit data you approve so your family can view synced health readings.</string>
+	<string>FamilyStack reads Activity, Vitals, Sleep, and Workout data you approve from Apple Health so your family can view synced readings.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>FamilyStack writes health readings only when you choose to save approved data.</string>
+	<string>FamilyStack does not write data to Apple Health. This description is required by iOS; the app only reads health types you approve.</string>
 	<key>SUPABASE_ANON_KEY</key>
 	<string>$(SUPABASE_ANON_KEY)</string>
 	<key>SUPABASE_URL</key>

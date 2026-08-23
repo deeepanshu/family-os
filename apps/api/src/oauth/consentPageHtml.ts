@@ -172,10 +172,10 @@ export function renderOAuthConsentPage(config: AppConfig): string {
     }
 
     function renderLogin() {
-      setStatus("Sign in to Family OS to continue");
+      setStatus("Sign in to FamilyStack to continue");
       contentEl.innerHTML =
         "<h1>Connect an AI client</h1>" +
-        "<p>Sign in with the same Family OS account that owns your health profiles. A one-time magic link will be emailed to you.</p>" +
+        "<p>Sign in with the same FamilyStack account that owns your health profiles. A one-time magic link will be emailed to you.</p>" +
         '<label class="label" for="email">Email</label>' +
         '<input id="email" type="email" autocomplete="email" placeholder="you@example.com" />' +
         '<div class="row"><button class="approve" id="send-link" type="button">Email magic link</button></div>' +
@@ -208,11 +208,11 @@ export function renderOAuthConsentPage(config: AppConfig): string {
 
       let html =
         "<h1>Authorize " + escapeHtml(clientName) + "</h1>" +
-        "<p><strong>" + escapeHtml(clientName) + "</strong> wants read-only access to Family OS health data through " +
+        "<p><strong>" + escapeHtml(clientName) + "</strong> wants read-only access to FamilyStack health data through " +
         escapeHtml(RESOURCE_NAME) + ".</p>" +
         '<div class="label">What will be shared</div>' +
         "<ul>" +
-        "<li>Read-only health summaries (steps, sleep, blood pressure) for profiles you can already access in Family OS</li>" +
+        "<li>Read-only health summaries (steps, sleep, blood pressure) for profiles you can already access in FamilyStack</li>" +
         "<li>Data may be processed by the AI client (for example ChatGPT) to answer your questions</li>" +
         "<li>No write access, no medical advice, no raw HealthKit export</li>" +
         "</ul>" +
@@ -231,7 +231,7 @@ export function renderOAuthConsentPage(config: AppConfig): string {
           "</ul>";
       }
       html +=
-        '<p class="hint">You can revoke this connection later from Family OS. Approving creates a Family OS connection grant for this OAuth client only.</p>' +
+        '<p class="hint">You can revoke this connection later from FamilyStack. Approving creates a FamilyStack connection grant for this OAuth client only.</p>' +
         '<div class="row">' +
         '<button class="deny" id="deny" type="button">Deny</button>' +
         '<button class="approve" id="approve" type="button">Approve</button>' +

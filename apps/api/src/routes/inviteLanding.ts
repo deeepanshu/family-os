@@ -23,10 +23,10 @@ export function renderInviteLandingPage(input: {
   status: string;
 }): string {
   const openUrl = `familyos://invite/${input.token}`;
-  const title = input.status === "pending" ? "You're invited to Family OS" : "This invite is no longer open";
+  const title = input.status === "pending" ? "You're invited to FamilyStack" : "This invite is no longer open";
   const body =
     input.status === "pending"
-      ? `${input.creatorDisplayName} invited you to ${input.familyName}. Open Family OS to join.`
+      ? `${input.creatorDisplayName} invited you to ${input.familyName}. Open FamilyStack to join.`
       : "This invite has expired or already been used.";
   return `<!DOCTYPE html>
 <html lang="en">
@@ -38,7 +38,7 @@ export function renderInviteLandingPage(input: {
 <body>
   <h1>${escapeHtml(title)}</h1>
   <p>${escapeHtml(body)}</p>
-  <p><a href="${escapeHtml(openUrl)}">Open in Family OS</a></p>
+  <p><a href="${escapeHtml(openUrl)}">Open in FamilyStack</a></p>
 </body>
 </html>`;
 }
@@ -64,7 +64,7 @@ export function createInviteLandingRoutes(repository: InviteStore) {
         c.header("content-type", "text/html; charset=utf-8");
         return c.body(
           renderInviteLandingPage({
-            familyName: "Family OS",
+            familyName: "FamilyStack",
             creatorDisplayName: "Someone",
             token,
             status: "unknown"

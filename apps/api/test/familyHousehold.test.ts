@@ -382,7 +382,7 @@ describe("household invites", () => {
     const html = await page.text();
     expect(html).toContain("Jain Family");
     expect(html).toContain("Deepanshu");
-    expect(html).toContain("Open in Family OS");
+    expect(html).toContain("Open in FamilyStack");
     expect(html).toContain(`familyos://invite/${minted.data.token}`);
 
     const preview = await api.request(`${HEALTH_API_PREFIX}/invites/${minted.data.token}`);

@@ -106,6 +106,9 @@ describe("OAuth consent", () => {
     expect(html).toContain("authorization_id");
     expect(html).toContain("SUPABASE_URL");
     expect(html).toContain('const OAUTH_PATH = "/health/api/oauth"');
+    expect(html).toContain("Sign in to FamilyStack to continue");
+    expect(html).toContain("FamilyStack health data");
+    expect(html).not.toContain("Family OS");
   });
 
   it("returns authorization details from Supabase, not from the browser body", async () => {
