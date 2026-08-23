@@ -7,6 +7,7 @@ import type { FamilyRepository } from "./repositories/families";
 import { createFamilyRoutes } from "./routes/families";
 import { createInviteRoutes } from "./routes/invites";
 import { createInviteLandingRoutes } from "./routes/inviteLanding";
+import { createLegalPageRoutes } from "./routes/legalPages";
 import { createPeopleRoutes } from "./routes/people";
 import { createBloodPressureRoutes } from "./routes/bloodPressure";
 import { createHeartRateRoutes, createSleepRoutes, createStepsRoutes, createWorkoutRoutes } from "./routes/historyReadings";
@@ -120,6 +121,7 @@ export function createApp(options: AppOptions = {}) {
   app.route(mcpPublicPath(config), createMcpRoutes({ config, repositories }));
   app.route(mcpOAuthPath(config), createOAuthConsentRoutes({ config, mcpConnections: repositories.mcpConnections }));
   app.route("/invite", createInviteLandingRoutes(repositories.invites));
+  app.route("/", createLegalPageRoutes());
   app.route(HEALTH_API_PREFIX, health);
 
   app.notFound((c) =>
