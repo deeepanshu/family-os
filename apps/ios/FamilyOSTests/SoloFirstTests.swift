@@ -581,7 +581,7 @@ final class SoloFirstTests: XCTestCase {
             {"data":[{"localDay":"2026-08-19","count":8432}]}
             """,
             "/readings/workouts": """
-            {"data":[{"id":"w1","workoutType":"running","startedAtUtc":"2026-08-19T00:40:00.000Z","endedAtUtc":"2026-08-19T01:12:00.000Z","durationSeconds":1920,"activeEnergyKcal":280}]}
+            {"data":[{"id":"w1","workoutType":"running","startedAtUtc":"2026-08-19T00:40:00.000Z","endedAtUtc":"2026-08-19T01:12:00.000Z","durationSeconds":1920,"activeEnergyKcal":280,"distanceMeters":5000,"averageHeartRateBpm":148,"maximumHeartRateBpm":172,"minimumHeartRateBpm":112,"sourceName":"Apple Watch","isIndoor":false,"elevationAscendedMeters":42,"averageMETs":9.4}]}
             """
         ])
         viewModel.auth.accessToken = "dev-token"
@@ -593,6 +593,66 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertEqual(viewModel.readings.sleepDays.map(\.sleepDay), ["2026-08-19"])
         XCTAssertEqual(viewModel.readings.stepDays.map(\.count), [8432])
         XCTAssertEqual(viewModel.readings.workouts.map(\.workoutType), ["running"])
+        XCTAssertEqual(viewModel.readings.workouts.first?.averageHeartRateBpm, 148)
+        XCTAssertEqual(viewModel.readings.workouts.first?.isIndoor, false)
+    }
+
+    func testWorkoutHistoryCopyIncludesHeartRateAndExtras() {
+        let bangkok = TimeZone(identifier: "Asia/Bangkok")!
+        let workout = makeWorkout(
+            id: "w1",
+            startedAtUtc: "2026-08-19T00:40:00.000Z",
+            durationSeconds: 1920,
+            endedAtUtc: "2026-08-19T01:12:00.000Z",
+            averageHeartRateBpm: 148.4,
+            maximumHeartRateBpm: 172.1,
+            minimumHeartRateBpm: 112,
+            sourceName: "Apple Watch",
+            isIndoor: false,
+            elevationAscendedMeters: 42,
+            averageMETs: 9.4,
+            events: [WorkoutHistoryEvent(type: "lap", dateUtc: "2026-08-19T00:50:00.000Z", endDateUtc: nil)]
+        )
+        let presentation = HistoryItem.workout(workout).presentation(timeZone: bangkok)
+
+        XCTAssertEqual(presentation.title, "Running")
+        XCTAssertEqual(presentation.subtitle, "07:40–08:12")
+        XCTAssertEqual(
+            presentation.metrics,
+            [
+                HistoryMetricCell(label: "Time", value: "32m"),
+                HistoryMetricCell(label: "Active", value: "280 kcal"),
+                HistoryMetricCell(label: "Distance", value: "5.0 km"),
+                HistoryMetricCell(label: "Heart rate", value: "148 bpm", detail: "112–172"),
+                HistoryMetricCell(label: "Elev", value: "+42 m"),
+                HistoryMetricCell(label: "METs", value: "9.4"),
+                HistoryMetricCell(label: "Laps", value: "1"),
+                HistoryMetricCell(label: "Place", value: "Outdoor"),
+                HistoryMetricCell(label: "Source", value: "Watch")
+            ]
+        )
+    }
+
+    func testBloodPressureAndStepsUseMetricTitles() {
+        let bangkok = TimeZone(identifier: "Asia/Bangkok")!
+        let bp = HistoryItem.bloodPressure(
+            makeBloodPressure(id: "bp-1", systolic: 118, diastolic: 76, measuredAt: "2026-08-19T23:48:00.000Z")
+        ).presentation(timeZone: bangkok)
+        let steps = HistoryItem.steps(StepDayReading(localDay: "2026-08-19", count: 8432))
+            .presentation(timeZone: bangkok)
+
+        XCTAssertEqual(bp.title, "Blood Pressure")
+        XCTAssertEqual(bp.subtitle, "06:48")
+        XCTAssertEqual(
+            bp.metrics,
+            [
+                HistoryMetricCell(label: "Reading", value: "118/76 mmHg"),
+                HistoryMetricCell(label: "Pulse", value: "72 bpm")
+            ]
+        )
+        XCTAssertEqual(steps.title, "Steps")
+        XCTAssertNil(steps.subtitle)
+        XCTAssertEqual(steps.metrics, [HistoryMetricCell(label: "Count", value: "8,432")])
     }
 }
 
@@ -646,16 +706,48 @@ private func makeSleepDay(sleepDay: String, totalMinutes: Int) -> SleepDayReadin
     )
 }
 
-private func makeWorkout(id: String, startedAtUtc: String, durationSeconds: Int) -> WorkoutReading {
+private func makeWorkout(
+    id: String,
+    startedAtUtc: String,
+    durationSeconds: Int,
+    endedAtUtc: String? = nil,
+    activeEnergyKcal: Double? = 280,
+    distanceMeters: Double? = 5000,
+    averageHeartRateBpm: Double? = nil,
+    maximumHeartRateBpm: Double? = nil,
+    minimumHeartRateBpm: Double? = nil,
+    sourceName: String? = nil,
+    deviceName: String? = nil,
+    isIndoor: Bool? = nil,
+    elevationAscendedMeters: Double? = nil,
+    averageMETs: Double? = nil,
+    swimmingStrokeCount: Int? = nil,
+    totalFlightsClimbed: Int? = nil,
+    events: [WorkoutHistoryEvent]? = nil,
+    activities: [WorkoutHistoryActivity]? = nil,
+    exercises: [WorkoutExerciseLog]? = nil
+) -> WorkoutReading {
     WorkoutReading(
         id: id,
         workoutType: "running",
         startedAtUtc: startedAtUtc,
-        endedAtUtc: startedAtUtc,
+        endedAtUtc: endedAtUtc ?? startedAtUtc,
         durationSeconds: durationSeconds,
-        activeEnergyKcal: 280,
-        distanceMeters: 5000,
-        exercises: nil
+        activeEnergyKcal: activeEnergyKcal,
+        distanceMeters: distanceMeters,
+        averageHeartRateBpm: averageHeartRateBpm,
+        maximumHeartRateBpm: maximumHeartRateBpm,
+        minimumHeartRateBpm: minimumHeartRateBpm,
+        sourceName: sourceName,
+        deviceName: deviceName,
+        isIndoor: isIndoor,
+        elevationAscendedMeters: elevationAscendedMeters,
+        averageMETs: averageMETs,
+        swimmingStrokeCount: swimmingStrokeCount,
+        totalFlightsClimbed: totalFlightsClimbed,
+        events: events,
+        activities: activities,
+        exercises: exercises
     )
 }
 

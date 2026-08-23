@@ -204,6 +204,19 @@ struct WorkoutExerciseLog: Codable, Identifiable, Hashable {
     }
 }
 
+struct WorkoutHistoryEvent: Decodable {
+    let type: String
+    let dateUtc: String
+    let endDateUtc: String?
+}
+
+struct WorkoutHistoryActivity: Decodable {
+    let workoutType: String
+    let startedAtUtc: String
+    let endedAtUtc: String
+    let durationSeconds: Int
+}
+
 struct WorkoutReading: Decodable, Identifiable {
     let id: String
     let workoutType: String
@@ -212,6 +225,18 @@ struct WorkoutReading: Decodable, Identifiable {
     let durationSeconds: Int
     let activeEnergyKcal: Double?
     let distanceMeters: Double?
+    let averageHeartRateBpm: Double?
+    let maximumHeartRateBpm: Double?
+    let minimumHeartRateBpm: Double?
+    let sourceName: String?
+    let deviceName: String?
+    let isIndoor: Bool?
+    let elevationAscendedMeters: Double?
+    let averageMETs: Double?
+    let swimmingStrokeCount: Int?
+    let totalFlightsClimbed: Int?
+    let events: [WorkoutHistoryEvent]?
+    let activities: [WorkoutHistoryActivity]?
     let exercises: [WorkoutExerciseLog]?
 
     var isStrengthWorkout: Bool {
@@ -220,6 +245,163 @@ struct WorkoutReading: Decodable, Identifiable {
             return true
         default:
             return false
+        }
+    }
+}
+
+struct HistoryMetricCell: Equatable, Identifiable {
+    let label: String
+    let value: String
+    let detail: String?
+
+    var id: String { label }
+
+    init(label: String, value: String, detail: String? = nil) {
+        self.label = label
+        self.value = value
+        self.detail = detail
+    }
+}
+
+struct HistoryItemPresentation: Equatable {
+    let title: String
+    let subtitle: String?
+    let metrics: [HistoryMetricCell]
+}
+
+extension WorkoutReading {
+    var historyTitle: String {
+        workoutType.replacingOccurrences(of: "_", with: " ").localizedCapitalized
+    }
+
+    func historySubtitle(timeZone: TimeZone) -> String? {
+        HistoryTimeline.formatTimeRange(startISO: startedAtUtc, endISO: endedAtUtc, timeZone: timeZone)
+    }
+
+    var historyMetrics: [HistoryMetricCell] {
+        var metrics = [
+            HistoryMetricCell(label: "Time", value: HistoryTimeline.formatDuration(seconds: durationSeconds))
+        ]
+        if let kcal = activeEnergyKcal {
+            metrics.append(HistoryMetricCell(label: "Active", value: "\(Int(kcal.rounded())) kcal"))
+        }
+        if let meters = distanceMeters {
+            metrics.append(HistoryMetricCell(label: "Distance", value: HistoryTimeline.formatDistance(meters: meters)))
+        }
+        if let avg = averageHeartRateBpm {
+            let range: String?
+            if let min = minimumHeartRateBpm, let max = maximumHeartRateBpm {
+                range = "\(Int(min.rounded()))–\(Int(max.rounded()))"
+            } else if let max = maximumHeartRateBpm {
+                range = "max \(Int(max.rounded()))"
+            } else {
+                range = nil
+            }
+            metrics.append(HistoryMetricCell(label: "Heart rate", value: "\(Int(avg.rounded())) bpm", detail: range))
+        } else if let max = maximumHeartRateBpm {
+            metrics.append(HistoryMetricCell(label: "Heart rate", value: "max \(Int(max.rounded())) bpm"))
+        }
+        if let elevation = elevationAscendedMeters, elevation > 0 {
+            metrics.append(HistoryMetricCell(label: "Elev", value: String(format: "+%.0f m", elevation)))
+        }
+        if let mets = averageMETs {
+            metrics.append(HistoryMetricCell(label: "METs", value: String(format: "%.1f", mets)))
+        }
+        if let strokes = swimmingStrokeCount, strokes > 0 {
+            metrics.append(HistoryMetricCell(label: "Strokes", value: HistoryTimeline.formatCount(strokes)))
+        }
+        if let flights = totalFlightsClimbed, flights > 0 {
+            metrics.append(HistoryMetricCell(label: "Flights", value: "\(flights)"))
+        }
+        let laps = events?.filter { $0.type == "lap" }.count ?? 0
+        if laps > 0 {
+            metrics.append(HistoryMetricCell(label: "Laps", value: "\(laps)"))
+        }
+        if let activities, activities.count > 1 {
+            metrics.append(HistoryMetricCell(label: "Segments", value: "\(activities.count)"))
+        }
+        if let indoor = isIndoor {
+            metrics.append(HistoryMetricCell(label: "Place", value: indoor ? "Indoor" : "Outdoor"))
+        }
+        if let first = exercises?.first {
+            let extra = (exercises?.count ?? 1) > 1 ? " +\((exercises?.count ?? 1) - 1)" : ""
+            metrics.append(HistoryMetricCell(label: "Exercises", value: "\(first.name)\(extra)"))
+        }
+        if let source = compactSourceName {
+            metrics.append(HistoryMetricCell(label: "Source", value: source))
+        }
+        return metrics
+    }
+
+    private var compactSourceName: String? {
+        let raw = deviceName ?? sourceName
+        guard let raw, !raw.isEmpty else { return nil }
+        if raw.localizedCaseInsensitiveContains("watch") { return "Watch" }
+        return raw
+    }
+}
+
+extension SleepDayReading {
+    var historyMetrics: [HistoryMetricCell] {
+        var metrics = [
+            HistoryMetricCell(label: "Core", value: HistoryTimeline.formatMinutes(coreMinutes)),
+            HistoryMetricCell(label: "Deep", value: HistoryTimeline.formatMinutes(deepMinutes)),
+            HistoryMetricCell(label: "REM", value: HistoryTimeline.formatMinutes(remMinutes))
+        ]
+        if unspecifiedAsleepMinutes > 0 {
+            metrics.append(HistoryMetricCell(label: "Other", value: HistoryTimeline.formatMinutes(unspecifiedAsleepMinutes)))
+        }
+        if awakeMinutes > 0 {
+            metrics.append(HistoryMetricCell(label: "Awake", value: HistoryTimeline.formatMinutes(awakeMinutes)))
+        }
+        if inBedMinutes > 0, inBedMinutes != totalMinutes {
+            metrics.append(HistoryMetricCell(label: "In bed", value: HistoryTimeline.formatMinutes(inBedMinutes)))
+        }
+        if let temp = wristTemperatureCelsius {
+            metrics.append(HistoryMetricCell(label: "Wrist", value: String(format: "%.1f°C", temp)))
+        }
+        if let breathing = breathingDisturbanceCount {
+            metrics.append(HistoryMetricCell(label: "Breathing", value: "\(breathing)"))
+        }
+        return metrics
+    }
+}
+
+extension HistoryItem {
+    func presentation(timeZone: TimeZone) -> HistoryItemPresentation {
+        switch self {
+        case let .bloodPressure(reading):
+            var metrics = [
+                HistoryMetricCell(label: "Reading", value: "\(reading.systolic)/\(reading.diastolic) mmHg")
+            ]
+            if let pulse = reading.pulse {
+                metrics.append(HistoryMetricCell(label: "Pulse", value: "\(pulse) bpm"))
+            } else {
+                metrics.append(HistoryMetricCell(label: "Pulse", value: "Not recorded"))
+            }
+            return HistoryItemPresentation(
+                title: "Blood Pressure",
+                subtitle: HistoryTimeline.formatTime(reading.measuredAt, timeZone: timeZone),
+                metrics: metrics
+            )
+        case let .sleep(day):
+            return HistoryItemPresentation(
+                title: "Sleep",
+                subtitle: HistoryTimeline.formatMinutes(day.totalMinutes),
+                metrics: day.historyMetrics
+            )
+        case let .steps(day):
+            return HistoryItemPresentation(
+                title: "Steps",
+                subtitle: nil,
+                metrics: [HistoryMetricCell(label: "Count", value: HistoryTimeline.formatCount(day.count))]
+            )
+        case let .workout(workout):
+            return HistoryItemPresentation(
+                title: workout.historyTitle,
+                subtitle: workout.historySubtitle(timeZone: timeZone),
+                metrics: workout.historyMetrics
+            )
         }
     }
 }
@@ -346,6 +528,50 @@ enum HistoryTimeline {
 
     static func parseISO(_ iso: String) -> Date? {
         HealthKitRunEngine.parseISODate(iso)
+    }
+
+    static func formatMinutes(_ total: Int) -> String {
+        let hours = total / 60
+        let minutes = total % 60
+        if hours == 0 { return "\(minutes)m" }
+        if minutes == 0 { return "\(hours)h" }
+        return "\(hours)h \(minutes)m"
+    }
+
+    static func formatDuration(seconds: Int) -> String {
+        let clamped = max(seconds, 0)
+        if clamped < 60 { return "\(clamped)s" }
+        return formatMinutes(clamped / 60)
+    }
+
+    static func formatDistance(meters: Double) -> String {
+        if meters >= 1000 {
+            return String(format: "%.1f km", meters / 1000)
+        }
+        return String(format: "%.0f m", meters)
+    }
+
+    static func formatTime(_ iso: String, timeZone: TimeZone) -> String? {
+        guard let date = parseISO(iso) else { return nil }
+        let formatter = DateFormatter()
+        formatter.timeZone = timeZone
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
+    }
+
+    static func formatTimeRange(startISO: String, endISO: String, timeZone: TimeZone) -> String? {
+        guard let start = formatTime(startISO, timeZone: timeZone) else { return nil }
+        guard let end = formatTime(endISO, timeZone: timeZone), end != start else { return start }
+        return "\(start)–\(end)"
+    }
+
+    static func formatCount(_ value: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 0
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 
     private static func date(fromLocalDay localDay: String, timeZone: TimeZone) -> Date? {

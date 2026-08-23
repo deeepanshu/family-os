@@ -28,11 +28,10 @@ struct HistoryView: View {
                         ForEach(days) { day in
                             Section(HistoryTimeline.dateTitle(localDay: day.localDay, timeZone: viewModel.historyTimeZone)) {
                                 ForEach(day.items) { item in
+                                    let presentation = item.presentation(timeZone: viewModel.historyTimeZone)
                                     if case let .sleep(sleepDay) = item {
                                         ReadingRow(
-                                            kicker: kicker(for: item),
-                                            title: title(for: item),
-                                            detail: detail(for: item),
+                                            presentation: presentation,
                                             onInfo: { showingSleepLegend = true }
                                         ) {
                                             SleepStageBar(segments: HistorySleepStages.segments(sleepDay))
@@ -41,19 +40,11 @@ struct HistoryView: View {
                                         Button {
                                             selectedWorkout = workout
                                         } label: {
-                                            ReadingRow(
-                                                kicker: kicker(for: item),
-                                                title: title(for: item),
-                                                detail: detail(for: item)
-                                            )
+                                            ReadingRow(presentation: presentation)
                                         }
                                         .buttonStyle(.plain)
                                     } else {
-                                        ReadingRow(
-                                            kicker: kicker(for: item),
-                                            title: title(for: item),
-                                            detail: detail(for: item)
-                                        )
+                                        ReadingRow(presentation: presentation)
                                     }
                                 }
                             }
@@ -137,85 +128,12 @@ struct HistoryView: View {
         await viewModel.loadHistory()
     }
 
-    private func kicker(for item: HistoryItem) -> String {
-        switch item {
-        case .bloodPressure: return "Blood Pressure"
-        case .sleep: return "Sleep"
-        case .steps: return "Steps"
-        case .workout: return "Workout"
-        }
-    }
-
-    private func title(for item: HistoryItem) -> String {
-        switch item {
-        case let .bloodPressure(reading):
-            return "\(reading.systolic)/\(reading.diastolic) mmHg"
-        case let .sleep(day):
-            return formatMinutes(day.totalMinutes)
-        case let .steps(day):
-            return stepFormatter.string(from: NSNumber(value: day.count)) ?? "\(day.count)"
-        case let .workout(workout):
-            return workout.workoutType.replacingOccurrences(of: "_", with: " ").localizedCapitalized
-        }
-    }
-
-    private func detail(for item: HistoryItem) -> String? {
-        switch item {
-        case let .bloodPressure(reading):
-            let pulse = reading.pulse.map { "Pulse \($0)" } ?? "Pulse not recorded"
-            if let time = formatTime(reading.measuredAt) {
-                return "\(time) · \(pulse)"
-            }
-            return pulse
-        case let .sleep(day):
-            return HistorySleepStages.caption(day, formatMinutes: formatMinutes)
-        case .steps:
-            return nil
-        case let .workout(workout):
-            var parts: [String] = []
-            if let time = formatTime(workout.startedAtUtc) {
-                parts.append(time)
-            }
-            parts.append(formatMinutes(max(workout.durationSeconds / 60, 0)))
-            if let kcal = workout.activeEnergyKcal {
-                parts.append("\(Int(kcal.rounded())) kcal")
-            }
-            if let meters = workout.distanceMeters {
-                parts.append(String(format: "%.1f km", meters / 1000))
-            }
-            if let first = workout.exercises?.first {
-                let extra = (workout.exercises?.count ?? 1) > 1
-                    ? " + \((workout.exercises?.count ?? 1) - 1) more"
-                    : ""
-                parts.append("\(first.name)\(extra)")
-            }
-            return parts.joined(separator: " · ")
-
-        }
-    }
-
     private func formatMinutes(_ total: Int) -> String {
-        let hours = total / 60
-        let minutes = total % 60
-        if hours == 0 { return "\(minutes)m" }
-        if minutes == 0 { return "\(hours)h" }
-        return "\(hours)h \(minutes)m"
+        HistoryTimeline.formatMinutes(total)
     }
 
     private func formatTime(_ iso: String) -> String? {
-        guard let date = HistoryTimeline.parseISO(iso) else { return nil }
-        let formatter = DateFormatter()
-        formatter.timeZone = viewModel.historyTimeZone
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: date)
-    }
-
-    private var stepFormatter: NumberFormatter {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.maximumFractionDigits = 0
-        return formatter
+        HistoryTimeline.formatTime(iso, timeZone: viewModel.historyTimeZone)
     }
 }
 
