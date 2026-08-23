@@ -24,6 +24,11 @@ The iOS local dev sign-in uses `Bearer dev-token`; the API maps it to
 `HEALTH_API_DEV_AUTH_USER_ID`. This bypass is for local smoke testing only and
 must stay disabled in production.
 
+`npm run db:seed:local` fills the Debug user (`…0001`) so Home/History are not
+empty. Debug build → **Continue**. Profile picker: **DJDJ** (or the existing
+Self name) has steps/sleep/BP/workouts; **MJ** has BP only. Same-day re-run
+upserts. Loopback Postgres only — refused in production.
+
 For a physical iPhone, `localhost` means the phone itself. Build with the Mac's
 LAN IP in `HEALTH_API_BASE_URL`:
 

@@ -78,6 +78,12 @@ npm run db:migrate:local
 npm run db:seed:local
 ```
 
+`db:seed:local` writes demo HealthKit history for the Debug `dev-token` user
+(`00000000-0000-4000-8000-000000000001`). Run the API with
+`HEALTH_API_ENABLE_DEV_AUTH=true` as below, then open a Debug build and tap
+**Continue**. Switch **Profile** to **MJ** for a second member with BP only.
+The command refuses `NODE_ENV=production` and non-loopback `DATABASE_URL`.
+
 Generate and apply database migrations through Drizzle Kit:
 
 ```sh
