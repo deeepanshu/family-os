@@ -44,6 +44,7 @@ export type BootstrapResponse = {
   profiles: HealthProfile[];
   selfProfile: HealthProfile | null;
   needsProfileSetup: boolean;
+  suggestedDisplayName?: string;
 };
 
 export type FamilyRole = "manager" | "member";

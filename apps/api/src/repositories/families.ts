@@ -155,6 +155,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   private readonly auditLogs: AuditLog[] = [];
   private readonly mcpConnectionGrants = new Map<string, McpConnectionGrant>();
   private readonly deletedUserIds = new Set<string>();
+  private readonly appleDisplayNames = new Map<string, string>();
   constructor() {
     this.healthKit = new MemoryHealthKitEngine({
       requireActiveMember: (userId) => this.requireActiveMember(userId),
@@ -352,7 +353,7 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     }
   }
 
-  async bootstrap(userId: string): Promise<BootstrapResponse> {
+  async bootstrap(userId: string, appleUserId?: string): Promise<BootstrapResponse> {
     // Solo-first: no auto-created personal family.
     const current = await this.getCurrentFamily(userId);
     const selfProfile = await this.getSelfProfile(userId);
@@ -361,6 +362,9 @@ export class InMemoryFamilyRepository implements FamilyRepository {
         ? await this.listProfiles(userId)
         : [selfProfile]
       : [];
+    const suggestedDisplayName = appleUserId
+      ? await this.getAppleDisplayName(appleUserId)
+      : null;
 
     return {
       family: current?.family ?? null,
@@ -369,7 +373,8 @@ export class InMemoryFamilyRepository implements FamilyRepository {
       liveInvite: current?.liveInvite,
       profiles,
       selfProfile,
-      needsProfileSetup: selfProfile === null
+      needsProfileSetup: selfProfile === null,
+      suggestedDisplayName: suggestedDisplayName ?? undefined
     };
   }
 
@@ -401,6 +406,24 @@ export class InMemoryFamilyRepository implements FamilyRepository {
     });
     return profile;
   }
+
+  async rememberAppleDisplayName(appleUserId: string, displayName: string): Promise<void> {
+    const id = appleUserId.trim();
+    const name = displayName.trim();
+    if (!id || !name) {
+      return;
+    }
+    this.appleDisplayNames.set(id, name);
+  }
+
+  async getAppleDisplayName(appleUserId: string): Promise<string | null> {
+    const id = appleUserId.trim();
+    if (!id) {
+      return null;
+    }
+    return this.appleDisplayNames.get(id) ?? null;
+  }
+
 
   async getSelfProfile(actorUserId: string): Promise<HealthProfile | null> {
     return (

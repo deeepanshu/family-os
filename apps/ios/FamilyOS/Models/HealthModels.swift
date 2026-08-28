@@ -23,6 +23,7 @@ struct BootstrapResponse: Decodable {
     let profiles: [HealthProfile]
     let selfProfile: HealthProfile?
     let needsProfileSetup: Bool
+    let suggestedDisplayName: String?
 }
 
 struct FamilyResponse: Decodable {

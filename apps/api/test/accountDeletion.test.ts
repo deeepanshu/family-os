@@ -139,6 +139,41 @@ describe("account deletion", () => {
     expect(second.status).toBe(204);
   });
 
+  it("keeps the Apple display name after account delete for a new auth user", async () => {
+    const appleUserId = "001234.abcdef.familyos";
+    const secondUserId = "00000000-0000-4000-8000-000000000499";
+    const api = app();
+    const firstToken = await jwtFor(managerId);
+    const created = await api.request(`${HEALTH_API_PREFIX}/me/profile`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${firstToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "Deepanshu Jain", appleUserId })
+    });
+    expect(created.status).toBe(201);
+
+    const deleted = await api.request(`${HEALTH_API_PREFIX}/me`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${firstToken}` }
+    });
+    expect(deleted.status).toBe(204);
+
+    const secondToken = await jwtFor(secondUserId);
+    const bootstrap = await api.request(`${HEALTH_API_PREFIX}/bootstrap`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${secondToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ appleUserId })
+    });
+    expect(bootstrap.status).toBe(200);
+    await expect(bootstrap.json()).resolves.toMatchObject({
+      data: {
+        needsProfileSetup: true,
+        selfProfile: null,
+        suggestedDisplayName: "Deepanshu Jain"
+      }
+    });
+  });
+
+
   it("hides the deleted member and their readings from remaining family", async () => {
     const api = app();
     const managerToken = await jwtFor(managerId);

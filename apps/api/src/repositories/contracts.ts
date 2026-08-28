@@ -66,7 +66,7 @@ export type RecordAuditInput = {
 export interface FamilyStore {
   createFamily(input: CreateFamilyInput): Promise<CurrentFamilyResponse>;
   getCurrentFamily(userId: string): Promise<CurrentFamilyResponse>;
-  bootstrap(userId: string): Promise<BootstrapResponse>;
+  bootstrap(userId: string, appleUserId?: string): Promise<BootstrapResponse>;
   listMembers(actorUserId: string): Promise<FamilyMember[]>;
   leaveFamily(actorUserId: string): Promise<void>;
   removeMember(actorUserId: string, memberUserId: string): Promise<void>;
@@ -84,6 +84,8 @@ export interface ProfileStore {
   getProfile(actorUserId: string, profileId: string): Promise<HealthProfile>;
   createProfile(input: CreateProfileInput): Promise<HealthProfile>;
   createSelfProfile(actorUserId: string, displayName: string): Promise<HealthProfile>;
+  rememberAppleDisplayName(appleUserId: string, displayName: string): Promise<void>;
+  getAppleDisplayName(appleUserId: string): Promise<string | null>;
   getSelfProfile(actorUserId: string): Promise<HealthProfile | null>;
   updateProfile(actorUserId: string, profileId: string, input: UpdateProfileInput): Promise<HealthProfile>;
   deleteProfile(actorUserId: string, profileId: string): Promise<void>;

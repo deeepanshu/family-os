@@ -56,7 +56,8 @@ final class SoloFirstTests: XCTestCase {
             ),
             profiles: response.profiles,
             selfProfile: response.selfProfile,
-            needsProfileSetup: false
+            needsProfileSetup: false,
+            suggestedDisplayName: nil
         )
         viewModel.applyBootstrap(response)
         XCTAssertEqual(viewModel.family.lastCreatedInviteURL, "https://familyos.example.com/invite/tok")
@@ -574,6 +575,27 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertEqual(viewModel.suggestedSelfDisplayName, "test")
     }
 
+    func testStartupAutoCreatesSelfProfileFromStoredAppleName() async {
+        let viewModel = makeViewModelWithMock([
+            "/bootstrap": """
+            {"data":{"family":null,"membership":null,"profiles":[],"selfProfile":null,"needsProfileSetup":true,"suggestedDisplayName":"Deepanshu Jain"}}
+            """,
+            "/me/profile": """
+            {"data":{"id":"p1","linkedUserId":"user-1","displayName":"Deepanshu Jain","relationshipLabel":"Self"}}
+            """
+        ])
+        viewModel.auth.accessToken = "token"
+        viewModel.auth.signedInUserId = "user-1"
+        viewModel.rememberAppleUserId("001234.abcdef.familyos")
+
+        await viewModel.startup()
+
+        XCTAssertFalse(viewModel.needsProfileSetup)
+        XCTAssertEqual(viewModel.selfProfile?.displayName, "Deepanshu Jain")
+        XCTAssertFalse(viewModel.isError)
+    }
+
+
 
     func testHistoryTimelineGroupsByLocalDayNewestFirst() {
         let bangkok = TimeZone(identifier: "Asia/Bangkok")!
@@ -992,7 +1014,8 @@ private func makeBootstrapResponse(
         liveInvite: nil,
         profiles: profiles,
         selfProfile: selfProfile,
-        needsProfileSetup: needsProfileSetup
+        needsProfileSetup: needsProfileSetup,
+        suggestedDisplayName: nil
     )
 }
 
@@ -1042,6 +1065,7 @@ private func makeViewModelWithMock(_ handlers: [String: String]) -> HealthBootst
     let session = URLSession(configuration: config)
     let defaults = UserDefaults(suiteName: nil)!
     defaults.removeObject(forKey: DefaultsKey.pendingAppleDisplayName)
+    defaults.removeObject(forKey: DefaultsKey.pendingAppleUserId)
     let dependencies = HealthBootstrapDependencies(
         environment: AppEnvironment(name: .local, apiBaseURL: "https://test.example.com", supabaseURL: "https://test.supabase.co"),
         healthClient: HealthAPIClient(session: session),

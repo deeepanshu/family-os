@@ -7,7 +7,8 @@ import type { AppConfig } from "../config";
 import type { ProfileStore } from "../repositories/contracts";
 
 const createSelfProfileSchema = z.object({
-  displayName: z.string().trim().min(1).max(120)
+  displayName: z.string().trim().min(1).max(120),
+  appleUserId: z.string().trim().min(1).max(255).optional()
 });
 
 export function createMeRoutes(profileRepository: ProfileStore, config: AppConfig) {
@@ -19,6 +20,9 @@ export function createMeRoutes(profileRepository: ProfileStore, config: AppConfi
     const user = c.get("user");
     const body = c.req.valid("json");
     const data = await profileRepository.createSelfProfile(user.id, body.displayName);
+    if (body.appleUserId) {
+      await profileRepository.rememberAppleDisplayName(body.appleUserId, body.displayName);
+    }
     return c.json({ data }, 201);
   });
 

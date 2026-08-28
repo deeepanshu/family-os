@@ -21,6 +21,11 @@ extension HealthBootstrapViewModel {
         }
     }
 
+    func rememberAppleUserId(_ userId: String) {
+        pendingAppleUserId = userId
+    }
+
+
 
     func handleAppleSignInCompletion(_ result: Result<ASAuthorization, Error>) async {
         switch result {
@@ -93,9 +98,11 @@ extension HealthBootstrapViewModel {
     }
 
     private func signInWithApple(_ authorization: ASAuthorization) async {
-        rememberAppleFullName(
-            (authorization.credential as? ASAuthorizationAppleIDCredential)?.fullName
-        )
+        let credential = authorization.credential as? ASAuthorizationAppleIDCredential
+        if let userId = credential?.user {
+            rememberAppleUserId(userId)
+        }
+        rememberAppleFullName(credential?.fullName)
         await request(showsFeedback: true) {
             guard let currentAppleNonce = auth.currentAppleNonce else {
                 return "Apple sign-in nonce was missing. Try again."

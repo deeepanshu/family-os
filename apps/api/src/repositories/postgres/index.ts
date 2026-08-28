@@ -95,8 +95,8 @@ export class PostgresFamilyRepository implements FamilyRepository {
     return this.familyStore.getCurrentFamily(userId);
   }
 
-  bootstrap(userId: string): Promise<BootstrapResponse> {
-    return this.familyStore.bootstrap(userId);
+  bootstrap(userId: string, appleUserId?: string): Promise<BootstrapResponse> {
+    return this.familyStore.bootstrap(userId, appleUserId);
   }
 
   listMembers(actorUserId: string): Promise<FamilyMember[]> {
@@ -142,6 +142,15 @@ export class PostgresFamilyRepository implements FamilyRepository {
   createSelfProfile(actorUserId: string, displayName: string): Promise<HealthProfile> {
     return this.familyStore.createSelfProfile(actorUserId, displayName);
   }
+
+  rememberAppleDisplayName(appleUserId: string, displayName: string): Promise<void> {
+    return this.familyStore.rememberAppleDisplayName(appleUserId, displayName);
+  }
+
+  getAppleDisplayName(appleUserId: string): Promise<string | null> {
+    return this.familyStore.getAppleDisplayName(appleUserId);
+  }
+
 
   getSelfProfile(actorUserId: string): Promise<HealthProfile | null> {
     return this.familyStore.getSelfProfile(actorUserId);

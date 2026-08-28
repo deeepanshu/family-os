@@ -187,7 +187,7 @@ export class PostgresFamilyStore {
     `;
   }
 
-  async bootstrap(userId: string): Promise<BootstrapResponse> {
+  async bootstrap(userId: string, appleUserId?: string): Promise<BootstrapResponse> {
     await this.context.syncAuthUser(userId);
     // Solo-first: do not auto-create a family. Household is opt-in via createFamily later.
     const current = await this.getCurrentFamily(userId);
@@ -197,6 +197,9 @@ export class PostgresFamilyStore {
         ? await this.listProfiles(userId)
         : [selfProfile]
       : [];
+    const suggestedDisplayName = appleUserId
+      ? await this.getAppleDisplayName(appleUserId)
+      : null;
 
     return {
       family: current?.family ?? null,
@@ -205,7 +208,8 @@ export class PostgresFamilyStore {
       liveInvite: current?.liveInvite,
       profiles,
       selfProfile,
-      needsProfileSetup: selfProfile === null
+      needsProfileSetup: selfProfile === null,
+      suggestedDisplayName: suggestedDisplayName ?? undefined
     };
   }
 
@@ -273,6 +277,32 @@ export class PostgresFamilyStore {
     });
     return mapProfile(createdProfile);
   }
+
+  async rememberAppleDisplayName(appleUserId: string, displayName: string): Promise<void> {
+    const id = appleUserId.trim();
+    const name = displayName.trim();
+    if (!id || !name) {
+      return;
+    }
+    await this.context.sql`
+      insert into apple_sign_in_names (apple_user_id, display_name)
+      values (${id}, ${name})
+      on conflict (apple_user_id) do update
+      set display_name = excluded.display_name, updated_at = now()
+    `;
+  }
+
+  async getAppleDisplayName(appleUserId: string): Promise<string | null> {
+    const id = appleUserId.trim();
+    if (!id) {
+      return null;
+    }
+    const [row] = await this.context.sql`
+      select display_name from apple_sign_in_names where apple_user_id = ${id}
+    `;
+    return typeof row?.display_name === "string" ? row.display_name : null;
+  }
+
 
   async getSelfProfile(actorUserId: string): Promise<HealthProfile | null> {
     const [profile] = await this.context.sql`
