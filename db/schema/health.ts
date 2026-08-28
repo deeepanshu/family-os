@@ -92,6 +92,14 @@ export const people = pgTable(
   ]
 );
 
+export const appleSignInNames = pgTable("apple_sign_in_names", {
+  appleUserId: text("apple_user_id").primaryKey(),
+  displayName: text("display_name").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+
 export const healthStepHours = pgTable(
   "health_step_hours",
   {

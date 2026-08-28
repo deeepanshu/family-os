@@ -44,14 +44,24 @@ struct HealthAPIClient {
         return try await get(path: "me", baseURL: baseURL, accessToken: accessToken)
     }
 
-    func bootstrap(baseURL: String, accessToken: String) async throws -> BootstrapResponse {
+    func bootstrap(baseURL: String, accessToken: String, appleUserId: String? = nil) async throws -> BootstrapResponse {
         guard !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw HealthAPIError.missingToken
         }
-        return try await post(path: "bootstrap", baseURL: baseURL, accessToken: accessToken, body: EmptyRequest())
+        return try await post(
+            path: "bootstrap",
+            baseURL: baseURL,
+            accessToken: accessToken,
+            body: AppleUserRequest(appleUserId: appleUserId)
+        )
     }
 
-    func createSelfProfile(baseURL: String, accessToken: String, displayName: String) async throws -> HealthProfile {
+    func createSelfProfile(
+        baseURL: String,
+        accessToken: String,
+        displayName: String,
+        appleUserId: String? = nil
+    ) async throws -> HealthProfile {
         guard !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw HealthAPIError.missingToken
         }
@@ -59,7 +69,7 @@ struct HealthAPIClient {
             path: "me/profile",
             baseURL: baseURL,
             accessToken: accessToken,
-            body: CreateSelfProfileRequest(displayName: displayName)
+            body: CreateSelfProfileRequest(displayName: displayName, appleUserId: appleUserId)
         )
     }
 
@@ -586,6 +596,21 @@ private struct APIErrorBody: Decodable {
 
 private struct EmptyRequest: Encodable {}
 
+private struct AppleUserRequest: Encodable {
+    let appleUserId: String?
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        if let appleUserId {
+            try container.encode(appleUserId, forKey: .appleUserId)
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case appleUserId
+    }
+}
+
 private struct CreateFamilyRequest: Encodable {
     let name: String
 }
@@ -606,6 +631,20 @@ private struct CreateProfileRequest: Encodable {
 
 private struct CreateSelfProfileRequest: Encodable {
     let displayName: String
+    let appleUserId: String?
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(displayName, forKey: .displayName)
+        if let appleUserId {
+            try container.encode(appleUserId, forKey: .appleUserId)
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case displayName
+        case appleUserId
+    }
 }
 
 private struct HealthKitSettingsRequest: Encodable {

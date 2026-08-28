@@ -162,6 +162,13 @@
       "when": 1787580002000,
       "tag": "0022_apply_deprecated_catalog_drop",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1756390000000,
+      "tag": "0023_apple_sign_in_names",
+      "breakpoints": true
     }
   ]
 }
