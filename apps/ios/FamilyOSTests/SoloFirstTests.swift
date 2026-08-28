@@ -243,11 +243,11 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertNil(healthKit.progressBanner)
 
         healthKit.beginRun(metric: .vitals, kind: .initialImport)
-        XCTAssertEqual(healthKit.progressBanner?.title, "Importing Blood pressure & heart rate")
+        XCTAssertEqual(healthKit.progressBanner?.title, "Importing Blood pressure, heart rate & blood glucose")
         XCTAssertEqual(healthKit.progressBanner?.detail, HealthKitRunStage.preparing.displayText)
 
         healthKit.updateActiveRunStage(.reading)
-        XCTAssertEqual(healthKit.progressBanner?.title, "Importing Blood pressure & heart rate")
+        XCTAssertEqual(healthKit.progressBanner?.title, "Importing Blood pressure, heart rate & blood glucose")
         XCTAssertEqual(healthKit.progressBanner?.detail, HealthKitRunStage.reading.displayText)
 
         healthKit.endRun(metric: .vitals)
