@@ -144,6 +144,7 @@ final class HealthBootstrapViewModel: ObservableObject {
         healthKit.clear()
         pendingInviteToken = nil
         pendingInvitePreview = nil
+        pendingAppleDisplayName = nil
         needsProfileSetup = false
         startupError = nil
         statusMessage = "Signed out."
@@ -189,6 +190,25 @@ final class HealthBootstrapViewModel: ObservableObject {
         }
     }
 
+    var pendingAppleDisplayName: String? {
+        get { defaults.string(forKey: DefaultsKey.pendingAppleDisplayName) }
+        set {
+            let trimmed = newValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let trimmed, !trimmed.isEmpty {
+                defaults.set(trimmed, forKey: DefaultsKey.pendingAppleDisplayName)
+            } else {
+                defaults.removeObject(forKey: DefaultsKey.pendingAppleDisplayName)
+            }
+        }
+    }
+
+    var suggestedSelfDisplayName: String {
+        pendingAppleDisplayName
+            ?? SignInWithAppleDisplayName.emailLocalPart(auth.signedInUserEmail)
+            ?? ""
+    }
+
+
     var selfProfile: HealthProfile? {
         // Prefer the HealthKit-linked profile only when it is actually Self.
         if let linked = healthKit.linkedProfileId,
@@ -223,6 +243,7 @@ final class HealthBootstrapViewModel: ObservableObject {
             try await refreshSessionIfNeeded()
             let bootstrap = try await client.bootstrap(baseURL: connection.baseURL, accessToken: auth.accessToken)
             applyBootstrap(bootstrap)
+            await completeSelfProfileIfNeeded()
             await loadPendingInvitePreview()
         } catch {
             if let api = error as? HealthAPIError, case .badStatus(let status, _, _) = api, status == 401 {
@@ -243,18 +264,19 @@ final class HealthBootstrapViewModel: ObservableObject {
         reportActionFailure(statusMessage)
     }
 
-    func createSelfProfile(displayName: String) async {
-        guard !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+    func createSelfProfile(displayName: String, showsFeedback: Bool = true) async {
+        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
             isError = true
             statusMessage = "Please enter your name."
             reportActionFailure(statusMessage)
             return
         }
-        await request(showsFeedback: true) {
+        await request(showsFeedback: showsFeedback) {
             let profile = try await client.createSelfProfile(
                 baseURL: connection.baseURL,
                 accessToken: auth.accessToken,
-                displayName: displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                displayName: trimmed
             )
             if !self.profiles.profiles.contains(where: { $0.id == profile.id }) {
                 self.profiles.profiles.append(profile)
@@ -262,9 +284,17 @@ final class HealthBootstrapViewModel: ObservableObject {
             self.profiles.selectedProfileId = profile.id
             self.healthKit.linkedProfileId = profile.id
             self.needsProfileSetup = false
+            self.pendingAppleDisplayName = nil
             return "Profile created."
         }
     }
+
+    func completeSelfProfileIfNeeded() async {
+        guard needsProfileSetup, selfProfile == nil else { return }
+        guard let name = pendingAppleDisplayName, !name.isEmpty else { return }
+        await createSelfProfile(displayName: name, showsFeedback: false)
+    }
+
 
     func loadPendingInvitePreview() async {
         guard let token = pendingInviteToken, !token.isEmpty else {
@@ -439,5 +469,6 @@ enum DefaultsKey {
     static let userId = "familyOS.userId"
     static let userEmail = "familyOS.userEmail"
     static let pendingInviteToken = "familyOS.pendingInviteToken"
+    static let pendingAppleDisplayName = "familyOS.pendingAppleDisplayName"
     static let healthkitBackgroundSyncAlerts = "familyOS.healthkitBackgroundSyncAlerts"
 }

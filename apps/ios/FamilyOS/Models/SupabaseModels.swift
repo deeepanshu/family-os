@@ -18,6 +18,28 @@ struct AppleSignInNonce {
     let sha256: String
 }
 
+enum SignInWithAppleDisplayName {
+    static func fromPersonName(_ name: PersonNameComponents?) -> String? {
+        guard let name else { return nil }
+        let formatter = PersonNameComponentsFormatter()
+        formatter.style = .default
+        let formatted = formatter.string(from: name)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return formatted.isEmpty ? nil : formatted
+    }
+
+    static func emailLocalPart(_ email: String?) -> String? {
+        guard let email else { return nil }
+        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let local = trimmed.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: true)
+            .first
+            .map(String.init) ?? trimmed
+        let cleaned = local.trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? nil : cleaned
+    }
+}
+
 enum AccessTokenExpiry {
     static func requiresRefresh(_ token: String, within interval: TimeInterval = 60, now: Date = .now) -> Bool {
         let parts = token.split(separator: ".", omittingEmptySubsequences: false)
