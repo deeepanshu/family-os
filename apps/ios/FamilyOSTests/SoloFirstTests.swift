@@ -509,6 +509,72 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertEqual(viewModel.selfProfile?.id, profile.id)
     }
 
+    func testSignInWithAppleDisplayNameFormatsPersonName() {
+        var name = PersonNameComponents()
+        name.givenName = "Deepanshu"
+        name.familyName = "Jain"
+        let formatted = SignInWithAppleDisplayName.fromPersonName(name)
+        XCTAssertNotNil(formatted)
+        XCTAssertTrue(formatted!.contains("Deepanshu"), formatted ?? "")
+        XCTAssertTrue(formatted!.contains("Jain"), formatted ?? "")
+        XCTAssertNil(SignInWithAppleDisplayName.fromPersonName(nil))
+        XCTAssertNil(SignInWithAppleDisplayName.fromPersonName(PersonNameComponents()))
+    }
+
+    func testSignInWithAppleDisplayNameEmailLocalPart() {
+        XCTAssertEqual(
+            SignInWithAppleDisplayName.emailLocalPart("ada@privaterelay.appleid.com"),
+            "ada"
+        )
+        XCTAssertNil(SignInWithAppleDisplayName.emailLocalPart("  "))
+        XCTAssertNil(SignInWithAppleDisplayName.emailLocalPart(nil))
+    }
+
+    func testStartupAutoCreatesSelfProfileFromAppleFullName() async {
+        var name = PersonNameComponents()
+        name.givenName = "Deepanshu"
+        name.familyName = "Jain"
+        let expected = SignInWithAppleDisplayName.fromPersonName(name)!
+        let viewModel = makeViewModelWithMock([
+            "/bootstrap": """
+            {"data":{"family":null,"membership":null,"profiles":[],"selfProfile":null,"needsProfileSetup":true}}
+            """,
+            "/me/profile": """
+            {"data":{"id":"p1","linkedUserId":"user-1","displayName":"\(expected)","relationshipLabel":"Self"}}
+            """
+        ])
+        viewModel.auth.accessToken = "token"
+        viewModel.auth.signedInUserId = "user-1"
+        viewModel.rememberAppleFullName(name)
+
+        await viewModel.startup()
+
+        XCTAssertFalse(viewModel.needsProfileSetup)
+        XCTAssertEqual(viewModel.selfProfile?.displayName, expected)
+        XCTAssertEqual(viewModel.selfProfile?.id, "p1")
+        XCTAssertNil(viewModel.pendingAppleDisplayName)
+        XCTAssertFalse(viewModel.isError)
+    }
+
+    func testStartupDoesNotAutoCreateSelfProfileWithoutAppleName() async {
+        let viewModel = makeViewModelWithMock([
+            "/bootstrap": """
+            {"data":{"family":null,"membership":null,"profiles":[],"selfProfile":null,"needsProfileSetup":true}}
+            """
+        ])
+        viewModel.auth.accessToken = "token"
+        viewModel.auth.signedInUserEmail = "test@example.com"
+
+        await viewModel.startup()
+
+        XCTAssertTrue(viewModel.needsProfileSetup)
+        XCTAssertNil(viewModel.selfProfile)
+        XCTAssertFalse(viewModel.isError)
+        XCTAssertNil(MockURLProtocol.lastBodyByPath["/me/profile"])
+        XCTAssertEqual(viewModel.suggestedSelfDisplayName, "test")
+    }
+
+
     func testHistoryTimelineGroupsByLocalDayNewestFirst() {
         let bangkok = TimeZone(identifier: "Asia/Bangkok")!
         let days = HistoryTimeline.days(
@@ -930,9 +996,11 @@ private func makeBootstrapResponse(
     )
 }
 
+
 private final class MockURLProtocol: URLProtocol {
     nonisolated(unsafe) static var handlers: [String: Data] = [:]
     nonisolated(unsafe) static var statusByPath: [String: Int] = [:]
+    nonisolated(unsafe) static var lastBodyByPath: [String: Data] = [:]
 
     override class func canInit(with request: URLRequest) -> Bool {
         true
@@ -948,6 +1016,7 @@ private final class MockURLProtocol: URLProtocol {
             return
         }
         let path = url.path
+        MockURLProtocol.lastBodyByPath[path] = request.httpBody
         guard let data = MockURLProtocol.handlers[path] else {
             client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
             return
@@ -967,16 +1036,19 @@ private func makeViewModelWithMock(_ handlers: [String: String]) -> HealthBootst
     MockURLProtocol.handlers = handlers.reduce(into: [:]) { result, entry in
         result[entry.key] = entry.value.data(using: .utf8)
     }
+    MockURLProtocol.lastBodyByPath = [:]
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [MockURLProtocol.self]
     let session = URLSession(configuration: config)
+    let defaults = UserDefaults(suiteName: nil)!
+    defaults.removeObject(forKey: DefaultsKey.pendingAppleDisplayName)
     let dependencies = HealthBootstrapDependencies(
         environment: AppEnvironment(name: .local, apiBaseURL: "https://test.example.com", supabaseURL: "https://test.supabase.co"),
         healthClient: HealthAPIClient(session: session),
         healthKitClient: HealthKitClient(),
         authClient: SupabaseAuthClient(session: session),
         keychain: KeychainStore(),
-        defaults: UserDefaults(suiteName: nil)!
+        defaults: defaults
     )
     return HealthBootstrapViewModel(dependencies: dependencies)
 }

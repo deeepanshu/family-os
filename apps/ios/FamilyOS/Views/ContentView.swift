@@ -158,8 +158,13 @@ struct AcceptInviteView: View {
 
 struct SetUpProfileView: View {
     @ObservedObject var viewModel: HealthBootstrapViewModel
-    @State private var name = ""
+    @State private var name: String
     @State private var isSubmitting = false
+
+    init(viewModel: HealthBootstrapViewModel) {
+        self.viewModel = viewModel
+        _name = State(initialValue: viewModel.suggestedSelfDisplayName)
+    }
 
     var body: some View {
         NavigationStack {
