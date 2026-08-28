@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   HEALTH_API_PREFIX,
   MCP_HEALTH_METRICS,
-  MCP_HEALTH_METRIC_FOR_PRODUCT_GROUP,
+  MCP_HEALTH_METRICS_FOR_PRODUCT_GROUP,
   mcpHealthMetricsForEnabledGroups
 } from "@family-os/shared";
-import { bloodPressureOp, postOps, seedHealthKitReadyGroup, sleepDayOp, stepsHourOp, workoutOp as makeWorkoutOp, beginRun } from "./healthKitTestHelpers";
+import { bloodGlucoseOp, bloodPressureOp, postOps, seedHealthKitReadyGroup, sleepDayOp, stepsHourOp, workoutOp as makeWorkoutOp, beginRun } from "./healthKitTestHelpers";
 
 import { SignJWT } from "jose";
 import { createApp } from "../src/app";
@@ -121,6 +121,12 @@ async function seedUserWithHealthData(
       systolic: 120,
       diastolic: 80,
       pulse: 70
+    }),
+    bloodGlucoseOp({
+      sourceSampleKey: "6e1ed621-4a6c-4e09-969e-31c6f0872c25",
+      measuredAtUtc: "2026-07-16T09:40:00.000Z",
+      valueMgDl: 104,
+      mealTime: "preprandial"
     })
   ]);
 
@@ -141,19 +147,25 @@ async function serviceFor(repo: InMemoryFamilyRepository, options: { allowedOAut
 }
 
 describe("MCP product allowlist contract", () => {
-  it("exposes exactly steps, blood_pressure, sleep, and workout", () => {
-    expect([...MCP_HEALTH_METRICS].sort()).toEqual(["blood_pressure", "sleep", "steps", "workout"]);
+  it("exposes exactly steps, blood_pressure, blood_glucose, sleep, and workout", () => {
+    expect([...MCP_HEALTH_METRICS].sort()).toEqual([
+      "blood_glucose",
+      "blood_pressure",
+      "sleep",
+      "steps",
+      "workout"
+    ]);
   });
 
-  it("maps each enabled app toggle to its explicit MCP metric", () => {
-    expect(MCP_HEALTH_METRIC_FOR_PRODUCT_GROUP).toEqual({
-      activity: "steps",
-      vitals: "blood_pressure",
-      sleep: "sleep",
-      workouts: "workout"
+  it("maps each enabled app toggle to its explicit MCP metrics", () => {
+    expect(MCP_HEALTH_METRICS_FOR_PRODUCT_GROUP).toEqual({
+      activity: ["steps"],
+      vitals: ["blood_pressure", "blood_glucose"],
+      sleep: ["sleep"],
+      workouts: ["workout"]
     });
     expect(mcpHealthMetricsForEnabledGroups(["activity"])).toEqual(["steps"]);
-    expect(mcpHealthMetricsForEnabledGroups(["vitals"])).toEqual(["blood_pressure"]);
+    expect(mcpHealthMetricsForEnabledGroups(["vitals"])).toEqual(["blood_pressure", "blood_glucose"]);
     expect(mcpHealthMetricsForEnabledGroups(["sleep"])).toEqual(["sleep"]);
     expect(mcpHealthMetricsForEnabledGroups(["workouts"])).toEqual(["workout"]);
     // Broad groups never expand into registry metrics.
@@ -161,7 +173,7 @@ describe("MCP product allowlist contract", () => {
   });
 
   it("rejects unknown and previously registry-derived metrics", () => {
-    for (const metric of ["heart_rate", "blood_glucose", "oxygen_saturation", "export.xml", "steps'; drop table"]) {
+    for (const metric of ["heart_rate", "oxygen_saturation", "body_temperature", "export.xml", "steps'; drop table"]) {
       try {
         resolveMetricQuery({ healthMetric: metric, rangeDays: 7 });
         throw new Error(`expected ${metric} to be rejected`);
@@ -170,6 +182,12 @@ describe("MCP product allowlist contract", () => {
         expect((error as HttpError).code).toBe("unsupported_metric");
       }
     }
+    expect(resolveMetricQuery({ healthMetric: "blood_glucose", rangeDays: 7 })).toMatchObject({
+      metric: "blood_glucose",
+      unit: "mg/dL",
+      viewType: "daily_reading_table",
+      maxReadings: 200
+    });
   });
 
   it("rejects sleep attribute metrics and points callers at sleep", () => {
@@ -212,7 +230,7 @@ describe("HealthMcpReadService", () => {
     ).rejects.toMatchObject({ status: 409, code: "healthkit_sync_incomplete" });
   });
 
-  it("returns authorized steps, blood pressure, sleep, and workout data and records an audit event", async () => {
+  it("returns authorized steps, blood pressure, blood glucose, sleep, and workout data and records an audit event", async () => {
     const repo = new InMemoryFamilyRepository();
     const { profileId } = await seedUserWithHealthData(repo, userId);
     const service = await serviceFor(repo);
@@ -232,8 +250,8 @@ describe("HealthMcpReadService", () => {
       { userId, oauthClientId, correlationId: "corr-1" },
       { personId: profileId, healthMetric: "blood_pressure", rangeDays: 30, timezone: "UTC" }
     );
-    expect(bp.viewType).toBe("daily_reading_table");
-    if (bp.viewType === "daily_reading_table") {
+    expect(bp.healthMetric).toBe("blood_pressure");
+    if (bp.healthMetric === "blood_pressure") {
       expect(bp.readings[0]?.systolic).toBe(120);
       expect(bp.readings[0]?.diastolic).toBe(80);
       expect(bp.truncated).toBe(false);
@@ -241,10 +259,23 @@ describe("HealthMcpReadService", () => {
     expect(bp.unit).toBe("mmHg");
     expect(bp.lastSyncedAt).toBeTruthy();
     expect(bp.coverage.requestedRangeDays).toBe(30);
-    // Response contract: no disclaimer or metric sync status anywhere.
     expect(JSON.stringify(bp)).not.toContain("disclaimer");
     expect(JSON.stringify(bp)).not.toContain("metricSyncStatus");
 
+    const glucose = await service.getHealthData(
+      { userId, oauthClientId },
+      { personId: profileId, healthMetric: "blood_glucose", rangeDays: 30, timezone: "UTC" }
+    );
+    expect(glucose.healthMetric).toBe("blood_glucose");
+    if (glucose.healthMetric === "blood_glucose") {
+      expect(glucose.unit).toBe("mg/dL");
+      expect(glucose.truncated).toBe(false);
+      expect(glucose.readings[0]).toMatchObject({
+        localDate: "2026-07-16",
+        value: 104,
+        mealTime: "preprandial"
+      });
+    }
     const sleep = await service.getHealthData(
       { userId, oauthClientId },
       { personId: profileId, healthMetric: "sleep", rangeDays: 30, timezone: "UTC" }
@@ -272,6 +303,8 @@ describe("HealthMcpReadService", () => {
     expect(mcpAudit?.metadata?.outcome).toBe("allowed");
     expect(mcpAudit?.metadata?.oauth_client_id).toBe(oauthClientId);
     expect(JSON.stringify(mcpAudit?.metadata ?? {})).not.toContain("120");
+    expect(JSON.stringify(mcpAudit?.metadata ?? {})).not.toContain("104");
+    expect(JSON.stringify(mcpAudit?.metadata ?? {})).not.toContain("preprandial");
   });
 
   it("includes saved strength exercises on workout_table rows", async () => {
@@ -376,13 +409,19 @@ describe("HealthMcpReadService", () => {
     expect(listed.profiles.length).toBeGreaterThanOrEqual(1);
     expect(listed.profiles[0]?.label).toBeTruthy();
     // Seed enables Activity + Vitals + Sleep + Workouts, each with its explicit product metric.
-    expect(listed.profiles[0]?.availableMetrics).toEqual(["steps", "blood_pressure", "sleep", "workout"]);
+    expect(listed.profiles[0]?.availableMetrics).toEqual([
+      "steps",
+      "blood_pressure",
+      "blood_glucose",
+      "sleep",
+      "workout"
+    ]);
     expect(JSON.stringify(listed)).not.toContain("disclaimer");
     expect(JSON.stringify(listed)).not.toContain("familyId");
     expect(JSON.stringify(listed)).not.toContain("dateOfBirth");
   });
 
-  it("enabling Blood pressure never advertises heart rate, glucose, temperature, or oxygen saturation", async () => {
+  it("enabling Vitals advertises blood pressure and glucose, never heart rate, temperature, or oxygen saturation", async () => {
     const repo = new InMemoryFamilyRepository();
     const api = createApp({
       config: {
@@ -432,9 +471,12 @@ describe("HealthMcpReadService", () => {
     expect(listed.profiles).toEqual([
       expect.objectContaining({
         personId: profileId,
-        availableMetrics: ["blood_pressure"]
+        availableMetrics: ["blood_pressure", "blood_glucose"]
       })
     ]);
+    expect(JSON.stringify(listed)).not.toContain("heart_rate");
+    expect(JSON.stringify(listed)).not.toContain("oxygen_saturation");
+    expect(JSON.stringify(listed)).not.toContain("body_temperature");
   });
 
   it("refuses get_health_data after the app toggle is disabled", async () => {
@@ -468,6 +510,12 @@ describe("HealthMcpReadService", () => {
       service.getHealthData(
         { userId, oauthClientId },
         { personId: profileId, healthMetric: "blood_pressure", rangeDays: 30, timezone: "UTC" }
+      )
+    ).rejects.toMatchObject({ code: "group_disabled", status: 403 });
+    await expect(
+      service.getHealthData(
+        { userId, oauthClientId },
+        { personId: profileId, healthMetric: "blood_glucose", rangeDays: 30, timezone: "UTC" }
       )
     ).rejects.toMatchObject({ code: "group_disabled", status: 403 });
 
@@ -541,8 +589,8 @@ describe("HealthMcpReadService", () => {
       { userId, oauthClientId },
       { personId: profileId, healthMetric: "blood_pressure", rangeDays: 30, timezone: "UTC" }
     );
-    expect(interrupted.viewType).toBe("daily_reading_table");
-    if (interrupted.viewType === "daily_reading_table") {
+    expect(interrupted.healthMetric).toBe("blood_pressure");
+    if (interrupted.healthMetric === "blood_pressure") {
       expect(interrupted.readings[0]?.systolic).toBe(121);
     }
     // No completed coverage yet; completeness is separate from presence.
@@ -571,7 +619,7 @@ describe("HealthMcpReadService", () => {
       { personId: profileId, healthMetric: "blood_pressure", rangeDays: 30, timezone: "UTC" }
     );
     expect(ready.lastSyncedAt).toBeTruthy();
-    if (ready.viewType === "daily_reading_table") {
+    if (ready.healthMetric === "blood_pressure") {
       expect(ready.readings[0]?.systolic).toBe(121);
     }
   });

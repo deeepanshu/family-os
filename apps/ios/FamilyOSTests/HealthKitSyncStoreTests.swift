@@ -697,6 +697,93 @@ final class HealthKitSyncStoreTests: XCTestCase {
             FileManager.default.fileExists(atPath: HealthKitSyncStore.storeDirectoryURL().path)
         )
     }
+
+    func testBloodGlucosePayloadEnqueueAndEncode() throws {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("healthkit-glucose-\(UUID().uuidString).sqlite")
+            .path
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let store = try HealthKitSyncStore(path: path)
+        let samples = [
+            HealthKitBloodGlucoseSync.GlucoseSample(
+                sourceSampleKey: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                measuredAtUtc: "2026-08-19T11:00:00.000Z",
+                valueMgDl: 104,
+                mealTime: "preprandial"
+            ),
+            HealthKitBloodGlucoseSync.GlucoseSample(
+                sourceSampleKey: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                measuredAtUtc: "2026-08-19T13:40:00.000Z",
+                valueMgDl: 132,
+                mealTime: nil
+            )
+        ]
+        try HealthKitBloodGlucoseSync.enqueueSamples(samples, into: store)
+
+        let batch = try store.claimBatch(limit: 10)
+        XCTAssertEqual(batch.count, 2)
+        XCTAssertEqual(batch[0].naturalKey, "blood_glucose:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+        XCTAssertEqual(batch[0].groupKey, "vitals")
+        XCTAssertEqual(batch[0].scopeKey, "blood_glucose")
+
+        let withMeal = try JSONDecoder().decode(
+            HealthKitOpPayloadWire.self,
+            from: try XCTUnwrap(batch[0].payloadJSON?.data(using: .utf8))
+        )
+        guard case let .bloodGlucose(key, measuredAt, value, mealTime) = withMeal else {
+            return XCTFail("Expected blood_glucose payload")
+        }
+        XCTAssertEqual(key, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+        XCTAssertEqual(measuredAt, "2026-08-19T11:00:00.000Z")
+        XCTAssertEqual(value, 104)
+        XCTAssertEqual(mealTime, "preprandial")
+
+        let withoutMeal = try JSONDecoder().decode(
+            HealthKitOpPayloadWire.self,
+            from: try XCTUnwrap(batch[1].payloadJSON?.data(using: .utf8))
+        )
+        guard case let .bloodGlucose(_, _, plainValue, omitted) = withoutMeal else {
+            return XCTFail("Expected blood_glucose payload without mealTime")
+        }
+        XCTAssertEqual(plainValue, 132)
+        XCTAssertNil(omitted)
+    }
+
+    func testBloodGlucoseMealTimeMapsPreAndPostAndOmitsUnknown() {
+        XCTAssertEqual(
+            HealthKitBloodGlucoseSync.mealTime(from: [HKMetadataKeyBloodGlucoseMealTime: HKBloodGlucoseMealTime.preprandial.rawValue]),
+            "preprandial"
+        )
+        XCTAssertEqual(
+            HealthKitBloodGlucoseSync.mealTime(from: [HKMetadataKeyBloodGlucoseMealTime: HKBloodGlucoseMealTime.postprandial.rawValue]),
+            "postprandial"
+        )
+        XCTAssertNil(HealthKitBloodGlucoseSync.mealTime(from: [HKMetadataKeyBloodGlucoseMealTime: 99]))
+        XCTAssertNil(HealthKitBloodGlucoseSync.mealTime(from: [:]))
+        XCTAssertNil(HealthKitBloodGlucoseSync.mealTime(from: nil))
+    }
+
+    func testBloodGlucoseFirstVitalsFetchWidensOnceThenFollowsServerRange() {
+        let suite = "healthkit.glucose.backfill.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        HealthKitBloodGlucoseSync.defaults = defaults
+        defer {
+            HealthKitBloodGlucoseSync.defaults = .standard
+            defaults.removePersistentDomain(forName: suite)
+        }
+
+        let through = Date(timeIntervalSince1970: 1_787_500_000)
+        let serverFrom = through.addingTimeInterval(-24 * 60 * 60)
+        let widened = HealthKitBloodGlucoseSync.fetchStart(serverFrom: serverFrom, through: through)
+        XCTAssertEqual(widened, through.addingTimeInterval(-90 * 24 * 60 * 60))
+
+        HealthKitBloodGlucoseSync.markInitialBackfillCompleted()
+        let followOn = HealthKitBloodGlucoseSync.fetchStart(serverFrom: serverFrom, through: through)
+        XCTAssertEqual(followOn, serverFrom)
+    }
+
 }
 
 final class RefusingFileManager: FileManager {

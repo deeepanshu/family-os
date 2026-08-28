@@ -722,6 +722,15 @@ export class PostgresHealthKitStore {
             and not (('blood_pressure:' || source_sample_key::text) = any(${bpKeys}))
           returning id
         `;
+        const glucoseKeys = manifest.filter((key) => key.startsWith("blood_glucose:"));
+        const glucoseRows = await tx`
+          delete from health_blood_glucose_readings
+          where person_id = ${input.personId}
+            and measured_at >= ${input.rangeStartAt}::timestamptz
+            and measured_at <= ${input.rangeEndAt}::timestamptz
+            and not (('blood_glucose:' || source_sample_key::text) = any(${glucoseKeys}))
+          returning id
+        `;
         const dailyKeys = manifest.filter(
           (key) => key.startsWith("daily_metric:heart_rate:") || key.startsWith("daily_metric:resting_heart_rate:")
         );
@@ -735,7 +744,7 @@ export class PostgresHealthKitStore {
             and not (('daily_metric:' || metric_key || ':' || local_day::text) = any(${dailyKeys}))
           returning id
         `;
-        return bpRows.length + hrRows.length;
+        return bpRows.length + glucoseRows.length + hrRows.length;
       }
       case "sleep": {
         const keys = manifest.filter((key) => key.startsWith("sleep_day:"));
@@ -991,7 +1000,7 @@ export class PostgresHealthKitStore {
       where r.person_id = ${personId}
         and r.measured_at >= ${rangeStartUtc}::timestamptz
         and r.measured_at <= ${rangeEndUtc}::timestamptz
-      order by r.measured_at asc
+      order by r.measured_at desc
       limit ${limit}
     `;
     return rows.map((row: Row) => mapBloodGlucose(row));
@@ -1265,13 +1274,14 @@ export class PostgresHealthKitStore {
       case "blood_glucose":
         await tx`
           insert into health_blood_glucose_readings (
-            family_id, person_id, source_sample_key, measured_at, value_mg_dl, updated_at
+            family_id, person_id, source_sample_key, measured_at, value_mg_dl, meal_time, updated_at
           ) values (
             ${input.familyId}, ${input.personId}, ${payload.sourceSampleKey}, ${payload.measuredAtUtc},
-            ${payload.valueMgDl}, ${input.nowIso}
+            ${payload.valueMgDl}, ${payload.mealTime ?? null}, ${input.nowIso}
           )
           on conflict (person_id, source_sample_key) do update set
-            measured_at = excluded.measured_at, value_mg_dl = excluded.value_mg_dl, updated_at = excluded.updated_at
+            measured_at = excluded.measured_at, value_mg_dl = excluded.value_mg_dl,
+            meal_time = excluded.meal_time, updated_at = excluded.updated_at
         `;
         return;
       case "workout":

@@ -169,6 +169,13 @@
       "when": 1787932987688,
       "tag": "0023_marvelous_ronan",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1787680000000,
+      "tag": "0024_blood_glucose_meal_time",
+      "breakpoints": true
     }
   ]
 }
