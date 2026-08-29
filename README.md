@@ -148,54 +148,22 @@ CI uses fake JWT/Supabase values only; no production secrets are included.
 
 ## Xcode Cloud Releases
 
-Xcode Cloud archives the iOS app. GitHub Actions starts those archives; merge
-and `release/*` tags do not.
-
-Two Xcode Cloud workflows exist in App Store Connect for the `FamilyOS` scheme:
-
-- **Release TestFlight** — archive + internal TestFlight.
-- **App Store Release** — archive for App Store Connect. Not auto-submitted.
-
-Xcode Cloud owns the Apple build number. Do not change `CURRENT_PROJECT_VERSION`
-for a cloud release.
-
 ### TestFlight
 
-Any pushed branch:
-
-1. GitHub → **Actions → TestFlight → Run workflow**.
-2. **Use workflow from** the branch to ship.
-3. The job waits on the `testflight` environment. **Review deployments** and
-   approve as DJ. Xcode Cloud does not start until then.
-4. GitHub starts Xcode Cloud on that SHA. Watch App Store Connect; the Action
-   does not wait for the archive.
-
-Retry = run the Action again. Feature branches created before this workflow
-landed on `main` need a rebase first.
-
-A branch TestFlight becomes the latest build testers auto-update to (same
-bundle ID and marketing version as `main`).
+1. Push the branch.
+2. GitHub → **Actions → TestFlight → Run workflow**. Use workflow from that
+   branch.
+3. **Review deployments** → approve.
+4. Wait for TestFlight processing.
 
 ### App Store Archive
 
-`main` only:
+1. GitHub → **Actions → App Store Archive → Run workflow** from `main`.
+2. **Review deployments** → approve.
+3. Attach the build in App Store Connect and submit.
 
-1. GitHub → **Actions → App Store Archive → Run workflow**.
-2. Use workflow from `main`.
-3. The job waits on the `app-store` environment. **Review deployments** and
-   approve as DJ. Xcode Cloud does not start until then.
-4. Attach the Cloud build in App Store Connect and submit for review.
-
-### GitHub secrets
-
-Both Actions need an App Store Connect API key with Xcode Cloud access:
-
-- `APP_STORE_CONNECT_ISSUER_ID`
-- `APP_STORE_CONNECT_KEY_ID`
-- `APP_STORE_CONNECT_PRIVATE_KEY` (`.p8` contents)
-
-In App Store Connect, turn off the `release/*` tag start condition on **Release
-TestFlight** so leftover tags cannot auto-ship.
+Repo secrets: `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_ID`,
+`APP_STORE_CONNECT_PRIVATE_KEY`.
 
 Install the repo-managed local git hooks for faster pre-commit and pre-push
 feedback:

@@ -44,11 +44,3 @@ gh pr merge --merge
 
 If the PR cannot merge cleanly, rebase the topic branch onto `origin/main` **in the worktree**, push, and merge the PR. Still do not use the primary checkout.
 
-## Release after merge
-
-Merging does not ship TestFlight. If the user wants a device build, run
-**Actions → TestFlight** on the topic branch (before or after merge) or on
-`main` after merge. App Store review archives are **Actions → App Store
-Archive** on `main` only. Both runs wait for DJ to approve the GitHub
-environment before Xcode Cloud starts. Do not create `release/*` tags or
-commit on local `main`.

@@ -135,29 +135,22 @@ is parsed as a comment after `https:`.
 
 ## Xcode Cloud Releases
 
-GitHub Actions starts Xcode Cloud on the selected git ref. Merge and
-`release/*` tags do not ship the app.
+### TestFlight
 
-| GitHub Action | Xcode Cloud workflow | Git ref | Post-action |
-| --- | --- | --- | --- |
-| **Actions → TestFlight** | Release TestFlight | any pushed branch | Internal TestFlight |
-| **Actions → App Store Archive** | App Store Release | `main` only | App Store Connect (not submitted) |
+1. Push the branch.
+2. GitHub → **Actions → TestFlight → Run workflow**. Use workflow from that
+   branch.
+3. **Review deployments** → approve.
+4. Wait for TestFlight processing.
 
-Both Actions wait for DJ to approve the GitHub environment (`testflight` or
-`app-store`) before Xcode Cloud starts. Open the run → **Review deployments**.
+### App Store Archive
 
-Xcode Cloud assigns the Apple build number. It increments automatically after
-the initial number is seeded in App Store Connect, so do not manually change
-`CURRENT_PROJECT_VERSION` for a cloud release.
+1. GitHub → **Actions → App Store Archive → Run workflow** from `main`.
+2. **Review deployments** → approve.
+3. Attach the build in App Store Connect and submit.
 
-Retry = re-run the Action. The GitHub job starts the Cloud build and exits;
-wait for Apple processing before testers can install.
-
-Repo secrets required: `APP_STORE_CONNECT_ISSUER_ID`,
-`APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_PRIVATE_KEY`.
-
-Turn off the `release/*` tag start condition on **Release TestFlight** in
-App Store Connect so leftover tags cannot auto-ship.
+Repo secrets: `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_ID`,
+`APP_STORE_CONNECT_PRIVATE_KEY`.
 
 The current bootstrap screen can call:
 

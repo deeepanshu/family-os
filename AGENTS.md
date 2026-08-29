@@ -56,19 +56,19 @@ xcrun xctrace list devices
 
 ## Xcode Cloud Releases
 
-GitHub Actions starts Xcode Cloud. Merge and `release/*` tags do not.
+### TestFlight
 
-- **Actions → TestFlight** — any pushed branch. Waits for DJ to approve the
-  `testflight` environment, then archives that SHA and uploads internal
-  TestFlight. `.github/workflows/testflight.yml`.
-- **Actions → App Store Archive** — `main` only. Waits for DJ to approve the
-  `app-store` environment, then archives for App Store Connect; does not
-  submit. `.github/workflows/app-store-archive.yml`.
+1. Push the branch.
+2. GitHub → **Actions → TestFlight → Run workflow**. Use workflow from that
+   branch.
+3. **Review deployments** → approve.
+4. Wait for TestFlight processing.
 
-`scripts/start-xcode-cloud.mjs` calls App Store Connect (`POST /v1/ciBuildRuns`).
-Needs repo secrets `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_ID`,
-and `APP_STORE_CONNECT_PRIVATE_KEY`.
+### App Store Archive
 
-Xcode Cloud workflows: **Release TestFlight**
-(`367FA404-8D98-4F7B-A133-A9E1929A82C8`), **App Store Release**
-(`47172e26-3833-4bcd-8891-12c2b610006f`). Cloud owns the Apple build number.
+1. GitHub → **Actions → App Store Archive → Run workflow** from `main`.
+2. **Review deployments** → approve.
+3. Attach the build in App Store Connect and submit.
+
+Repo secrets: `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_ID`,
+`APP_STORE_CONNECT_PRIVATE_KEY`.
