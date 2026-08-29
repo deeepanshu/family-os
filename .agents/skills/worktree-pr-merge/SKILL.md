@@ -44,6 +44,3 @@ gh pr merge --merge
 
 If the PR cannot merge cleanly, rebase the topic branch onto `origin/main` **in the worktree**, push, and merge the PR. Still do not use the primary checkout.
 
-## Release after merge
-
-If the user also wants a release: after the PR is merged on GitHub, the `Release App` workflow on `main` tags `apps/ios/**` changes. Do not create the release commit on local `main`.

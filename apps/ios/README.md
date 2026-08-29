@@ -133,37 +133,24 @@ In `.xcconfig` files, write URLs as `https:/$()/your-project.supabase.co`.
 Xcode expands that to `https://your-project.supabase.co`; a literal `https://`
 is parsed as a comment after `https:`.
 
-## Xcode Cloud TestFlight Workflow
+## Xcode Cloud Releases
 
-The release workflow is configured in App Store Connect for the `FamilyOS`
-scheme. It has this shape:
+### TestFlight
 
-| Workflow setting | Value |
-| --- | --- |
-| Start condition | Git tag changes matching `release/*` |
-| Action | Archive for iOS |
-| Post-action | TestFlight internal distribution |
-| Source ref | The pushed release tag |
+1. Push the branch.
+2. GitHub → **Actions → TestFlight → Run workflow**. Use workflow from that
+   branch.
+3. **Review deployments** → approve.
+4. Wait for TestFlight processing.
 
-Xcode Cloud assigns the Apple build number. It increments automatically after
-the initial number is seeded in App Store Connect, so do not manually change
-`CURRENT_PROJECT_VERSION` for a cloud release. The tag is a source-release
-identifier, not the TestFlight build number.
+### App Store Archive
 
-GitHub Actions `.github/workflows/release-app.yml` creates the next
-`release/<marketing-version>-N` tag when iOS changes land on `main`, or when
-you run **Actions → Release App**. Xcode Cloud still starts from the tag, not
-from the branch push.
+1. GitHub → **Actions → App Store Archive → Run workflow** from `main`.
+2. **Review deployments** → approve.
+3. Attach the build in App Store Connect and submit.
 
-```sh
-# Manual fallback if GitHub Actions cannot push tags
-git tag release/<marketing-version>-<release-sequence>
-git push origin release/<marketing-version>-<release-sequence>
-```
-
-Each retry needs a new tag. Xcode Cloud must complete and Apple must process
-the upload before testers can install it. A manual Xcode Cloud start is only a
-recovery path and must select the intended release tag.
+Repo secrets: `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_ID`,
+`APP_STORE_CONNECT_PRIVATE_KEY`.
 
 The current bootstrap screen can call:
 

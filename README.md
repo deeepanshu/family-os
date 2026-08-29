@@ -148,32 +148,22 @@ CI uses fake JWT/Supabase values only; no production secrets are included.
 
 ## Xcode Cloud Releases
 
-Xcode Cloud is the TestFlight release surface. Its workflow configuration lives
-in App Store Connect and uses the `FamilyOS` scheme:
+### TestFlight
 
-- Start condition: Git tag changes matching `release/*`.
-- Action: Archive the iOS app.
-- Post-action: distribute the archive to the internal TestFlight group.
-- Build number: Xcode Cloud owns the number and increments it for each cloud
-  build. The initial number is seeded in App Store Connect to avoid colliding
-  with manually uploaded builds.
+1. Push the branch.
+2. GitHub → **Actions → TestFlight → Run workflow**. Use workflow from that
+   branch.
+3. **Review deployments** → approve.
+4. Wait for TestFlight processing.
 
-Merging iOS changes to `main` runs `.github/workflows/release-app.yml`, which
-creates the next `release/<marketing-version>-N` tag. That tag starts Xcode
-Cloud; it does not set the Apple build number.
+### App Store Archive
 
-To retry or ship `main` without an iOS path change, run **Actions → Release
-App**. You can pass an explicit `release/...` tag, or leave it blank to use the
-next sequence number.
+1. GitHub → **Actions → App Store Archive → Run workflow** from `main`.
+2. **Review deployments** → approve.
+3. Attach the build in App Store Connect and submit.
 
-```sh
-# Manual fallback if GitHub Actions cannot push tags
-git tag release/0.1.0-9
-git push origin release/0.1.0-9
-```
-
-Use a new tag for every retry. After Xcode Cloud succeeds, wait for Apple
-processing before the build appears in TestFlight.
+Repo secrets: `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_ID`,
+`APP_STORE_CONNECT_PRIVATE_KEY`.
 
 Install the repo-managed local git hooks for faster pre-commit and pre-push
 feedback:
