@@ -144,6 +144,7 @@ export class MemoryHealthKitEngine {
       sourceSampleKey: string;
       measuredAtUtc: string;
       valueMgDl: number;
+      mealTime?: "preprandial" | "postprandial";
     }
   >();
   readonly workouts = new Map<
@@ -653,6 +654,14 @@ export class MemoryHealthKitEngine {
             deleted += 1;
           }
         }
+        for (const [key, row] of this.glucose) {
+          if (row.personId !== input.personId) continue;
+          if (row.measuredAtUtc < input.rangeStartAt || row.measuredAtUtc > input.rangeEndAt) continue;
+          if (!manifest.has(`blood_glucose:${row.sourceSampleKey}`)) {
+            this.glucose.delete(key);
+            deleted += 1;
+          }
+        }
         const healthTimezone = this.profileSettings.get(input.personId)?.healthTimezone ?? "UTC";
         const startDay = localDayStringInTimezone(input.rangeStartAt, healthTimezone);
         const endDay = localDayStringInTimezone(input.rangeEndAt, healthTimezone);
@@ -867,15 +876,16 @@ export class MemoryHealthKitEngine {
     return [...this.glucose.values()]
       .filter((r) => r.personId === personId)
       .filter((r) => r.measuredAtUtc >= rangeStartUtc && r.measuredAtUtc <= rangeEndUtc)
-      .sort((a, b) => a.measuredAtUtc.localeCompare(b.measuredAtUtc))
+      .sort((a, b) => b.measuredAtUtc.localeCompare(a.measuredAtUtc))
       .slice(0, limit)
       .map((r) => ({
         id: r.sourceSampleKey,
-        familyId: "",
+        familyId: null,
         personId: r.personId,
         recordedByUserId: "",
         value: r.valueMgDl,
         unit: "mg/dL" as const,
+        mealTime: r.mealTime,
         measuredAt: r.measuredAtUtc,
         source: "healthkit" as const,
         createdAt: r.measuredAtUtc,
@@ -1069,7 +1079,8 @@ export class MemoryHealthKitEngine {
           personId: ctx.personId,
           sourceSampleKey: payload.sourceSampleKey,
           measuredAtUtc: payload.measuredAtUtc,
-          valueMgDl: payload.valueMgDl
+          valueMgDl: payload.valueMgDl,
+          mealTime: payload.mealTime
         });
         return;
       }

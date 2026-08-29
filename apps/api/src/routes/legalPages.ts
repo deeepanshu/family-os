@@ -92,16 +92,15 @@ export function renderPrivacyPolicyPage(origin: string): string {
   <li><strong>Health data you choose to import.</strong> FamilyStack <em>reads</em> from Apple Health (HealthKit). It does not write readings back to Apple Health. This release imports only:
     <ul>
       <li>Activity — step count</li>
-      <li>Vitals — blood pressure (systolic/diastolic) and heart rate (including resting heart rate)</li>
+      <li>Vitals — blood pressure (systolic/diastolic), heart rate (including resting heart rate), and blood glucose (mg/dL, with optional before/after meal metadata from HealthKit)</li>
       <li>Sleep — sleep analysis</li>
       <li>Workouts — session metadata (type, start/end, duration, active energy, distance, heart-rate summary, source/device, indoor flag, elevation, average METs, flights climbed, pause/lap events, and multi-sport segments), plus swimming distance and stroke count when present. For strength workouts you can add exercise names, reps, and optional weights. We do not import GPS routes or per-second workout series.</li>
     </ul>
   </li>
-  <li><strong>Not a product metric.</strong> Blood glucose / blood sugar is not an implemented FamilyStack metric. The app does not request or present glucose as a product feature.</li>
   <li><strong>Household.</strong> Family name, membership, and pending invites you create so relatives can join.</li>
   <li><strong>Reminders.</strong> Reminder content, schedule, and recipients you configure.</li>
   <li><strong>Device notifications.</strong> If you opt in, the app uses on-device local notifications for HealthKit sync alerts. This release does not register for remote (APNs) notifications or upload a device token.</li>
-  <li><strong>Optional assistant access.</strong> If you approve an OAuth consent for a third-party assistant (for example ChatGPT via MCP), we store that connection grant. The approved assistant can read stored steps, blood pressure, sleep, and workout data for profiles you are already allowed to see, including other household Self profiles. Strength-workout exercise entries (name, reps, optional weight) can be included. The assistant receives this data and handles it under its own privacy terms.</li>
+  <li><strong>Optional assistant access.</strong> If you approve an OAuth consent for a third-party assistant (for example ChatGPT via MCP), we store that connection grant. The approved assistant can read stored steps, blood pressure, blood glucose, sleep, and workout data for profiles you are already allowed to see, including other household Self profiles. Strength-workout exercise entries (name, reps, optional weight) can be included. The assistant receives this data and handles it under its own privacy terms.</li>
   <li><strong>Diagnostics.</strong> Firebase Crashlytics receives crash and non-fatal reports. A report may include crash stack traces, device model, OS and app version, session and app state, operational stage names, error codes, a stable user id (UUID only — never email), and other non-health diagnostic context we attach to help reproduce the failure. Reports do not include health readings, tokens, free-text notes, or raw sample payloads.</li>
 </ul>
 

@@ -1,0 +1,2 @@
+ALTER TABLE "health_blood_glucose_readings" ADD COLUMN "meal_time" text;--> statement-breakpoint
+ALTER TABLE "health_blood_glucose_readings" ADD CONSTRAINT "health_glucose_meal_time_check" CHECK ("health_blood_glucose_readings"."meal_time" is null or "health_blood_glucose_readings"."meal_time" in ('preprandial', 'postprandial'));

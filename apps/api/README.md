@@ -131,22 +131,13 @@ curl -H "Authorization: Bearer <supabase_access_token>" \
   "http://localhost:3001/health/api/v1/readings/blood-pressure?personId=<profile_id>"
 ```
 
-Log a blood sugar reading:
-
-```sh
-curl -X POST \
-  -H "Authorization: Bearer <supabase_access_token>" \
-  -H "Content-Type: application/json" \
-  -d '{"personId":"<profile_id>","value":105,"unit":"mg/dL","context":"fasting","measuredAt":"2026-06-21T10:00:00.000Z"}' \
-  http://localhost:3001/health/api/v1/readings/blood-glucose
-```
-
-List blood sugar history:
+List blood glucose history (HealthKit import only; no manual POST):
 
 ```sh
 curl -H "Authorization: Bearer <supabase_access_token>" \
-  "http://localhost:3001/health/api/v1/readings/blood-glucose?personId=<profile_id>"
+  "http://localhost:3001/health/api/v1/readings/blood-glucose?personId=<profile_id>&from=2026-06-01&to=2026-06-21"
 ```
+
 
 Configure HealthKit background sync for the signed-in user's Self profile
 (consent, enabled metrics, health timezone, and active installation):

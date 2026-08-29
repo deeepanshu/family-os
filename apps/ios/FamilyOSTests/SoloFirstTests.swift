@@ -243,11 +243,11 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertNil(healthKit.progressBanner)
 
         healthKit.beginRun(metric: .vitals, kind: .initialImport)
-        XCTAssertEqual(healthKit.progressBanner?.title, "Importing Blood pressure & heart rate")
+        XCTAssertEqual(healthKit.progressBanner?.title, "Importing Blood pressure, heart rate & blood glucose")
         XCTAssertEqual(healthKit.progressBanner?.detail, HealthKitRunStage.preparing.displayText)
 
         healthKit.updateActiveRunStage(.reading)
-        XCTAssertEqual(healthKit.progressBanner?.title, "Importing Blood pressure & heart rate")
+        XCTAssertEqual(healthKit.progressBanner?.title, "Importing Blood pressure, heart rate & blood glucose")
         XCTAssertEqual(healthKit.progressBanner?.detail, HealthKitRunStage.reading.displayText)
 
         healthKit.endRun(metric: .vitals)
@@ -342,20 +342,23 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertFalse(AccessTokenExpiry.requiresRefresh("dev-token"))
     }
 
-    func testHealthKitVitalsAuthTypesAreBPThenPulseNotCorrelation() {
+    func testHealthKitVitalsAuthTypesAreBPThenPulseAndGlucoseNotCorrelation() {
         let bp = HealthKitClient.bloodPressureReadTypes()
         let pulse = HealthKitClient.pulseReadTypes()
+        let glucose = HealthKitClient.bloodGlucoseReadTypes()
         let combined = HealthKitClient.readTypes(for: [.vitals])
 
         let systolic = HKObjectType.quantityType(forIdentifier: .bloodPressureSystolic)
         let diastolic = HKObjectType.quantityType(forIdentifier: .bloodPressureDiastolic)
         let heartRate = HKObjectType.quantityType(forIdentifier: .heartRate)
         let resting = HKObjectType.quantityType(forIdentifier: .restingHeartRate)
+        let bloodGlucose = HKObjectType.quantityType(forIdentifier: .bloodGlucose)
         let correlation = HKObjectType.correlationType(forIdentifier: .bloodPressure)
 
         XCTAssertEqual(bp.count, 2)
         XCTAssertEqual(pulse.count, 2)
-        XCTAssertEqual(combined, bp.union(pulse))
+        XCTAssertEqual(glucose.count, 1)
+        XCTAssertEqual(combined, bp.union(pulse).union(glucose))
         if let systolic { XCTAssertTrue(bp.contains(systolic)) }
         if let diastolic { XCTAssertTrue(bp.contains(diastolic)) }
         if let heartRate {
@@ -364,6 +367,10 @@ final class SoloFirstTests: XCTestCase {
         }
         if let resting {
             XCTAssertTrue(pulse.contains(resting))
+        }
+        if let bloodGlucose {
+            XCTAssertTrue(glucose.contains(bloodGlucose))
+            XCTAssertTrue(combined.contains(bloodGlucose))
         }
         if let correlation {
             XCTAssertFalse(bp.contains(correlation))
@@ -374,6 +381,7 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertTrue(bpIds.contains("BloodPressureSystolic"))
         XCTAssertTrue(bpIds.contains("BloodPressureDiastolic"))
         XCTAssertFalse(bpIds.contains("HeartRate"))
+        XCTAssertTrue(HealthKitClient.typeIds(glucose).contains("BloodGlucose"))
     }
 
     func testHealthKitSleepAuthTypesIncludeSleepAnalysis() {
@@ -635,6 +643,60 @@ final class SoloFirstTests: XCTestCase {
 
         XCTAssertEqual(days.map(\.localDay), ["2026-08-19"])
         XCTAssertEqual(days[0].items.map(\.id), ["bp:bp-19", "hr:2026-08-19"])
+    }
+
+    func testHistoryTimelineKeepsSparseGlucoseRowsAndOmitsMissingMeal() {
+        let utc = TimeZone(identifier: "UTC")!
+        let days = HistoryTimeline.days(
+            bloodPressure: [],
+            heartRate: [],
+            sleep: [],
+            steps: [],
+            workouts: [],
+            bloodGlucose: [
+                makeBloodGlucose(id: "g1", value: 104, measuredAt: "2026-08-19T11:05:00.000Z", mealTime: "preprandial"),
+                makeBloodGlucose(id: "g2", value: 98, measuredAt: "2026-08-19T13:18:00.000Z"),
+                makeBloodGlucose(id: "g3", value: 132, measuredAt: "2026-08-19T17:40:00.000Z", mealTime: "postprandial")
+            ],
+            filter: .vitals,
+            timeZone: utc
+        )
+        XCTAssertEqual(days[0].items.map(\.id), ["glu:g3", "glu:g2", "glu:g1"])
+        let withMeal = days[0].items[2].presentation(timeZone: utc)
+        XCTAssertEqual(withMeal.title, "Blood Glucose")
+        XCTAssertEqual(withMeal.metrics.map(\.label), ["Reading", "Meal"])
+        XCTAssertEqual(withMeal.metrics.map(\.value), ["104 mg/dL", "Before meal"])
+        let omitted = days[0].items[1].presentation(timeZone: utc)
+        XCTAssertEqual(omitted.metrics.map(\.label), ["Reading"])
+        XCTAssertEqual(omitted.metrics.map(\.value), ["98 mg/dL"])
+        let after = days[0].items[0].presentation(timeZone: utc)
+        XCTAssertEqual(after.metrics.map(\.value), ["132 mg/dL", "After meal"])
+    }
+
+    func testHistoryTimelineSummarizesDenseGlucoseDays() {
+        let utc = TimeZone(identifier: "UTC")!
+        let samples = (0..<9).map { index in
+            makeBloodGlucose(
+                id: "g\(index)",
+                value: Double(90 + index),
+                measuredAt: String(format: "2026-08-18T%02d:00:00.000Z", index + 10)
+            )
+        }
+        let days = HistoryTimeline.days(
+            bloodPressure: [],
+            heartRate: [],
+            sleep: [],
+            steps: [],
+            workouts: [],
+            bloodGlucose: samples,
+            filter: .vitals,
+            timeZone: utc
+        )
+        XCTAssertEqual(days[0].items.map(\.id), ["glu-day:2026-08-18"])
+        let presentation = days[0].items[0].presentation(timeZone: utc)
+        XCTAssertEqual(presentation.title, "Blood Glucose")
+        XCTAssertEqual(presentation.metrics.map(\.label), ["Latest", "Min", "Max", "Readings"])
+        XCTAssertEqual(presentation.metrics.map(\.value), ["98 mg/dL", "90 mg/dL", "98 mg/dL", "9"])
     }
 
     func testHistoryDateTitleUsesTodayYesterdayAndDayMonth() {
@@ -918,6 +980,22 @@ private func makeBloodPressure(
         systolic: systolic,
         diastolic: diastolic,
         pulse: pulse,
+        source: .healthkit,
+        measuredAt: measuredAt
+    )
+}
+
+private func makeBloodGlucose(
+    id: String,
+    value: Double,
+    measuredAt: String,
+    mealTime: String? = nil
+) -> BloodGlucoseReading {
+    BloodGlucoseReading(
+        id: id,
+        value: value,
+        unit: "mg/dL",
+        mealTime: mealTime,
         source: .healthkit,
         measuredAt: measuredAt
     )
