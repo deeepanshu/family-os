@@ -133,37 +133,28 @@ In `.xcconfig` files, write URLs as `https:/$()/your-project.supabase.co`.
 Xcode expands that to `https://your-project.supabase.co`; a literal `https://`
 is parsed as a comment after `https:`.
 
-## Xcode Cloud TestFlight Workflow
+## Xcode Cloud Releases
 
-The release workflow is configured in App Store Connect for the `FamilyOS`
-scheme. It has this shape:
+GitHub Actions starts Xcode Cloud on the selected git ref. Merge and
+`release/*` tags do not ship the app.
 
-| Workflow setting | Value |
-| --- | --- |
-| Start condition | Git tag changes matching `release/*` |
-| Action | Archive for iOS |
-| Post-action | TestFlight internal distribution |
-| Source ref | The pushed release tag |
+| GitHub Action | Xcode Cloud workflow | Git ref | Post-action |
+| --- | --- | --- | --- |
+| **Actions → TestFlight** | Release TestFlight | any pushed branch | Internal TestFlight |
+| **Actions → App Store Archive** | App Store Release | `main` only | App Store Connect (not submitted) |
 
 Xcode Cloud assigns the Apple build number. It increments automatically after
 the initial number is seeded in App Store Connect, so do not manually change
-`CURRENT_PROJECT_VERSION` for a cloud release. The tag is a source-release
-identifier, not the TestFlight build number.
+`CURRENT_PROJECT_VERSION` for a cloud release.
 
-GitHub Actions `.github/workflows/release-app.yml` creates the next
-`release/<marketing-version>-N` tag when iOS changes land on `main`, or when
-you run **Actions → Release App**. Xcode Cloud still starts from the tag, not
-from the branch push.
+Retry = re-run the Action. The GitHub job starts the Cloud build and exits;
+wait for Apple processing before testers can install.
 
-```sh
-# Manual fallback if GitHub Actions cannot push tags
-git tag release/<marketing-version>-<release-sequence>
-git push origin release/<marketing-version>-<release-sequence>
-```
+Repo secrets required: `APP_STORE_CONNECT_ISSUER_ID`,
+`APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_PRIVATE_KEY`.
 
-Each retry needs a new tag. Xcode Cloud must complete and Apple must process
-the upload before testers can install it. A manual Xcode Cloud start is only a
-recovery path and must select the intended release tag.
+Turn off the `release/*` tag start condition on **Release TestFlight** in
+App Store Connect so leftover tags cannot auto-ship.
 
 The current bootstrap screen can call:
 

@@ -46,4 +46,8 @@ If the PR cannot merge cleanly, rebase the topic branch onto `origin/main` **in 
 
 ## Release after merge
 
-If the user also wants a release: after the PR is merged on GitHub, the `Release App` workflow on `main` tags `apps/ios/**` changes. Do not create the release commit on local `main`.
+Merging does not ship TestFlight. If the user wants a device build, run
+**Actions → TestFlight** on the topic branch (before or after merge) or on
+`main` after merge. App Store review archives are **Actions → App Store
+Archive** on `main` only. Do not create `release/*` tags or commit on local
+`main`.

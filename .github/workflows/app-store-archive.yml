@@ -1,0 +1,33 @@
+name: App Store Archive
+
+run-name: App Store Archive ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: app-store-archive
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  start:
+    name: Start Xcode Cloud App Store archive
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start App Store Release
+        env:
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+          XCODE_CLOUD_TARGET: app-store
+          GIT_REF: ${{ github.ref }}
+          GIT_SHA: ${{ github.sha }}
+          REQUIRE_MAIN: "1"
+        run: node scripts/start-xcode-cloud.mjs

@@ -56,7 +56,17 @@ xcrun xctrace list devices
 
 ## Xcode Cloud Releases
 
-The `FamilyOS` Xcode Cloud workflow starts automatically from tags prefixed
-`release/` (for example, `release/0.1.0-22`). It does not trigger from branch
-pushes. The `Release App` GitHub Actions workflow on `main` creates the next
-tag when `apps/ios/**` changes, or when you run it from Actions → Release App.
+GitHub Actions starts Xcode Cloud. Merge and `release/*` tags do not.
+
+- **Actions → TestFlight** — any pushed branch. Archives that SHA and uploads
+  internal TestFlight. `.github/workflows/testflight.yml`.
+- **Actions → App Store Archive** — `main` only. Archives for App Store
+  Connect; does not submit. `.github/workflows/app-store-archive.yml`.
+
+`scripts/start-xcode-cloud.mjs` calls App Store Connect (`POST /v1/ciBuildRuns`).
+Needs repo secrets `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_ID`,
+and `APP_STORE_CONNECT_PRIVATE_KEY`.
+
+Xcode Cloud workflows: **Release TestFlight**
+(`367FA404-8D98-4F7B-A133-A9E1929A82C8`), **App Store Release**
+(`47172e26-3833-4bcd-8891-12c2b610006f`). Cloud owns the Apple build number.
