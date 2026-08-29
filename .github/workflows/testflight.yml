@@ -16,6 +16,7 @@ jobs:
   start:
     name: Start Xcode Cloud TestFlight
     runs-on: ubuntu-latest
+    environment: testflight
     timeout-minutes: 10
     steps:
       - name: Checkout

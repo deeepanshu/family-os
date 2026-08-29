@@ -143,6 +143,9 @@ GitHub Actions starts Xcode Cloud on the selected git ref. Merge and
 | **Actions → TestFlight** | Release TestFlight | any pushed branch | Internal TestFlight |
 | **Actions → App Store Archive** | App Store Release | `main` only | App Store Connect (not submitted) |
 
+Both Actions wait for DJ to approve the GitHub environment (`testflight` or
+`app-store`) before Xcode Cloud starts. Open the run → **Review deployments**.
+
 Xcode Cloud assigns the Apple build number. It increments automatically after
 the initial number is seeded in App Store Connect, so do not manually change
 `CURRENT_PROJECT_VERSION` for a cloud release.

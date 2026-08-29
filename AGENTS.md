@@ -58,10 +58,12 @@ xcrun xctrace list devices
 
 GitHub Actions starts Xcode Cloud. Merge and `release/*` tags do not.
 
-- **Actions → TestFlight** — any pushed branch. Archives that SHA and uploads
-  internal TestFlight. `.github/workflows/testflight.yml`.
-- **Actions → App Store Archive** — `main` only. Archives for App Store
-  Connect; does not submit. `.github/workflows/app-store-archive.yml`.
+- **Actions → TestFlight** — any pushed branch. Waits for DJ to approve the
+  `testflight` environment, then archives that SHA and uploads internal
+  TestFlight. `.github/workflows/testflight.yml`.
+- **Actions → App Store Archive** — `main` only. Waits for DJ to approve the
+  `app-store` environment, then archives for App Store Connect; does not
+  submit. `.github/workflows/app-store-archive.yml`.
 
 `scripts/start-xcode-cloud.mjs` calls App Store Connect (`POST /v1/ciBuildRuns`).
 Needs repo secrets `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_ID`,

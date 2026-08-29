@@ -16,6 +16,7 @@ jobs:
   start:
     name: Start Xcode Cloud App Store archive
     runs-on: ubuntu-latest
+    environment: app-store
     timeout-minutes: 10
     steps:
       - name: Checkout

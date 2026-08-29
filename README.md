@@ -165,7 +165,9 @@ Any pushed branch:
 
 1. GitHub → **Actions → TestFlight → Run workflow**.
 2. **Use workflow from** the branch to ship.
-3. GitHub starts Xcode Cloud on that SHA. Watch App Store Connect; the Action
+3. The job waits on the `testflight` environment. **Review deployments** and
+   approve as DJ. Xcode Cloud does not start until then.
+4. GitHub starts Xcode Cloud on that SHA. Watch App Store Connect; the Action
    does not wait for the archive.
 
 Retry = run the Action again. Feature branches created before this workflow
@@ -180,7 +182,9 @@ bundle ID and marketing version as `main`).
 
 1. GitHub → **Actions → App Store Archive → Run workflow**.
 2. Use workflow from `main`.
-3. Attach the Cloud build in App Store Connect and submit for review.
+3. The job waits on the `app-store` environment. **Review deployments** and
+   approve as DJ. Xcode Cloud does not start until then.
+4. Attach the Cloud build in App Store Connect and submit for review.
 
 ### GitHub secrets
 
