@@ -11,6 +11,59 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      ios: ${{ steps.filter.outputs.ios }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify paths
+        id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          api=false
+          ios=false
+
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            base="${BASE_SHA}"
+          else
+            base="${BEFORE}"
+          fi
+
+          if [ -z "${base:-}" ] || [ "${base}" = "0000000000000000000000000000000000000000" ]; then
+            api=true
+            ios=true
+          else
+            while IFS= read -r file; do
+              [ -z "${file}" ] && continue
+              case "${file}" in
+                apps/api/*|packages/shared/*|db/*|drizzle.config.ts|package.json|package-lock.json|.github/workflows/ci.yml)
+                  api=true
+                  ;;
+              esac
+              if [ "${file}" = ".github/workflows/ci.yml" ]; then
+                ios=true
+              elif [[ "${file}" == apps/ios/* ]] && [[ "${file}" != *.md ]]; then
+                ios=true
+              fi
+            done < <(git diff --name-only "${base}" "${SHA}")
+          fi
+
+          echo "api=${api}" >> "${GITHUB_OUTPUT}"
+          echo "ios=${ios}" >> "${GITHUB_OUTPUT}"
+          echo "api=${api} ios=${ios}"
+
   workspace:
     name: Workspace Typecheck
     runs-on: ubuntu-latest
@@ -32,6 +85,8 @@ jobs:
 
   api:
     name: API Tests
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgres://family_os:family_os@localhost:5432/family_os
@@ -70,6 +125,8 @@ jobs:
 
   drizzle:
     name: Drizzle Migrations
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgres://family_os:family_os@localhost:5432/family_os
@@ -105,3 +162,94 @@ jobs:
         if: always()
         run: docker compose down
 
+  ios:
+    name: iOS Build and Test
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Print selected Xcode
+        run: |
+          echo "Xcode path: $(xcode-select -p)"
+          xcodebuild -version
+
+      - name: Find available iPhone simulator
+        id: simulator
+        run: |
+          device=$(xcrun simctl list devices available -j | \
+            python3 -c "import json,sys; data=json.load(sys.stdin); print(next((d['udid'] for runtime, devices in data.get('devices', {}).items() for d in devices if isinstance(d, dict) and d.get('isAvailable') and 'iPhone' in d.get('name', '')), ''))")
+          if [ -z "$device" ]; then
+            echo "No available iPhone simulator found"
+            exit 1
+          fi
+          echo "udid=$device" >> "$GITHUB_OUTPUT"
+          echo "Using simulator UDID: $device"
+
+      - name: Provide Firebase placeholder for CI
+        run: cp apps/ios/FamilyOS/Resources/GoogleService-Info.plist.example apps/ios/FamilyOS/Resources/GoogleService-Info.plist
+
+      - name: Build iOS app
+        run: |
+          xcodebuild \
+            -project apps/ios/FamilyOS.xcodeproj \
+            -scheme FamilyOS \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Test iOS app
+        run: |
+          xcodebuild \
+            -project apps/ios/FamilyOS.xcodeproj \
+            -scheme FamilyOS \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+  gate:
+    name: Merge Gate
+    if: always()
+    needs: [changes, workspace, api, drizzle, ios]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require jobs for changed paths
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          API_NEEDED: ${{ needs.changes.outputs.api }}
+          IOS_NEEDED: ${{ needs.changes.outputs.ios }}
+          WORKSPACE: ${{ needs.workspace.result }}
+          API: ${{ needs.api.result }}
+          DRIZZLE: ${{ needs.drizzle.result }}
+          IOS: ${{ needs.ios.result }}
+        run: |
+          set -euo pipefail
+          fail=0
+
+          if [ "${CHANGES}" != "success" ]; then
+            echo "Changed paths: ${CHANGES}" >&2
+            fail=1
+          fi
+          if [ "${WORKSPACE}" != "success" ]; then
+            echo "Workspace Typecheck: ${WORKSPACE}" >&2
+            fail=1
+          fi
+          if [ "${API_NEEDED}" = "true" ]; then
+            if [ "${API}" != "success" ] || [ "${DRIZZLE}" != "success" ]; then
+              echo "API Tests: ${API}; Drizzle Migrations: ${DRIZZLE}" >&2
+              fail=1
+            fi
+          fi
+          if [ "${IOS_NEEDED}" = "true" ]; then
+            if [ "${IOS}" != "success" ]; then
+              echo "iOS Build and Test: ${IOS}" >&2
+              fail=1
+            fi
+          fi
+
+          if [ "${fail}" -ne 0 ]; then
+            exit 1
+          fi
+          echo "api_needed=${API_NEEDED} ios_needed=${IOS_NEEDED}"

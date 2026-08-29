@@ -133,16 +133,13 @@ xcodebuild \
 
 ## CI and Local Hooks
 
-GitHub Actions in `.github/workflows/ci.yml` are the authoritative quality gate
-for `main` and pull requests. The workflow runs:
+GitHub Actions `.github/workflows/ci.yml` is the merge gate for `main` and
+pull requests.
 
-- `workspace` - typechecks the whole monorepo.
-- `api` - starts Docker Postgres, applies local migrations, typechecks the
-  Health API, and runs API tests including RLS against Postgres.
-- `drizzle` - runs `db:check` and fails if schema changes would produce
-  uncommitted migration output.
-- `ios` - builds and tests the `FamilyOS` scheme on a macOS runner with
-  `CODE_SIGNING_ALLOWED=NO`.
+- Workspace Typecheck always runs.
+- API Tests and Drizzle Migrations run when API, shared, or db paths change.
+- iOS Build and Test runs when iOS app sources change.
+- Merge Gate waits for the jobs that apply and is the required check.
 
 CI uses fake JWT/Supabase values only; no production secrets are included.
 
