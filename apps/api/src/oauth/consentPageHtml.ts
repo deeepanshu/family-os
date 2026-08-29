@@ -176,11 +176,25 @@ export function renderOAuthConsentPage(config: AppConfig): string {
       setStatus("Sign in to FamilyStack to continue");
       contentEl.innerHTML =
         "<h1>Connect an AI client</h1>" +
-        "<p>Sign in with the same FamilyStack account that owns your health profiles. A one-time magic link will be emailed to you.</p>" +
-        '<label class="label" for="email">Email</label>' +
+        "<p>Sign in with the same FamilyStack account that owns your health profiles.</p>" +
+        '<div class="row"><button class="approve" id="sign-in-apple" type="button">Continue with Apple</button></div>' +
+        '<p class="hint">Use the same Apple ID you use for FamilyStack. You will return here to review the connection.</p>' +
+        '<label class="label" for="email">Or use email</label>' +
         '<input id="email" type="email" autocomplete="email" placeholder="you@example.com" />' +
-        '<div class="row"><button class="approve" id="send-link" type="button">Email magic link</button></div>' +
-        '<p class="hint">After clicking the link in your email, return to this tab if it does not reopen automatically.</p>';
+        '<div class="row"><button class="deny" id="send-link" type="button">Email magic link</button></div>' +
+        '<p class="hint">Open the email link in this browser, or return to this tab after signing in.</p>';
+
+      document.getElementById("sign-in-apple").onclick = async () => {
+        setStatus("Redirecting to Apple…");
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider: "apple",
+          options: { redirectTo: window.location.href }
+        });
+        if (error) {
+          setStatus("");
+          showError(error.message);
+        }
+      };
 
       document.getElementById("send-link").onclick = async () => {
         const email = document.getElementById("email").value.trim();
