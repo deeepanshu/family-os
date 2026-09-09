@@ -181,6 +181,21 @@ struct HealthAPIClient {
         try await get(path: readingsPath("blood-pressure", personId: personId), baseURL: baseURL, accessToken: accessToken)
     }
 
+    func listBloodGlucose(
+        baseURL: String,
+        accessToken: String,
+        personId: String,
+        from: String,
+        to: String,
+        limit: Int = 100
+    ) async throws -> [BloodGlucoseReading] {
+        try await get(
+            path: readingsPath("blood-glucose", personId: personId, from: from, to: to, limit: limit),
+            baseURL: baseURL,
+            accessToken: accessToken
+        )
+    }
+
     func listSleepDays(
         baseURL: String,
         accessToken: String,

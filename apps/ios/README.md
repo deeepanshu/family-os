@@ -165,7 +165,6 @@ The current bootstrap screen can call:
 - `POST /health/api/v1/people`
 - `POST /health/api/v1/readings/blood-pressure`
 - `GET /health/api/v1/readings/blood-pressure`
-- `POST /health/api/v1/readings/blood-glucose`
 - `GET /health/api/v1/readings/blood-glucose`
 - `POST /health/api/v1/reminders`
 - `GET /health/api/v1/reminders`

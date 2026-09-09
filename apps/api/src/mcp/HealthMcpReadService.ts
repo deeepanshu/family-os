@@ -185,7 +185,6 @@ export class HealthMcpReadService {
           truncated
         };
       }
-
       if (query.metric === "blood_pressure") {
         const { readings, truncated } = await this.loadBloodPressureTable(
           caller.userId,
@@ -205,6 +204,25 @@ export class HealthMcpReadService {
         };
       }
 
+      if (query.metric === "blood_glucose") {
+        const { readings, truncated } = await this.loadBloodGlucoseTable(
+          caller.userId,
+          input.personId,
+          rangeStart,
+          rangeEnd,
+          presentationTimezone,
+          maxReadings
+        );
+        return {
+          ...base,
+          healthMetric: "blood_glucose",
+          viewType: "daily_reading_table",
+          coverage: { ...coverage, daysWithData: countDistinctDaysFromBuckets(readings.map((r) => r.localDate)) },
+          readings,
+          truncated
+        };
+      }
+
       // Never fall through to an unrelated table shape.
       throw new HttpError(
         400,
@@ -215,8 +233,8 @@ export class HealthMcpReadService {
   }
 
   /**
-   * The explicit app-toggle → MCP metric mapping (plan §8.2): Blood pressure /
-   * `vitals` exposes `blood_pressure` only, Sleep exposes `sleep`, Workouts
+   * The explicit app-toggle → MCP metric mapping (plan §8.2): Vitals exposes
+   * `blood_pressure` and `blood_glucose`, Sleep exposes `sleep`, Workouts
    * exposes `workout`. Settings are readable for any household member. Only
    * expected access/settings failures collapse to []; unexpected errors rethrow.
    */
@@ -348,6 +366,48 @@ export class HealthMcpReadService {
           systolic: reading.systolic,
           diastolic: reading.diastolic,
           pulse: reading.pulse
+        };
+      })
+    };
+  }
+
+  private async loadBloodGlucoseTable(
+    userId: string,
+    personId: string,
+    rangeStart: string,
+    rangeEnd: string,
+    timezone: string,
+    maxReadings: number
+  ) {
+    const start = new Date(`${rangeStart}T00:00:00.000Z`);
+    start.setUTCDate(start.getUTCDate() - 1);
+    const end = new Date(`${rangeEnd}T23:59:59.999Z`);
+    end.setUTCDate(end.getUTCDate() + 1);
+    const rows = await this.deps.healthKit.listHealthKitBloodGlucose(
+      userId,
+      personId,
+      start.toISOString(),
+      end.toISOString(),
+      maxReadings + 50
+    );
+    const inRange = rows
+      .filter((reading) => {
+        const localDate = localDateString(new Date(reading.measuredAt), timezone);
+        return isDateInInclusiveRange(localDate, rangeStart, rangeEnd);
+      })
+      .sort((a, b) => Date.parse(a.measuredAt) - Date.parse(b.measuredAt));
+
+    const truncated = inRange.length > maxReadings;
+    const limited = truncated ? inRange.slice(-maxReadings) : inRange;
+    return {
+      truncated,
+      readings: limited.map((reading) => {
+        const instant = new Date(reading.measuredAt);
+        return {
+          localDate: localDateString(instant, timezone),
+          localTime: localTimeOfDay(instant, timezone),
+          value: reading.value,
+          mealTime: reading.mealTime
         };
       })
     };

@@ -141,6 +141,23 @@ struct BloodPressureReading: Decodable, Identifiable {
     let measuredAt: String
 }
 
+struct BloodGlucoseReading: Decodable, Identifiable, Equatable {
+    let id: String
+    let value: Double
+    let unit: String
+    let mealTime: String?
+    let source: HealthDataSource
+    let measuredAt: String
+}
+
+struct BloodGlucoseDaySummary: Equatable {
+    let localDay: String
+    let latest: BloodGlucoseReading
+    let minimumValue: Double
+    let maximumValue: Double
+    let count: Int
+}
+
 struct SleepDayReading: Decodable, Identifiable {
     let personId: String
     let sleepDay: String
@@ -385,6 +402,23 @@ extension HistoryItem {
                 subtitle: HistoryTimeline.formatTime(reading.measuredAt, timeZone: timeZone),
                 metrics: metrics
             )
+        case let .bloodGlucose(reading):
+            return HistoryItemPresentation(
+                title: "Blood Glucose",
+                subtitle: HistoryTimeline.formatTime(reading.measuredAt, timeZone: timeZone),
+                metrics: HistoryTimeline.glucoseSampleMetrics(reading)
+            )
+        case let .bloodGlucoseSummary(summary):
+            return HistoryItemPresentation(
+                title: "Blood Glucose",
+                subtitle: HistoryTimeline.formatTime(summary.latest.measuredAt, timeZone: timeZone),
+                metrics: [
+                    HistoryMetricCell(label: "Latest", value: HistoryTimeline.formatGlucose(summary.latest.value)),
+                    HistoryMetricCell(label: "Min", value: HistoryTimeline.formatGlucose(summary.minimumValue)),
+                    HistoryMetricCell(label: "Max", value: HistoryTimeline.formatGlucose(summary.maximumValue)),
+                    HistoryMetricCell(label: "Readings", value: "\(summary.count)")
+                ]
+            )
         case let .sleep(day):
             return HistoryItemPresentation(
                 title: "Sleep",
@@ -448,6 +482,8 @@ enum HistoryMetricFilter: String, CaseIterable, Identifiable {
 
 enum HistoryItem: Identifiable {
     case bloodPressure(BloodPressureReading)
+    case bloodGlucose(BloodGlucoseReading)
+    case bloodGlucoseSummary(BloodGlucoseDaySummary)
     case heartRate(HeartRateDayReading)
     case workout(WorkoutReading)
     case sleep(SleepDayReading)
@@ -456,6 +492,8 @@ enum HistoryItem: Identifiable {
     var id: String {
         switch self {
         case let .bloodPressure(reading): return "bp:\(reading.id)"
+        case let .bloodGlucose(reading): return "glu:\(reading.id)"
+        case let .bloodGlucoseSummary(summary): return "glu-day:\(summary.localDay)"
         case let .heartRate(day): return "hr:\(day.localDay)"
         case let .workout(workout): return "workout:\(workout.id)"
         case let .sleep(day): return "sleep:\(day.sleepDay)"
@@ -465,7 +503,7 @@ enum HistoryItem: Identifiable {
 
     var metric: HistoryMetricFilter {
         switch self {
-        case .bloodPressure, .heartRate: return .vitals
+        case .bloodPressure, .bloodGlucose, .bloodGlucoseSummary, .heartRate: return .vitals
         case .sleep: return .sleep
         case .workout, .steps: return .workouts
         }
@@ -480,12 +518,15 @@ struct HistoryDay: Identifiable {
 }
 
 enum HistoryTimeline {
+    static let denseGlucoseDayThreshold = 8
+
     static func days(
         bloodPressure: [BloodPressureReading],
         heartRate: [HeartRateDayReading],
         sleep: [SleepDayReading],
         steps: [StepDayReading],
         workouts: [WorkoutReading],
+        bloodGlucose: [BloodGlucoseReading] = [],
         filter: HistoryMetricFilter,
         timeZone: TimeZone
     ) -> [HistoryDay] {
@@ -499,6 +540,35 @@ enum HistoryTimeline {
         for reading in bloodPressure {
             guard let day = localDay(iso: reading.measuredAt, timeZone: timeZone) else { continue }
             append(day, .bloodPressure(reading))
+        }
+        var glucoseByDay: [String: [BloodGlucoseReading]] = [:]
+        for reading in bloodGlucose {
+            guard let day = localDay(iso: reading.measuredAt, timeZone: timeZone) else { continue }
+            glucoseByDay[day, default: []].append(reading)
+        }
+        for (day, samples) in glucoseByDay {
+            let ordered = samples.sorted {
+                (parseISO($0.measuredAt)?.timeIntervalSince1970 ?? 0) > (parseISO($1.measuredAt)?.timeIntervalSince1970 ?? 0)
+            }
+            if ordered.count <= denseGlucoseDayThreshold {
+                for sample in ordered {
+                    append(day, .bloodGlucose(sample))
+                }
+            } else if let latest = ordered.first {
+                let values = ordered.map(\.value)
+                append(
+                    day,
+                    .bloodGlucoseSummary(
+                        BloodGlucoseDaySummary(
+                            localDay: day,
+                            latest: latest,
+                            minimumValue: values.min() ?? latest.value,
+                            maximumValue: values.max() ?? latest.value,
+                            count: ordered.count
+                        )
+                    )
+                )
+            }
         }
         for workout in workouts {
             guard let day = localDay(iso: workout.startedAtUtc, timeZone: timeZone) else { continue }
@@ -620,10 +690,34 @@ enum HistoryTimeline {
             return (1, 0)
         case let .bloodPressure(reading):
             return (2, parseISO(reading.measuredAt)?.timeIntervalSince1970 ?? 0)
+        case let .bloodGlucose(reading):
+            return (3, parseISO(reading.measuredAt)?.timeIntervalSince1970 ?? 0)
+        case let .bloodGlucoseSummary(summary):
+            return (3, parseISO(summary.latest.measuredAt)?.timeIntervalSince1970 ?? 0)
         case .heartRate:
-            return (3, 0)
+            return (4, 0)
         case let .workout(workout):
-            return (4, parseISO(workout.startedAtUtc)?.timeIntervalSince1970 ?? 0)
+            return (5, parseISO(workout.startedAtUtc)?.timeIntervalSince1970 ?? 0)
+        }
+    }
+
+    static func formatGlucose(_ value: Double) -> String {
+        "\(Int(value.rounded())) mg/dL"
+    }
+
+    static func glucoseSampleMetrics(_ reading: BloodGlucoseReading) -> [HistoryMetricCell] {
+        var metrics = [HistoryMetricCell(label: "Reading", value: formatGlucose(reading.value))]
+        if let meal = glucoseMealLabel(reading.mealTime) {
+            metrics.append(HistoryMetricCell(label: "Meal", value: meal))
+        }
+        return metrics
+    }
+
+    static func glucoseMealLabel(_ mealTime: String?) -> String? {
+        switch mealTime {
+        case "preprandial": return "Before meal"
+        case "postprandial": return "After meal"
+        default: return nil
         }
     }
 }
@@ -997,7 +1091,6 @@ enum HealthKitEventPayload: Encodable {
         sampleCount: Int
     )
     case bloodPressure(sourceObjectKey: String, measuredAtUtc: String, systolic: Int, diastolic: Int, pulse: Int?)
-    case bloodGlucose(sourceSampleKey: String, measuredAtUtc: String, valueMgDl: Double)
     case workout(
         sourceSampleKey: String,
         workoutType: String,
@@ -1050,11 +1143,6 @@ enum HealthKitEventPayload: Encodable {
             try container.encode(systolic, forKey: .systolic)
             try container.encode(diastolic, forKey: .diastolic)
             try container.encodeIfPresent(pulse, forKey: .pulse)
-        case let .bloodGlucose(sourceSampleKey, measuredAtUtc, valueMgDl):
-            try container.encode("blood_glucose", forKey: .kind)
-            try container.encode(sourceSampleKey, forKey: .sourceSampleKey)
-            try container.encode(measuredAtUtc, forKey: .measuredAtUtc)
-            try container.encode(valueMgDl, forKey: .valueMgDl)
         case let .workout(
             sourceSampleKey, workoutType, startedAtUtc, endedAtUtc, durationSeconds,
             activeEnergyKcal, distanceMeters, averageHeartRateBpm, maximumHeartRateBpm
@@ -1091,8 +1179,6 @@ enum HealthKitSyncOperation: Encodable {
     case dailyMetricDelete(healthMetric: HealthKitDataMetric, localDay: String)
     case bloodPressureUpsert(sourceObjectKey: String, measuredAtUtc: String, systolic: Int, diastolic: Int, pulse: Int?)
     case bloodPressureDelete(sourceObjectKey: String)
-    case bloodGlucoseUpsert(sourceSampleKey: String, measuredAtUtc: String, valueMgDl: Double)
-    case bloodGlucoseDelete(sourceSampleKey: String)
     case workoutUpsert(sourceSampleKey: String, workoutType: String, startedAtUtc: String, endedAtUtc: String, durationSeconds: Int, activeEnergyKcal: Double?, distanceMeters: Double?, averageHeartRateBpm: Double?, maximumHeartRateBpm: Double?)
     case workoutDelete(sourceSampleKey: String)
 
@@ -1184,14 +1270,6 @@ enum HealthKitSyncOperation: Encodable {
         case let .bloodPressureDelete(sourceObjectKey):
             try container.encode("blood_pressure_delete", forKey: .kind)
             try container.encode(sourceObjectKey, forKey: .sourceObjectKey)
-        case let .bloodGlucoseUpsert(sourceSampleKey, measuredAtUtc, valueMgDl):
-            try container.encode("blood_glucose_upsert", forKey: .kind)
-            try container.encode(sourceSampleKey, forKey: .sourceSampleKey)
-            try container.encode(measuredAtUtc, forKey: .measuredAtUtc)
-            try container.encode(valueMgDl, forKey: .valueMgDl)
-        case let .bloodGlucoseDelete(sourceSampleKey):
-            try container.encode("blood_glucose_delete", forKey: .kind)
-            try container.encode(sourceSampleKey, forKey: .sourceSampleKey)
         case let .workoutUpsert(sourceSampleKey, workoutType, startedAtUtc, endedAtUtc, durationSeconds, activeEnergyKcal, distanceMeters, averageHeartRateBpm, maximumHeartRateBpm):
             try container.encode("workout_upsert", forKey: .kind)
             try container.encode(sourceSampleKey, forKey: .sourceSampleKey)
@@ -1221,8 +1299,6 @@ enum HealthKitSyncOperation: Encodable {
             return healthMetric.group
         case .bloodPressureUpsert, .bloodPressureDelete:
             return .bloodPressure
-        case .bloodGlucoseUpsert, .bloodGlucoseDelete:
-            return .vitals
         case .workoutUpsert, .workoutDelete:
             return .workouts
         }
@@ -1247,10 +1323,6 @@ enum HealthKitSyncOperation: Encodable {
             return "bp_up:\(sourceObjectKey)"
         case let .bloodPressureDelete(sourceObjectKey):
             return "bp_del:\(sourceObjectKey)"
-        case let .bloodGlucoseUpsert(sourceSampleKey, _, _):
-            return "glucose_up:\(sourceSampleKey)"
-        case let .bloodGlucoseDelete(sourceSampleKey):
-            return "glucose_del:\(sourceSampleKey)"
         case let .workoutUpsert(sourceSampleKey, _, _, _, _, _, _, _, _):
             return "workout_up:\(sourceSampleKey)"
         case let .workoutDelete(sourceSampleKey):
@@ -1275,13 +1347,12 @@ struct HealthKitBackfillWindow {
             return includesDay(sleepDay)
         case let .dailyMetricUpsert(_, localDay, _, _, _, _, _, _):
             return includesDay(localDay)
-        case let .bloodPressureUpsert(_, measuredAtUtc, _, _, _),
-             let .bloodGlucoseUpsert(_, measuredAtUtc, _):
+        case let .bloodPressureUpsert(_, measuredAtUtc, _, _, _):
             return includesInstant(measuredAtUtc)
         case let .workoutUpsert(_, _, startedAtUtc, _, _, _, _, _, _):
             return includesInstant(startedAtUtc)
         case .stepsHourDelete, .sleepDayDelete, .dailyMetricDelete,
-             .bloodPressureDelete, .bloodGlucoseDelete, .workoutDelete:
+             .bloodPressureDelete, .workoutDelete:
             // A delete proves a previously observed source disappeared. The
             // API deliberately treats its time range as soft.
             return true

@@ -72,7 +72,8 @@ const bloodGlucosePayload = z
     kind: z.literal("blood_glucose"),
     sourceSampleKey: uuid,
     measuredAtUtc: isoInstant,
-    valueMgDl: z.number().min(20).max(700)
+    valueMgDl: z.number().min(20).max(700),
+    mealTime: z.enum(["preprandial", "postprandial"]).optional()
   })
   .strict();
 

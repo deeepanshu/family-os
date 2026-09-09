@@ -59,11 +59,14 @@ export type HealthKitBloodPressurePayload = {
   pulse?: number;
 };
 
+export type BloodGlucoseMealTime = "preprandial" | "postprandial";
+
 export type HealthKitBloodGlucosePayload = {
   kind: "blood_glucose";
   sourceSampleKey: string;
   measuredAtUtc: string;
   valueMgDl: number;
+  mealTime?: BloodGlucoseMealTime;
 };
 
 /** Pause / resume / lap / marker style events on a workout (layer B). */
@@ -412,4 +415,8 @@ export function requiredScopeKeysForGroup(group: HealthKitConsentGroup): string[
 
 export function bloodPressureNaturalKey(sourceObjectKey: string): string {
   return `blood_pressure:${sourceObjectKey}`;
+}
+
+export function bloodGlucoseNaturalKey(sourceSampleKey: string): string {
+  return `blood_glucose:${sourceSampleKey}`;
 }

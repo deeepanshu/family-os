@@ -6,13 +6,13 @@ import type { McpCallerContext, HealthMcpReadService } from "./HealthMcpReadServ
 import { encodeCappedJson, withTimeout } from "./responseCap";
 import { toSafeToolErrorMessage } from "./toolErrors";
 
-// Fixed product allowlist: exactly blood_pressure, sleep, workout (plan §8.2).
+// Fixed product allowlist: steps, blood_pressure, blood_glucose, sleep, workout (plan §8.2).
 const healthMetricSchema = z.enum([...MCP_HEALTH_METRICS] as [McpHealthMetric, ...McpHealthMetric[]]);
 
 const getHealthDataInput = {
   personId: z.string().uuid().describe("Untrusted profile ID from list_authorized_profiles"),
   healthMetric: healthMetricSchema.describe(
-    "One of blood_pressure, sleep, workout. Use sleep for night summaries (includes stages, optional wrist temperature and breathing disturbances)."
+    "One of steps, blood_pressure, blood_glucose, sleep, workout. Use sleep for night summaries (includes stages, optional wrist temperature and breathing disturbances). blood_glucose is mg/dL with optional mealTime preprandial|postprandial."
   ),
   rangeDays: z.number().int().min(1).max(90).describe("Number of local days to include, inclusive of today"),
   timezone: z.string().min(1).max(64).optional().describe("IANA timezone for local buckets. Defaults to UTC.")
@@ -34,7 +34,7 @@ export function createFamilyOsMcpServer(options: {
     {
       title: "List authorized profiles",
       description:
-        "Lists Family OS profiles the connected user may query. Returns familiar labels, untrusted person IDs, and the per-profile available health metrics (blood_pressure, sleep, workout) based on the user's enabled app toggles."
+        "Lists Family OS profiles the connected user may query. Returns familiar labels, untrusted person IDs, and the per-profile available health metrics (steps, blood_pressure, blood_glucose, sleep, workout) based on the user's enabled app toggles."
     },
     async () => {
       try {
@@ -59,7 +59,7 @@ export function createFamilyOsMcpServer(options: {
     {
       title: "Get health data",
       description:
-        "Returns bounded, metric-specific health data for one authorized profile: blood pressure as a reading table, sleep as a per-night summary (stages plus optional wrist temperature and breathing disturbance fields), and workouts as a bounded table. Strength workouts may include a user-authored exercises array (name, per-set reps, optional weightKg). Returns stored data with coverage and last-synced metadata, up to 90 days per call.",
+        "Returns bounded, metric-specific health data for one authorized profile: blood pressure and blood glucose as reading tables (glucose in mg/dL with optional mealTime), sleep as a per-night summary (stages plus optional wrist temperature and breathing disturbance fields), and workouts as a bounded table. Strength workouts may include a user-authored exercises array (name, per-set reps, optional weightKg). Returns stored data with coverage and last-synced metadata, up to 90 days per call.",
 
       inputSchema: getHealthDataInput
     },

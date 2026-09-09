@@ -1,12 +1,13 @@
 import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
-import { HEALTH_API_PREFIX, bloodPressureNaturalKey } from "@family-os/shared";
+import { HEALTH_API_PREFIX, bloodGlucoseNaturalKey, bloodPressureNaturalKey } from "@family-os/shared";
 import { createApp } from "../src/app";
 import { HealthMcpReadService } from "../src/mcp/HealthMcpReadService";
 import { repositoriesFromFamilyRepository } from "../src/dependencies";
 import { InMemoryFamilyRepository } from "../src/repositories/families";
 import {
   beginRun,
+  bloodGlucoseOp,
   bloodPressureOp,
   completeRun,
   failRun,
@@ -350,6 +351,43 @@ describe("HealthKit run lifecycle", () => {
     const ids = await listBpReadingIds(api, token, profileId);
     expect(ids).not.toContain(inWindow);
     expect(ids).toContain(outOfWindow);
+  });
+
+  it("repair completion removes stale glucose keys inside the vitals window", async () => {
+    const { api } = app();
+    const { token, profileId } = await setup(api);
+    await putSettings(api, token, profileId);
+
+    const keep = crypto.randomUUID();
+    const drop = crypto.randomUUID();
+    const outside = crypto.randomUUID();
+    await seedHealthKitReadyGroup(api, token, profileId, installationId, "vitals", [
+      bloodGlucoseOp({ sourceSampleKey: keep, measuredAtUtc: isoDaysAgo(10), valueMgDl: 104, mealTime: "preprandial" }),
+      bloodGlucoseOp({ sourceSampleKey: drop, measuredAtUtc: isoDaysAgo(20), valueMgDl: 140 }),
+      bloodGlucoseOp({ sourceSampleKey: outside, measuredAtUtc: isoDaysAgo(100), valueMgDl: 90 })
+    ]);
+
+    const begin = await beginRun(api, token, profileId, installationId, "vitals", "repair_import");
+    const descriptor = (await begin.json()).data;
+    const complete = await completeRun(api, token, profileId, installationId, "vitals", {
+      kind: "repair_import",
+      rangeStartAt: descriptor.rangeStartAt,
+      rangeEndAt: descriptor.rangeEndAt,
+      completeSnapshot: true,
+      presentNaturalKeys: [bloodGlucoseNaturalKey(keep)]
+    });
+    expect(complete.status).toBe(200);
+    expect((await complete.json()).data.deletedCount).toBe(1);
+
+    const listed = await (
+      await api.request(`${HEALTH_API_PREFIX}/readings/blood-glucose?personId=${profileId}&from=1970-01-01&to=2099-01-01&limit=100`, {
+        headers: { authorization: `Bearer ${token}` }
+      })
+    ).json();
+    const ids = listed.data.map((row: { id: string }) => row.id);
+    expect(ids).toContain(keep);
+    expect(ids).not.toContain(drop);
+    expect(ids).toContain(outside);
   });
 
   it("deletes nothing when the app disappears before repair completion", async () => {

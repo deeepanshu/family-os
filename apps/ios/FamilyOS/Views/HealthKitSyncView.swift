@@ -217,7 +217,7 @@ struct HealthKitSettingsSections: View {
 
     private func title(for metric: HealthKitSyncMetric) -> String {
         switch metric {
-        case .vitals: return "Blood pressure & heart rate"
+        case .vitals: return "Blood pressure, heart rate & blood glucose"
         case .sleep: return "Sleep"
         case .workouts: return "Workouts"
         default: return metric.displayName
