@@ -95,7 +95,7 @@ jobs:
           echo "Decision: build=${build} deploy=${deploy} image_tag=${tag}"
 
   build-and-push:
-    name: Build and push arm64 image
+    name: Build and push amd64 image
     needs: changes
     if: needs.changes.outputs.build == 'true'
     runs-on: ubuntu-latest
@@ -115,9 +115,6 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "Image tag: ${TAG}"
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -133,7 +130,7 @@ jobs:
         with:
           context: .
           file: Dockerfile
-          platforms: linux/arm64
+          platforms: linux/amd64
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
