@@ -92,7 +92,7 @@ Production compose attaches both API and MCP to the external Docker network
 `observability` and sets:
 
 ```text
-OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel.lab:4318
 OTEL_SERVICE_NAME=family-os-health-api   # or family-os-mcp
 OTEL_RESOURCE_ATTRIBUTES=deployment.environment=prod
 ```
