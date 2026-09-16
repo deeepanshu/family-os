@@ -110,7 +110,7 @@ final class AppMetricsTests: XCTestCase {
         AppMetrics.configureForTesting(endpoint: try XCTUnwrap(URL(string: "http://telemetry.lab:4318/v1/metrics"))) { request in
             recorder.record(request)
         }
-        AppMetrics.recordBootstrap(outcome: "unauthorized")
+        AppMetrics.recordBootstrap(.unauthorized)
         AppMetrics.flush(force: true)
 
         wait(for: [delivered], timeout: 1)
@@ -128,8 +128,8 @@ final class AppMetricsTests: XCTestCase {
             recorder.record(request)
         }
         AppMetrics.recordHealthKitSkip(
-            trigger: "bg_refresh",
-            skipReason: "not_background_enabled",
+            reason: "bg_refresh",
+            skipReason: .notBackgroundEnabled,
             group: "activity"
         )
         AppMetrics.flush(force: true)
@@ -150,12 +150,12 @@ final class AppMetricsTests: XCTestCase {
         AppMetrics.configureForTesting(endpoint: try XCTUnwrap(URL(string: "http://telemetry.lab:4318/v1/metrics"))) { request in
             recorder.record(request)
         }
-        AppMetrics.recordSignIn(outcome: "success")
-        AppMetrics.recordRefresh(source: "ui", outcome: "failed")
-        AppMetrics.recordSignOut(reason: "unauthorized")
-        AppMetrics.recordAuthRetry(outcome: "recovered")
+        AppMetrics.recordSignIn(.success)
+        AppMetrics.recordRefresh(source: .ui, outcome: .failed)
+        AppMetrics.recordSignOut(reason: .unauthorized)
+        AppMetrics.recordAuthRetry(.recovered)
         AppMetrics.recordHealthKitFailed(
-            trigger: "foreground",
+            reason: "foreground",
             group: "vitals",
             error: HealthAPIError.badStatus(401, "expired", code: "unauthorized")
         )
@@ -176,6 +176,13 @@ final class AppMetricsTests: XCTestCase {
         XCTAssertEqual(failed.attributes["code"], "unauthorized")
         XCTAssertEqual(failed.attributes["group"], "vitals")
     }
+
+    func testHealthAPIErrorMetricCodeAllowlist() {
+        XCTAssertEqual(HealthAPIError.missingToken.metricCode, "missing_token")
+        XCTAssertEqual(HealthAPIError.badStatus(401, "expired", code: "unauthorized").metricCode, "unauthorized")
+        XCTAssertEqual(HealthAPIError.badStatus(409, "locked", code: "healthkit_locked").metricCode, "healthkit_locked")
+        XCTAssertEqual(HealthAPIError.badStatus(500, "boom", code: "not_a_real_code").metricCode, "other")
+    }
 }
 
 private final class RequestRecorder: @unchecked Sendable {
@@ -195,7 +202,7 @@ private final class RequestRecorder: @unchecked Sendable {
     }
 }
 
-private func counterPoint(named name: String, in request: URLRequest?) throws -> (value: Double, attributes: [String: String]) {
+func counterPoint(named name: String, in request: URLRequest?) throws -> (value: Double, attributes: [String: String]) {
     let body = try XCTUnwrap(request?.httpBody)
     let root = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
     let metrics = try XCTUnwrap(
@@ -211,4 +218,13 @@ private func counterPoint(named name: String, in request: URLRequest?) throws ->
         attributes[key] = try XCTUnwrap((attribute["value"] as? [String: Any])?["stringValue"] as? String)
     }
     return (value, attributes)
+}
+
+func otlpMetricNames(in request: URLRequest?) throws -> Set<String> {
+    let body = try XCTUnwrap(request?.httpBody)
+    let root = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+    let metrics = try XCTUnwrap(
+        (((root["resourceMetrics"] as? [[String: Any]])?.first?["scopeMetrics"] as? [[String: Any]])?.first?["metrics"] as? [[String: Any]])
+    )
+    return Set(metrics.compactMap { $0["name"] as? String })
 }

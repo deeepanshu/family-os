@@ -325,14 +325,14 @@ final class HealthKitRunEngineTests: XCTestCase {
     func testBackgroundSkipReasonDistinguishesActivityFromImport() {
         XCTAssertEqual(
             HealthKitBackgroundSync.backgroundSkipReason(for: .activity, needingInitialImport: []),
-            "not_background_enabled"
+            .notBackgroundEnabled
         )
         XCTAssertEqual(
             HealthKitBackgroundSync.backgroundSkipReason(
                 for: .sleep,
                 needingInitialImport: [HealthKitSyncMetric.sleep.rawValue]
             ),
-            "needs_import"
+            .needsImport
         )
     }
 

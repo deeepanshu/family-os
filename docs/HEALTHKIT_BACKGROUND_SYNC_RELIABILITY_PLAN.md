@@ -378,7 +378,20 @@ static func scheduleAppRefresh()
 
 ## Observability
 
-Reuse `CrashReporting.healthKit` / `healthKitNonFatal`. Add or keep these breadcrumbs:
+Operational diagnosis is **self-hosted OTLP metrics** from `AppMetrics` (Release
+builds → `telemetry.deepanshujain.me` → Grafana **Family OS iOS**). Crashlytics
+breadcrumbs remain for per-device traces and request IDs; they are not the
+aggregate signal.
+
+| Metric | Meaning |
+| --- | --- |
+| `ios.auth.refresh{source,outcome}` | UI/background token refresh, including `missing_token` / `missing_refresh` / `missing_config` |
+| `ios.auth.sign_out{reason}` | Local session cleared (`unauthorized`, `refresh_failed`, …) |
+| `ios.healthkit.sync.runs{reason,outcome}` | Wake completed, skipped, or failed |
+| `ios.healthkit.sync.skips{skip_reason}` | Why a wake did not upload (`no_token`, `not_background_enabled`, …) |
+| `ios.healthkit.sync.failures{code}` | Allowlisted API failure code or `other` |
+
+Reuse `CrashReporting.healthKit` / `healthKitNonFatal` for these breadcrumbs:
 
 | Event | Meaning |
 | --- | --- |

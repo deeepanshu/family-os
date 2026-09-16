@@ -1153,12 +1153,3 @@ private final class MetricsRequestRecorder: @unchecked Sendable {
         expectation.fulfill()
     }
 }
-
-private func otlpMetricNames(in request: URLRequest?) throws -> Set<String> {
-    let body = try XCTUnwrap(request?.httpBody)
-    let root = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
-    let metrics = try XCTUnwrap(
-        (((root["resourceMetrics"] as? [[String: Any]])?.first?["scopeMetrics"] as? [[String: Any]])?.first?["metrics"] as? [[String: Any]])
-    )
-    return Set(metrics.compactMap { $0["name"] as? String })
-}

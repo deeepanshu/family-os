@@ -11,7 +11,7 @@ extension HealthBootstrapViewModel {
         } catch {
             isError = true
             statusMessage = error.localizedDescription
-            AppMetrics.recordSignIn(outcome: "failed")
+            AppMetrics.recordSignIn(.failed)
             reportActionFailure(statusMessage)
         }
     }
@@ -34,7 +34,7 @@ extension HealthBootstrapViewModel {
             await signInWithApple(authorization)
         case .failure(let error):
             let cancelled = Self.isAppleSignInCancelled(error)
-            AppMetrics.recordSignIn(outcome: cancelled ? "cancelled" : "failed")
+            AppMetrics.recordSignIn(cancelled ? .cancelled : .failed)
             isError = true
             statusMessage = error.localizedDescription
             reportActionFailure(statusMessage)
@@ -118,14 +118,14 @@ extension HealthBootstrapViewModel {
             )
             try storeSession(session)
             self.auth.currentAppleNonce = nil
-            AppMetrics.recordSignIn(outcome: "success")
+            AppMetrics.recordSignIn(.success)
             AppMetrics.flush(force: true)
             return "Signed in with Apple as \(signedInSummary)."
         }
         if hasAccessToken {
             await startup()
         } else {
-            AppMetrics.recordSignIn(outcome: "failed")
+            AppMetrics.recordSignIn(.failed)
         }
     }
 

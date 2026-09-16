@@ -42,6 +42,33 @@ enum HealthAPIError: LocalizedError {
             return nil
         }
     }
+
+    /// Low-cardinality failure label for OTLP. Unknown server codes collapse to `other`.
+    var metricCode: String {
+        if httpStatus == 401 {
+            return "unauthorized"
+        }
+        if case .missingToken = self {
+            return "missing_token"
+        }
+        if let code = errorCode, Self.metricCodes.contains(code) {
+            return code
+        }
+        return "other"
+    }
+
+    private static let metricCodes: Set<String> = [
+        "unauthorized",
+        "missing_token",
+        "healthkit_locked",
+        "sync_timeout",
+        "sync_cancelled",
+        "sync_failed",
+        "sync_incomplete",
+        "bp_samples_empty",
+        "consent_missing",
+        "installation_inactive"
+    ]
 }
 
 struct HealthAPIClient {

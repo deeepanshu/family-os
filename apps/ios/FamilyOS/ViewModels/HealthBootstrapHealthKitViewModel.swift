@@ -223,25 +223,25 @@ extension HealthBootstrapViewModel {
             )
 
             for result in outcome.synced {
-                AppMetrics.recordHealthKitCompleted(trigger: "foreground", group: result.metric.scopeMetricKey)
+                AppMetrics.recordHealthKitCompleted(reason: "foreground", group: result.metric.scopeMetricKey)
             }
             for failure in outcome.failures {
                 AppMetrics.recordHealthKitFailed(
-                    trigger: "foreground",
+                    reason: "foreground",
                     group: failure.metric.scopeMetricKey,
                     error: failure.error
                 )
             }
             for metric in outcome.skipped {
                 AppMetrics.recordHealthKitSkip(
-                    trigger: "foreground",
-                    skipReason: "needs_import",
+                    reason: "foreground",
+                    skipReason: .needsImport,
                     group: metric.scopeMetricKey
                 )
             }
-            AppMetrics.increment(
-                "ios.healthkit.sync.runs",
-                attributes: ["reason": "foreground", "outcome": outcome.failures.isEmpty ? "completed" : "failed"]
+            AppMetrics.recordSyncRun(
+                reason: "foreground",
+                outcome: outcome.failures.isEmpty ? .completed : .failed
             )
             AppMetrics.flush(force: true)
 
@@ -257,10 +257,7 @@ extension HealthBootstrapViewModel {
         } catch {
             healthKit.clearActiveRun()
             await refreshHealthKitStatusAfterRun()
-            AppMetrics.increment(
-                "ios.healthkit.sync.runs",
-                attributes: ["reason": "foreground", "outcome": "failed"]
-            )
+            AppMetrics.recordSyncRun(reason: "foreground", outcome: .failed)
             AppMetrics.flush(force: true)
             isError = true
             statusMessage = error.localizedDescription
@@ -310,11 +307,8 @@ extension HealthBootstrapViewModel {
                 count: result.fetchedCount,
                 extra: ["run_kind": kind.rawValue, "deleted": String(result.deletedCount)]
             )
-            AppMetrics.recordHealthKitCompleted(trigger: kind.rawValue, group: metric.scopeMetricKey)
-            AppMetrics.increment(
-                "ios.healthkit.sync.runs",
-                attributes: ["reason": kind.rawValue, "outcome": "completed"]
-            )
+            AppMetrics.recordHealthKitCompleted(reason: kind.rawValue, group: metric.scopeMetricKey)
+            AppMetrics.recordSyncRun(reason: kind.rawValue, outcome: .completed)
             AppMetrics.flush(force: true)
             let message = Self.runSummaryMessage(result: result)
             statusMessage = message
@@ -322,11 +316,8 @@ extension HealthBootstrapViewModel {
             reportActionResult(message)
         } catch {
             await refreshHealthKitStatusAfterRun()
-            AppMetrics.recordHealthKitFailed(trigger: kind.rawValue, group: metric.scopeMetricKey, error: error)
-            AppMetrics.increment(
-                "ios.healthkit.sync.runs",
-                attributes: ["reason": kind.rawValue, "outcome": "failed"]
-            )
+            AppMetrics.recordHealthKitFailed(reason: kind.rawValue, group: metric.scopeMetricKey, error: error)
+            AppMetrics.recordSyncRun(reason: kind.rawValue, outcome: .failed)
             AppMetrics.flush(force: true)
             isError = true
             statusMessage = error.localizedDescription
@@ -352,7 +343,7 @@ extension HealthBootstrapViewModel {
                 message: "sync_blocked_missing_self_profile"
             )
             reportActionFailure(statusMessage)
-            AppMetrics.recordHealthKitSkip(trigger: "foreground", skipReason: "missing_profile")
+            AppMetrics.recordHealthKitSkip(reason: "foreground", skipReason: .missingProfile)
             return false
         }
         guard healthKit.linkedProfileId == nil || healthKit.linkedProfileId == personId else {
@@ -364,7 +355,7 @@ extension HealthBootstrapViewModel {
                 message: "sync_blocked_wrong_profile"
             )
             reportActionFailure(statusMessage)
-            AppMetrics.recordHealthKitSkip(trigger: "foreground", skipReason: "wrong_profile")
+            AppMetrics.recordHealthKitSkip(reason: "foreground", skipReason: .wrongProfile)
             return false
         }
         guard healthKitClient.isAvailable || healthKit.isAvailable else {
@@ -376,7 +367,7 @@ extension HealthBootstrapViewModel {
                 message: "sync_blocked_healthkit_unavailable"
             )
             reportActionFailure(statusMessage)
-            AppMetrics.recordHealthKitSkip(trigger: "foreground", skipReason: "unavailable")
+            AppMetrics.recordHealthKitSkip(reason: "foreground", skipReason: .unavailable)
             return false
         }
         guard healthKit.consentGranted else {
@@ -388,7 +379,7 @@ extension HealthBootstrapViewModel {
                 message: "sync_blocked_no_consent"
             )
             reportActionFailure(statusMessage)
-            AppMetrics.recordHealthKitSkip(trigger: "foreground", skipReason: "consent_missing")
+            AppMetrics.recordHealthKitSkip(reason: "foreground", skipReason: .consentMissing)
             return false
         }
         return true

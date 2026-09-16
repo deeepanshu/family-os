@@ -101,7 +101,9 @@ FamilyStack → https://telemetry.deepanshujain.me/v1/metrics
   argument only for a LAN smoke test against `http://telemetry.lab:4318/v1/metrics`.
 - Release metrics require `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`.
   Add both as Xcode Cloud environment variables; `ci_pre_xcodebuild.sh` writes
-  them to the ignored release xcconfig before building.
+  them to the ignored release xcconfig before building. Xcode Cloud archives
+  **fail closed** if either variable is unset, so a Release IPA cannot ship
+  with metrics silently disabled.
 - The Access service token is a write-only anti-abuse control, not a durable
   secret: it ships in the signed app. Scope its Cloudflare Access policy only
   to `telemetry.deepanshujain.me`.

@@ -136,7 +136,7 @@ final class HealthBootstrapViewModel: ObservableObject {
         isError = false
     }
 
-    func signOut(reason: String = "user") {
+    func signOut(reason: AppMetrics.SignOutReason = .user) {
         AppMetrics.recordSignOut(reason: reason)
         AppMetrics.flush(force: true)
         auth.clear(defaults: defaults, keychain: keychain)
@@ -166,7 +166,7 @@ final class HealthBootstrapViewModel: ObservableObject {
             try await client.deleteAccount(baseURL: connection.baseURL, accessToken: auth.accessToken)
             let wiped = HealthKitSyncStore.wipeShared()
             HealthKitInstallationId.clear(using: keychain)
-            signOut(reason: "account_deleted")
+            signOut(reason: .accountDeleted)
             if wiped {
                 statusMessage = "Account deleted."
                 isError = false
@@ -268,10 +268,10 @@ final class HealthBootstrapViewModel: ObservableObject {
             applyBootstrap(bootstrap)
             await completeSelfProfileIfNeeded()
             await loadPendingInvitePreview()
-            AppMetrics.recordBootstrap(outcome: "success")
+            AppMetrics.recordBootstrap(.success)
         } catch {
             if let api = error as? HealthAPIError, api.httpStatus == 401 {
-                AppMetrics.recordBootstrap(outcome: "unauthorized")
+                AppMetrics.recordBootstrap(.unauthorized)
                 AppMetrics.flush(force: true)
                 CrashReporting.recordNonFatal(
                     domain: "com.deepanshujain.familyos.auth",
@@ -283,10 +283,10 @@ final class HealthBootstrapViewModel: ObservableObject {
                         "request_id": api.requestId ?? ""
                     ]
                 )
-                signOut(reason: "unauthorized")
+                signOut(reason: .unauthorized)
                 return
             }
-            AppMetrics.recordBootstrap(outcome: "error")
+            AppMetrics.recordBootstrap(.error)
             startupError = error
             statusMessage = error.localizedDescription
             isError = true
@@ -417,12 +417,23 @@ final class HealthBootstrapViewModel: ObservableObject {
 
     /// Internal so the HealthKit command extension can refresh before throwing saves.
     func refreshSessionIfNeeded() async throws {
+        if auth.accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            AppMetrics.recordRefresh(source: .ui, outcome: .missingToken)
+            AppMetrics.recordSignOut(reason: .refreshFailed)
+            auth.clear(defaults: defaults, keychain: keychain)
+            throw SupabaseAuthError.requestFailed("Your sign-in session expired. Please sign in again.")
+        }
         guard AccessTokenExpiry.requiresRefresh(auth.accessToken) else {
             return
         }
+        if connection.supabaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || connection.supabaseAnonKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            AppMetrics.recordRefresh(source: .ui, outcome: .missingConfig)
+            throw SupabaseAuthError.requestFailed("Sign-in is not configured. Try again later.")
+        }
         guard let refreshToken = auth.refreshToken, !refreshToken.isEmpty else {
-            AppMetrics.recordRefresh(source: "ui", outcome: "missing_refresh")
-            AppMetrics.recordSignOut(reason: "refresh_failed")
+            AppMetrics.recordRefresh(source: .ui, outcome: .missingRefresh)
+            AppMetrics.recordSignOut(reason: .refreshFailed)
             auth.clear(defaults: defaults, keychain: keychain)
             throw SupabaseAuthError.requestFailed("Your sign-in session expired. Please sign in again.")
         }
@@ -434,10 +445,10 @@ final class HealthBootstrapViewModel: ObservableObject {
                 refreshToken: refreshToken
             )
             try auth.store(session: session, defaults: defaults, keychain: keychain)
-            AppMetrics.recordRefresh(source: "ui", outcome: "success")
+            AppMetrics.recordRefresh(source: .ui, outcome: .success)
         } catch {
-            AppMetrics.recordRefresh(source: "ui", outcome: "failed")
-            AppMetrics.recordSignOut(reason: "refresh_failed")
+            AppMetrics.recordRefresh(source: .ui, outcome: .failed)
+            AppMetrics.recordSignOut(reason: .refreshFailed)
             auth.clear(defaults: defaults, keychain: keychain)
             throw SupabaseAuthError.requestFailed("Your sign-in session expired. Please sign in again.")
         }
