@@ -205,16 +205,23 @@ enum HealthSessionRefresher: Sendable {
             return try await perform(token)
         } catch let error as HealthAPIError {
             guard isUnauthorized(error) else { throw error }
-            guard let retry = await freshAccessToken(force: true) else { throw error }
-            return try await perform(retry)
+            guard let retry = await freshAccessToken(force: true) else {
+                AppMetrics.recordAuthRetry(outcome: "failed")
+                throw error
+            }
+            do {
+                let value = try await perform(retry)
+                AppMetrics.recordAuthRetry(outcome: "recovered")
+                return value
+            } catch {
+                AppMetrics.recordAuthRetry(outcome: "failed")
+                throw error
+            }
         }
     }
 
     static func isUnauthorized(_ error: HealthAPIError) -> Bool {
-        if case .badStatus(let status, _, _) = error {
-            return status == 401
-        }
-        return false
+        error.httpStatus == 401
     }
 
     fileprivate static func loadOrRefresh(force: Bool) async -> String? {
@@ -222,6 +229,7 @@ enum HealthSessionRefresher: Sendable {
         let access = (try? keychain.string(for: DefaultsKey.accessToken)) ?? ""
         guard !access.isEmpty else {
             CrashReporting.log("healthkit_bg_sync_skip_no_token")
+            AppMetrics.recordRefresh(source: "background", outcome: "missing_token")
             return nil
         }
         if !force, !AccessTokenExpiry.requiresRefresh(access) {
@@ -231,6 +239,7 @@ enum HealthSessionRefresher: Sendable {
         let refresh = (try? keychain.string(for: DefaultsKey.refreshToken)) ?? ""
         guard !refresh.isEmpty else {
             CrashReporting.log("healthkit_bg_sync_skip_no_refresh_token")
+            AppMetrics.recordRefresh(source: "background", outcome: "missing_refresh")
             return nil
         }
 
@@ -241,6 +250,7 @@ enum HealthSessionRefresher: Sendable {
             ?? AppEnvironment.current.supabaseAnonKey
         guard !supabaseURL.isEmpty, !anonKey.isEmpty else {
             CrashReporting.log("healthkit_bg_sync_skip_no_supabase_config")
+            AppMetrics.recordRefresh(source: "background", outcome: "missing_config")
             return nil
         }
 
@@ -254,6 +264,7 @@ enum HealthSessionRefresher: Sendable {
             if let nextRefresh = session.refreshToken, !nextRefresh.isEmpty {
                 try keychain.set(nextRefresh, for: DefaultsKey.refreshToken)
             }
+            AppMetrics.recordRefresh(source: "background", outcome: "success")
             return session.accessToken
         } catch {
             CrashReporting.healthKitNonFatal(
@@ -262,6 +273,7 @@ enum HealthSessionRefresher: Sendable {
                 message: "healthkit_bg_token_refresh_failed",
                 underlying: error
             )
+            AppMetrics.recordRefresh(source: "background", outcome: "failed")
             return nil
         }
     }

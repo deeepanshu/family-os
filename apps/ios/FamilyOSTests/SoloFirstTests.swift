@@ -1,3 +1,4 @@
+import AuthenticationServices
 import HealthKit
 import XCTest
 @testable import FamilyOS
@@ -857,8 +858,16 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertFalse(viewModel.isError)
     }
 
-    func testStartupAccountDeletedSignsOut() async {
+    func testStartupAccountDeletedSignsOut() async throws {
+        let delivered = expectation(description: "OTLP bootstrap unauthorized")
+        delivered.assertForOverFulfill = false
+        let recorder = MetricsRequestRecorder(expectation: delivered)
+        AppMetrics.configureForTesting(endpoint: try XCTUnwrap(URL(string: "http://telemetry.lab:4318/v1/metrics"))) { request in
+            recorder.record(request)
+        }
+
         MockURLProtocol.statusByPath = ["/bootstrap": 401]
+        MockURLProtocol.headerFieldsByPath = ["/bootstrap": ["x-request-id": "req-lockout-1"]]
         let viewModel = makeViewModelWithMock([
             "/bootstrap": #"{"error":{"code":"account_deleted","message":"This account has been deleted."}}"#
         ])
@@ -870,7 +879,46 @@ final class SoloFirstTests: XCTestCase {
         XCTAssertEqual(viewModel.auth.accessToken, "")
         XCTAssertNil(viewModel.auth.signedInUserId)
         XCTAssertNil(viewModel.startupError)
+        await fulfillment(of: [delivered], timeout: 1)
+        let names = try otlpMetricNames(in: recorder.request)
+        XCTAssertTrue(names.contains("ios.bootstrap.requests"))
         MockURLProtocol.statusByPath = [:]
+        MockURLProtocol.headerFieldsByPath = [:]
+    }
+
+    func testHealthAPIClientSurfacesRequestIdOnUnauthorized() async {
+        MockURLProtocol.statusByPath = ["/bootstrap": 401]
+        MockURLProtocol.headerFieldsByPath = ["/bootstrap": ["X-Request-Id": "req-lockout-1"]]
+        let session = makeMockSession([
+            "/bootstrap": #"{"error":{"code":"account_deleted","message":"This account has been deleted."}}"#
+        ])
+        let client = HealthAPIClient(session: session)
+
+        do {
+            _ = try await client.bootstrap(
+                baseURL: "https://test.example.com",
+                accessToken: "test-token"
+            )
+            XCTFail("Expected unauthorized bootstrap to throw")
+        } catch let error as HealthAPIError {
+            XCTAssertEqual(error.httpStatus, 401)
+            XCTAssertEqual(error.errorCode, "account_deleted")
+            XCTAssertEqual(error.requestId, "req-lockout-1")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        MockURLProtocol.statusByPath = [:]
+        MockURLProtocol.headerFieldsByPath = [:]
+    }
+
+    func testAppleSignInCancelIsNotAFailure() {
+        let cancelled = NSError(
+            domain: ASAuthorizationError.errorDomain,
+            code: ASAuthorizationError.canceled.rawValue
+        )
+        XCTAssertTrue(HealthBootstrapViewModel.isAppleSignInCancelled(cancelled))
+        XCTAssertFalse(HealthBootstrapViewModel.isAppleSignInCancelled(NSError(domain: "test", code: 1)))
     }
 
     func testPublicSiteOriginStripsHealthAPIPrefix() {
@@ -1023,6 +1071,7 @@ private func makeBootstrapResponse(
 private final class MockURLProtocol: URLProtocol {
     nonisolated(unsafe) static var handlers: [String: Data] = [:]
     nonisolated(unsafe) static var statusByPath: [String: Int] = [:]
+    nonisolated(unsafe) static var headerFieldsByPath: [String: [String: String]] = [:]
     nonisolated(unsafe) static var lastBodyByPath: [String: Data] = [:]
 
     override class func canInit(with request: URLRequest) -> Bool {
@@ -1045,7 +1094,13 @@ private final class MockURLProtocol: URLProtocol {
             return
         }
         let status = MockURLProtocol.statusByPath[path] ?? 200
-        let urlResponse = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+        var headerFields = ["Content-Type": "application/json"]
+        if let extra = MockURLProtocol.headerFieldsByPath[path] {
+            for (key, value) in extra {
+                headerFields[key] = value
+            }
+        }
+        let urlResponse = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: headerFields)!
         client?.urlProtocol(self, didReceive: urlResponse, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: data)
         client?.urlProtocolDidFinishLoading(self)
@@ -1056,13 +1111,7 @@ private final class MockURLProtocol: URLProtocol {
 
 @MainActor
 private func makeViewModelWithMock(_ handlers: [String: String]) -> HealthBootstrapViewModel {
-    MockURLProtocol.handlers = handlers.reduce(into: [:]) { result, entry in
-        result[entry.key] = entry.value.data(using: .utf8)
-    }
-    MockURLProtocol.lastBodyByPath = [:]
-    let config = URLSessionConfiguration.ephemeral
-    config.protocolClasses = [MockURLProtocol.self]
-    let session = URLSession(configuration: config)
+    let session = makeMockSession(handlers)
     let defaults = UserDefaults(suiteName: nil)!
     defaults.removeObject(forKey: DefaultsKey.pendingAppleDisplayName)
     defaults.removeObject(forKey: DefaultsKey.pendingAppleUserId)
@@ -1075,4 +1124,41 @@ private func makeViewModelWithMock(_ handlers: [String: String]) -> HealthBootst
         defaults: defaults
     )
     return HealthBootstrapViewModel(dependencies: dependencies)
+}
+
+@MainActor
+private func makeMockSession(_ handlers: [String: String]) -> URLSession {
+    MockURLProtocol.handlers = handlers.reduce(into: [:]) { result, entry in
+        result[entry.key] = entry.value.data(using: .utf8)
+    }
+    MockURLProtocol.lastBodyByPath = [:]
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [MockURLProtocol.self]
+    return URLSession(configuration: config)
+}
+
+private final class MetricsRequestRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private let expectation: XCTestExpectation
+    private(set) var request: URLRequest?
+
+    init(expectation: XCTestExpectation) {
+        self.expectation = expectation
+    }
+
+    func record(_ request: URLRequest) {
+        lock.lock()
+        self.request = request
+        lock.unlock()
+        expectation.fulfill()
+    }
+}
+
+private func otlpMetricNames(in request: URLRequest?) throws -> Set<String> {
+    let body = try XCTUnwrap(request?.httpBody)
+    let root = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+    let metrics = try XCTUnwrap(
+        (((root["resourceMetrics"] as? [[String: Any]])?.first?["scopeMetrics"] as? [[String: Any]])?.first?["metrics"] as? [[String: Any]])
+    )
+    return Set(metrics.compactMap { $0["name"] as? String })
 }

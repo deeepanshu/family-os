@@ -136,7 +136,9 @@ final class HealthBootstrapViewModel: ObservableObject {
         isError = false
     }
 
-    func signOut() {
+    func signOut(reason: String = "user") {
+        AppMetrics.recordSignOut(reason: reason)
+        AppMetrics.flush(force: true)
         auth.clear(defaults: defaults, keychain: keychain)
         family.clear()
         profiles.clear()
@@ -164,7 +166,7 @@ final class HealthBootstrapViewModel: ObservableObject {
             try await client.deleteAccount(baseURL: connection.baseURL, accessToken: auth.accessToken)
             let wiped = HealthKitSyncStore.wipeShared()
             HealthKitInstallationId.clear(using: keychain)
-            signOut()
+            signOut(reason: "account_deleted")
             if wiped {
                 statusMessage = "Account deleted."
                 isError = false
@@ -266,11 +268,25 @@ final class HealthBootstrapViewModel: ObservableObject {
             applyBootstrap(bootstrap)
             await completeSelfProfileIfNeeded()
             await loadPendingInvitePreview()
+            AppMetrics.recordBootstrap(outcome: "success")
         } catch {
-            if let api = error as? HealthAPIError, case .badStatus(let status, _, _) = api, status == 401 {
-                signOut()
+            if let api = error as? HealthAPIError, api.httpStatus == 401 {
+                AppMetrics.recordBootstrap(outcome: "unauthorized")
+                AppMetrics.flush(force: true)
+                CrashReporting.recordNonFatal(
+                    domain: "com.deepanshujain.familyos.auth",
+                    code: 2001,
+                    message: "bootstrap_unauthorized",
+                    userInfo: [
+                        "api_status": 401,
+                        "api_error_code": api.errorCode ?? "unauthorized",
+                        "request_id": api.requestId ?? ""
+                    ]
+                )
+                signOut(reason: "unauthorized")
                 return
             }
+            AppMetrics.recordBootstrap(outcome: "error")
             startupError = error
             statusMessage = error.localizedDescription
             isError = true
@@ -405,6 +421,8 @@ final class HealthBootstrapViewModel: ObservableObject {
             return
         }
         guard let refreshToken = auth.refreshToken, !refreshToken.isEmpty else {
+            AppMetrics.recordRefresh(source: "ui", outcome: "missing_refresh")
+            AppMetrics.recordSignOut(reason: "refresh_failed")
             auth.clear(defaults: defaults, keychain: keychain)
             throw SupabaseAuthError.requestFailed("Your sign-in session expired. Please sign in again.")
         }
@@ -416,11 +434,15 @@ final class HealthBootstrapViewModel: ObservableObject {
                 refreshToken: refreshToken
             )
             try auth.store(session: session, defaults: defaults, keychain: keychain)
+            AppMetrics.recordRefresh(source: "ui", outcome: "success")
         } catch {
+            AppMetrics.recordRefresh(source: "ui", outcome: "failed")
+            AppMetrics.recordSignOut(reason: "refresh_failed")
             auth.clear(defaults: defaults, keychain: keychain)
             throw SupabaseAuthError.requestFailed("Your sign-in session expired. Please sign in again.")
         }
     }
+
 
     func handleInviteURL(_ url: URL) -> Bool {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: true) else {

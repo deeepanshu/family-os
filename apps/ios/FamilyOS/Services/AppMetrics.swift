@@ -102,6 +102,59 @@ enum AppMetrics {
         storage.counters[key, default: 0] += value
     }
 
+    /// Startup /bootstrap result. `outcome` is success, unauthorized, or error.
+    static func recordBootstrap(outcome: String) {
+        increment("ios.bootstrap.requests", attributes: ["outcome": outcome])
+    }
+
+    /// Background/foreground HealthKit skip. `reason` is the wake trigger.
+    static func recordHealthKitSkip(trigger: String, skipReason: String, group: String? = nil) {
+        var attributes = ["reason": trigger, "skip_reason": skipReason]
+        if let group, !group.isEmpty {
+            attributes["group"] = group
+        }
+        increment("ios.healthkit.sync.skips", attributes: attributes)
+    }
+
+    /// Apple sign-in result. `outcome` is success, cancelled, or failed.
+    static func recordSignIn(outcome: String) {
+        increment("ios.auth.sign_in", attributes: ["outcome": outcome])
+    }
+
+    /// Supabase token refresh. `source` is ui or background.
+    static func recordRefresh(source: String, outcome: String) {
+        increment("ios.auth.refresh", attributes: ["source": source, "outcome": outcome])
+    }
+
+    /// Local session cleared. `reason` is user, unauthorized, refresh_failed, or account_deleted.
+    static func recordSignOut(reason: String) {
+        increment("ios.auth.sign_out", attributes: ["reason": reason])
+    }
+
+    /// Health API 401 recovered by a forced refresh, or not.
+    static func recordAuthRetry(outcome: String) {
+        increment("ios.auth.api_retry", attributes: ["outcome": outcome])
+    }
+
+    static func recordHealthKitCompleted(trigger: String, group: String) {
+        increment("ios.healthkit.sync.completed", attributes: ["reason": trigger, "group": group])
+    }
+
+    static func recordHealthKitFailed(trigger: String, group: String, error: Error? = nil) {
+        increment(
+            "ios.healthkit.sync.failures",
+            attributes: [
+                "reason": trigger,
+                "group": group,
+                "code": healthKitErrorCode(error)
+            ]
+        )
+    }
+
+    static func recordHealthKitDrain(outcome: String) {
+        increment("ios.healthkit.drain", attributes: ["outcome": outcome])
+    }
+
     /// Records a duration into a cumulative OTLP histogram.
     static func observeDuration(_ name: String, seconds: TimeInterval, attributes: [String: String] = [:]) {
         guard seconds.isFinite, seconds >= 0 else { return }
@@ -290,6 +343,35 @@ enum AppMetrics {
             return nil
         }
         return trimmed
+    }
+
+    private static let knownHealthKitCodes: Set<String> = [
+        "unauthorized",
+        "missing_token",
+        "healthkit_locked",
+        "sync_timeout",
+        "sync_cancelled",
+        "sync_failed",
+        "sync_incomplete",
+        "bp_samples_empty",
+        "consent_missing",
+        "installation_inactive"
+    ]
+
+    private static func healthKitErrorCode(_ error: Error?) -> String {
+        guard let error else { return "other" }
+        if let api = error as? HealthAPIError {
+            if api.httpStatus == 401 {
+                return "unauthorized"
+            }
+            if case .missingToken = api {
+                return "missing_token"
+            }
+            if let code = api.errorCode, knownHealthKitCodes.contains(code) {
+                return code
+            }
+        }
+        return "other"
     }
 
     private struct Configuration: Sendable {

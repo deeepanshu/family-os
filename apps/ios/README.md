@@ -105,9 +105,30 @@ FamilyStack → https://telemetry.deepanshujain.me/v1/metrics
 - The Access service token is a write-only anti-abuse control, not a durable
   secret: it ships in the signed app. Scope its Cloudflare Access policy only
   to `telemetry.deepanshujain.me`.
-- Metrics are launch/background counts and HealthKit-sync outcomes/durations
-  only. Never add health values, dates, free-text, tokens, email, or user IDs
-  as metric attributes.
+- Metrics are launch/background counts, bootstrap outcomes, and HealthKit-sync
+  outcomes/durations/skips only. Never add health values, dates, free-text,
+  tokens, email, user IDs, or request IDs as metric attributes.
+- `ios.bootstrap.requests{outcome}` — `success`, `unauthorized`, or `error`.
+- `ios.auth.sign_in{outcome}` — `success`, `cancelled`, or `failed`.
+- `ios.auth.refresh{source,outcome}` — `source` is `ui` or `background`.
+  `outcome` is `success`, `failed`, `missing_token`, `missing_refresh`, or
+  `missing_config`.
+- `ios.auth.sign_out{reason}` — `user`, `unauthorized`, `refresh_failed`, or
+  `account_deleted`.
+- `ios.auth.api_retry{outcome}` — Health API `401` recovered by a forced
+  refresh, or not (`recovered` / `failed`).
+- `ios.healthkit.sync.skips{reason,skip_reason,group}` — why a wake did not
+  upload. `reason` is the trigger (`bg_task`, `bg_refresh`, `observer`,
+  `become_active`, `foreground`, `sync`, `initial_import`, `repair_import`).
+  `skip_reason` is a fixed enum (`no_token`, `no_config`,
+  `not_background_enabled`, `needs_import`, `database_inaccessible`,
+  `run_in_progress`, `no_budget`, `no_groups`, `missing_profile`,
+  `wrong_profile`, `unavailable`, `consent_missing`).
+- `ios.healthkit.sync.failures{reason,group,code}` — `code` is an allowlisted
+  API error (`unauthorized`, `missing_token`, `healthkit_locked`, …) or
+  `other`.
+- `ios.healthkit.drain{outcome}` — leftover-queue drain: `applied`, `empty`,
+  or `failed`.
 
 - Each export includes resource identity:
   - `service.version` — marketing version (`CFBundleShortVersionString`)

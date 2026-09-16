@@ -104,7 +104,7 @@ extension HealthBootstrapViewModel {
                 installationId: installationId,
                 replaceActiveInstallation: replaceInstallation
             )
-        } catch let HealthAPIError.badStatus(code, _, errorCode)
+        } catch let HealthAPIError.badStatus(code, _, errorCode, _)
             where code == 409 && errorCode == "installation_inactive" && !replaceInstallation
         {
             CrashReporting.healthKit(
@@ -222,6 +222,29 @@ extension HealthBootstrapViewModel {
                 extra: ["failures": String(outcome.failures.count), "skipped": String(outcome.skipped.count)]
             )
 
+            for result in outcome.synced {
+                AppMetrics.recordHealthKitCompleted(trigger: "foreground", group: result.metric.scopeMetricKey)
+            }
+            for failure in outcome.failures {
+                AppMetrics.recordHealthKitFailed(
+                    trigger: "foreground",
+                    group: failure.metric.scopeMetricKey,
+                    error: failure.error
+                )
+            }
+            for metric in outcome.skipped {
+                AppMetrics.recordHealthKitSkip(
+                    trigger: "foreground",
+                    skipReason: "needs_import",
+                    group: metric.scopeMetricKey
+                )
+            }
+            AppMetrics.increment(
+                "ios.healthkit.sync.runs",
+                attributes: ["reason": "foreground", "outcome": outcome.failures.isEmpty ? "completed" : "failed"]
+            )
+            AppMetrics.flush(force: true)
+
             let message = Self.syncAllSummaryMessage(outcome: outcome)
             statusMessage = message
             if outcome.failures.isEmpty {
@@ -234,6 +257,11 @@ extension HealthBootstrapViewModel {
         } catch {
             healthKit.clearActiveRun()
             await refreshHealthKitStatusAfterRun()
+            AppMetrics.increment(
+                "ios.healthkit.sync.runs",
+                attributes: ["reason": "foreground", "outcome": "failed"]
+            )
+            AppMetrics.flush(force: true)
             isError = true
             statusMessage = error.localizedDescription
             reportActionFailure(statusMessage)
@@ -282,12 +310,24 @@ extension HealthBootstrapViewModel {
                 count: result.fetchedCount,
                 extra: ["run_kind": kind.rawValue, "deleted": String(result.deletedCount)]
             )
+            AppMetrics.recordHealthKitCompleted(trigger: kind.rawValue, group: metric.scopeMetricKey)
+            AppMetrics.increment(
+                "ios.healthkit.sync.runs",
+                attributes: ["reason": kind.rawValue, "outcome": "completed"]
+            )
+            AppMetrics.flush(force: true)
             let message = Self.runSummaryMessage(result: result)
             statusMessage = message
             isError = false
             reportActionResult(message)
         } catch {
             await refreshHealthKitStatusAfterRun()
+            AppMetrics.recordHealthKitFailed(trigger: kind.rawValue, group: metric.scopeMetricKey, error: error)
+            AppMetrics.increment(
+                "ios.healthkit.sync.runs",
+                attributes: ["reason": kind.rawValue, "outcome": "failed"]
+            )
+            AppMetrics.flush(force: true)
             isError = true
             statusMessage = error.localizedDescription
             reportActionFailure(statusMessage)
@@ -312,6 +352,7 @@ extension HealthBootstrapViewModel {
                 message: "sync_blocked_missing_self_profile"
             )
             reportActionFailure(statusMessage)
+            AppMetrics.recordHealthKitSkip(trigger: "foreground", skipReason: "missing_profile")
             return false
         }
         guard healthKit.linkedProfileId == nil || healthKit.linkedProfileId == personId else {
@@ -323,6 +364,7 @@ extension HealthBootstrapViewModel {
                 message: "sync_blocked_wrong_profile"
             )
             reportActionFailure(statusMessage)
+            AppMetrics.recordHealthKitSkip(trigger: "foreground", skipReason: "wrong_profile")
             return false
         }
         guard healthKitClient.isAvailable || healthKit.isAvailable else {
@@ -334,6 +376,7 @@ extension HealthBootstrapViewModel {
                 message: "sync_blocked_healthkit_unavailable"
             )
             reportActionFailure(statusMessage)
+            AppMetrics.recordHealthKitSkip(trigger: "foreground", skipReason: "unavailable")
             return false
         }
         guard healthKit.consentGranted else {
@@ -345,6 +388,7 @@ extension HealthBootstrapViewModel {
                 message: "sync_blocked_no_consent"
             )
             reportActionFailure(statusMessage)
+            AppMetrics.recordHealthKitSkip(trigger: "foreground", skipReason: "consent_missing")
             return false
         }
         return true

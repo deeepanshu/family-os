@@ -102,6 +102,80 @@ final class AppMetricsTests: XCTestCase {
         XCTAssertEqual(values["deployment.environment"], "test")
         XCTAssertEqual(values["ios.build_configuration"], "debug")
     }
+
+    func testFlushEmitsBootstrapUnauthorizedCounter() throws {
+        let delivered = expectation(description: "OTLP bootstrap counter")
+        let recorder = RequestRecorder(expectation: delivered)
+
+        AppMetrics.configureForTesting(endpoint: try XCTUnwrap(URL(string: "http://telemetry.lab:4318/v1/metrics"))) { request in
+            recorder.record(request)
+        }
+        AppMetrics.recordBootstrap(outcome: "unauthorized")
+        AppMetrics.flush(force: true)
+
+        wait(for: [delivered], timeout: 1)
+
+        let point = try counterPoint(named: "ios.bootstrap.requests", in: recorder.request)
+        XCTAssertEqual(point.value, 1)
+        XCTAssertEqual(point.attributes["outcome"], "unauthorized")
+    }
+
+    func testFlushEmitsHealthKitSkipReason() throws {
+        let delivered = expectation(description: "OTLP skip counter")
+        let recorder = RequestRecorder(expectation: delivered)
+
+        AppMetrics.configureForTesting(endpoint: try XCTUnwrap(URL(string: "http://telemetry.lab:4318/v1/metrics"))) { request in
+            recorder.record(request)
+        }
+        AppMetrics.recordHealthKitSkip(
+            trigger: "bg_refresh",
+            skipReason: "not_background_enabled",
+            group: "activity"
+        )
+        AppMetrics.flush(force: true)
+
+        wait(for: [delivered], timeout: 1)
+
+        let point = try counterPoint(named: "ios.healthkit.sync.skips", in: recorder.request)
+        XCTAssertEqual(point.value, 1)
+        XCTAssertEqual(point.attributes["reason"], "bg_refresh")
+        XCTAssertEqual(point.attributes["skip_reason"], "not_background_enabled")
+        XCTAssertEqual(point.attributes["group"], "activity")
+    }
+
+    func testFlushEmitsAuthSignInRefreshAndSignOut() throws {
+        let delivered = expectation(description: "OTLP auth counters")
+        let recorder = RequestRecorder(expectation: delivered)
+
+        AppMetrics.configureForTesting(endpoint: try XCTUnwrap(URL(string: "http://telemetry.lab:4318/v1/metrics"))) { request in
+            recorder.record(request)
+        }
+        AppMetrics.recordSignIn(outcome: "success")
+        AppMetrics.recordRefresh(source: "ui", outcome: "failed")
+        AppMetrics.recordSignOut(reason: "unauthorized")
+        AppMetrics.recordAuthRetry(outcome: "recovered")
+        AppMetrics.recordHealthKitFailed(
+            trigger: "foreground",
+            group: "vitals",
+            error: HealthAPIError.badStatus(401, "expired", code: "unauthorized")
+        )
+        AppMetrics.flush(force: true)
+
+        wait(for: [delivered], timeout: 1)
+
+        let signIn = try counterPoint(named: "ios.auth.sign_in", in: recorder.request)
+        XCTAssertEqual(signIn.attributes["outcome"], "success")
+        let refresh = try counterPoint(named: "ios.auth.refresh", in: recorder.request)
+        XCTAssertEqual(refresh.attributes["source"], "ui")
+        XCTAssertEqual(refresh.attributes["outcome"], "failed")
+        let signOut = try counterPoint(named: "ios.auth.sign_out", in: recorder.request)
+        XCTAssertEqual(signOut.attributes["reason"], "unauthorized")
+        let retry = try counterPoint(named: "ios.auth.api_retry", in: recorder.request)
+        XCTAssertEqual(retry.attributes["outcome"], "recovered")
+        let failed = try counterPoint(named: "ios.healthkit.sync.failures", in: recorder.request)
+        XCTAssertEqual(failed.attributes["code"], "unauthorized")
+        XCTAssertEqual(failed.attributes["group"], "vitals")
+    }
 }
 
 private final class RequestRecorder: @unchecked Sendable {
@@ -119,4 +193,22 @@ private final class RequestRecorder: @unchecked Sendable {
         lock.unlock()
         expectation.fulfill()
     }
+}
+
+private func counterPoint(named name: String, in request: URLRequest?) throws -> (value: Double, attributes: [String: String]) {
+    let body = try XCTUnwrap(request?.httpBody)
+    let root = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+    let metrics = try XCTUnwrap(
+        (((root["resourceMetrics"] as? [[String: Any]])?.first?["scopeMetrics"] as? [[String: Any]])?.first?["metrics"] as? [[String: Any]])
+    )
+    let metric = try XCTUnwrap(metrics.first { $0["name"] as? String == name })
+    let sum = try XCTUnwrap(metric["sum"] as? [String: Any])
+    let point = try XCTUnwrap((sum["dataPoints"] as? [[String: Any]])?.first)
+    let value = try XCTUnwrap(point["asDouble"] as? Double)
+    var attributes: [String: String] = [:]
+    for attribute in (point["attributes"] as? [[String: Any]]) ?? [] {
+        let key = try XCTUnwrap(attribute["key"] as? String)
+        attributes[key] = try XCTUnwrap((attribute["value"] as? [String: Any])?["stringValue"] as? String)
+    }
+    return (value, attributes)
 }
