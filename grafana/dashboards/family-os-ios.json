@@ -64,6 +64,18 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{ "expr": "sum by (group, reason) (increase(app_ios_healthkit_sync_failures_total[24h]))", "legendFormat": "{{group}} · {{reason}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
+    },
+    {
+      "title": "App identity",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 26 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{
+        "expr": "sum by (service_version, ios_build, deployment_environment, ios_build_configuration) (app_ios_launches_total)",
+        "format": "table",
+        "instant": true,
+        "refId": "A"
+      }]
     }
   ],
   "schemaVersion": 39,

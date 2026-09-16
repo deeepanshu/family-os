@@ -72,6 +72,36 @@ final class AppMetricsTests: XCTestCase {
         XCTAssertEqual(point["explicitBounds"] as? [Double], [0.25, 1, 5, 15, 30, 60])
         XCTAssertEqual(histogram["aggregationTemporality"] as? Int, 2)
     }
+
+    func testFlushIncludesAppIdentityResourceAttributes() throws {
+        let delivered = expectation(description: "OTLP resource attributes")
+        let recorder = RequestRecorder(expectation: delivered)
+
+        AppMetrics.configureForTesting(endpoint: try XCTUnwrap(URL(string: "http://telemetry.lab:4318/v1/metrics"))) { request in
+            recorder.record(request)
+        }
+        AppMetrics.flush(force: true)
+
+        wait(for: [delivered], timeout: 1)
+
+        let body = try XCTUnwrap(recorder.request?.httpBody)
+        let root = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let attributes = try XCTUnwrap(
+            ((root["resourceMetrics"] as? [[String: Any]])?.first?["resource"] as? [String: Any])?["attributes"] as? [[String: Any]]
+        )
+
+        var values: [String: String] = [:]
+        for attribute in attributes {
+            let key = try XCTUnwrap(attribute["key"] as? String)
+            values[key] = try XCTUnwrap((attribute["value"] as? [String: Any])?["stringValue"] as? String)
+        }
+
+        XCTAssertEqual(values["service.name"], "family-os-ios")
+        XCTAssertEqual(values["service.version"], "1.0")
+        XCTAssertEqual(values["ios.build"], "1")
+        XCTAssertEqual(values["deployment.environment"], "test")
+        XCTAssertEqual(values["ios.build_configuration"], "debug")
+    }
 }
 
 private final class RequestRecorder: @unchecked Sendable {

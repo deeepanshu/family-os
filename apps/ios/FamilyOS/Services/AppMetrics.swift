@@ -46,9 +46,13 @@ enum AppMetrics {
             headers["CF-Access-Client-Secret"] = environment.metricsAccessClientSecret
         }
 
+        let info = Bundle.main.infoDictionary ?? [:]
         let configuration = Configuration(
             endpoint: endpoint,
             environment: environment.name.rawValue,
+            version: Self.nonEmpty(info["CFBundleShortVersionString"] as? String) ?? "unknown",
+            build: Self.nonEmpty(info["CFBundleVersion"] as? String) ?? "unknown",
+            buildConfiguration: Self.buildConfiguration,
             headers: headers,
             startedAtUnixNanoseconds: unixTimeNanoseconds(),
             requestSink: nil
@@ -66,6 +70,9 @@ enum AppMetrics {
             Configuration(
                 endpoint: endpoint,
                 environment: "test",
+                version: "1.0",
+                build: "1",
+                buildConfiguration: "debug",
                 headers: [:],
                 startedAtUnixNanoseconds: unixTimeNanoseconds(),
                 requestSink: send
@@ -241,8 +248,11 @@ enum AppMetrics {
                 "resource": [
                     "attributes": otlpAttributes([
                         MetricAttribute(key: "service.name", value: "family-os-ios"),
-                        MetricAttribute(key: "deployment.environment", value: snapshot.configuration.environment)
-                    ])
+                        MetricAttribute(key: "service.version", value: snapshot.configuration.version),
+                        MetricAttribute(key: "deployment.environment", value: snapshot.configuration.environment),
+                        MetricAttribute(key: "ios.build", value: snapshot.configuration.build),
+                        MetricAttribute(key: "ios.build_configuration", value: snapshot.configuration.buildConfiguration)
+                    ].sorted())
                 ],
                 "scopeMetrics": [[
                     "scope": ["name": "com.deepanshujain.familyos.metrics"],
@@ -267,9 +277,27 @@ enum AppMetrics {
         }
     }
 
+    private static var buildConfiguration: String {
+        #if DEBUG
+        "debug"
+        #else
+        "release"
+        #endif
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
+    }
+
     private struct Configuration: Sendable {
         let endpoint: URL
         let environment: String
+        let version: String
+        let build: String
+        let buildConfiguration: String
         let headers: [String: String]
         let startedAtUnixNanoseconds: UInt64
         let requestSink: (@Sendable (URLRequest) -> Void)?

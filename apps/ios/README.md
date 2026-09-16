@@ -109,6 +109,12 @@ FamilyStack → https://telemetry.deepanshujain.me/v1/metrics
   only. Never add health values, dates, free-text, tokens, email, or user IDs
   as metric attributes.
 
+- Each export includes resource identity:
+  - `service.version` — marketing version (`CFBundleShortVersionString`)
+  - `ios.build` — build number (`CFBundleVersion`)
+  - `deployment.environment` — Family OS env (`local` or `release`)
+  - `ios.build_configuration` — Xcode configuration (`debug` or `release`)
+
 The dashboard is **Family OS iOS** (`family-os-ios`) in Grafana's Apps folder.
 It is synced from `grafana/dashboards/family-os-ios.json` during app deploy.
 
