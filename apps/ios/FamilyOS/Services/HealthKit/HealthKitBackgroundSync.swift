@@ -416,6 +416,7 @@ enum HealthKitBackgroundSync {
     }
 
     private static func handleProcessingTask(_ task: BGProcessingTask) {
+        AppMetrics.increment("ios.bg.tasks", attributes: ["kind": "processing"])
         scheduleBackgroundSync()
         scheduleAppRefresh()
         let handle = BGProcessingHandle(task)
@@ -433,6 +434,7 @@ enum HealthKitBackgroundSync {
     }
 
     private static func handleRefreshTask(_ task: BGAppRefreshTask) {
+        AppMetrics.increment("ios.bg.tasks", attributes: ["kind": "refresh"])
         scheduleAppRefresh()
         let handle = BGRefreshHandle(task)
         task.expirationHandler = {
@@ -505,6 +507,19 @@ enum HealthKitBackgroundSync {
         metrics: Set<HealthKitSyncMetric>? = nil,
         wallTimeoutSeconds: TimeInterval? = nil
     ) async {
+        let syncStartedAt = Date()
+        var outcome = "skipped"
+        defer {
+            let attributes = ["reason": reason, "outcome": outcome]
+            AppMetrics.increment("ios.healthkit.sync.runs", attributes: attributes)
+            AppMetrics.observeDuration(
+                "ios.healthkit.sync.duration.seconds",
+                seconds: Date().timeIntervalSince(syncStartedAt),
+                attributes: attributes
+            )
+            AppMetrics.flush(force: true)
+        }
+
         CrashReporting.healthKit(.syncStarted, extra: ["reason": reason, "mode": "background"])
         do {
             let store = try HealthKitSyncStore.shared
@@ -659,6 +674,10 @@ enum HealthKitBackgroundSync {
                                     appliedCount: result.appliedCount,
                                     reason: reason
                                 )
+                                AppMetrics.increment(
+                                    "ios.healthkit.sync.completed",
+                                    attributes: ["reason": reason, "group": metric.scopeMetricKey]
+                                )
                             } catch {
                                 CrashReporting.log(
                                     "healthkit_bg_metric_failed reason=\(reason) group=\(metric.rawValue) ms=\(Int(Date().timeIntervalSince(metricStarted) * 1000))"
@@ -678,6 +697,10 @@ enum HealthKitBackgroundSync {
                                     metric: metric.scopeMetricKey,
                                     underlying: error
                                 )
+                                AppMetrics.increment(
+                                    "ios.healthkit.sync.failures",
+                                    attributes: ["reason": reason, "group": metric.scopeMetricKey]
+                                )
                             }
                         }
                     }
@@ -695,9 +718,11 @@ enum HealthKitBackgroundSync {
                 CrashReporting.log("healthkit_bg_sync_skip_run_in_progress")
                 return
             } catch {
+                outcome = "failed"
                 CrashReporting.log("healthkit_observer_sync_timeout \(error.localizedDescription)")
                 return
             }
+            outcome = "completed"
             CrashReporting.healthKit(.syncCompleted, extra: ["reason": reason, "mode": "background"])
         } catch {
             CrashReporting.healthKitNonFatal(
@@ -706,6 +731,7 @@ enum HealthKitBackgroundSync {
                 message: "bg_bounded_sync_failed",
                 underlying: error
             )
+            outcome = "failed"
         }
     }
 

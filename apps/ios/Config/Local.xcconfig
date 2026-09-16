@@ -1,4 +1,5 @@
 SUPABASE_URL =
 SUPABASE_ANON_KEY =
+OTLP_METRICS_ENDPOINT = http:/$()/telemetry.lab:4318/v1/metrics
 
 #include? "Local.private.xcconfig"

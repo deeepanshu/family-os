@@ -44,6 +44,8 @@ struct FamilyOSApp: App {
                             await viewModel.reloadHealthKitStatusAfterPassiveSync()
                             CrashReporting.log("healthkit_become_active_end")
                         }
+                    } else if phase == .background {
+                        AppMetrics.flush(force: true)
                     }
                 }
         }
@@ -58,6 +60,8 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, @preconcur
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         CrashReporting.configure()
+        AppMetrics.configure()
+        AppMetrics.flush(force: true)
         _ = HealthKitSyncStore.retryPendingWipe()
         UNUserNotificationCenter.current().delegate = self
         // Nonisolated BG registration — never own handlers on a @MainActor coordinator.
