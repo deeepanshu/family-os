@@ -98,7 +98,7 @@ FamilyStack → https://telemetry.deepanshujain.me/v1/metrics
 ```
 
 - DEBUG collection is off by default. Use the `-FamilyOSMetricsSmoke` launch
-  argument only for a LAN smoke test against `http://telemetry.lab:4318/v1/metrics`.
+  argument to send to `https://telemetry.deepanshujain.me/v1/metrics`.
 - Release metrics require `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`.
   Add both as Xcode Cloud environment variables; `ci_pre_xcodebuild.sh` writes
   them to the ignored release xcconfig before building. Xcode Cloud archives
@@ -141,11 +141,11 @@ FamilyStack → https://telemetry.deepanshujain.me/v1/metrics
 The dashboard is **Family OS iOS** (`family-os-ios`) in Grafana's Apps folder.
 It is synced from `grafana/dashboards/family-os-ios.json` during app deploy.
 
-### LAN smoke test
+### Metrics smoke test
 
-Post an OTLP metric to `http://telemetry.lab:4318/v1/metrics`, then confirm
-`app_ios_*` appears in Prometheus. The release endpoint must remain HTTPS and
-Cloudflare Access-protected for phones outside the LAN.
+Debug builds need `-FamilyOSMetricsSmoke` plus `CF_ACCESS_CLIENT_ID` /
+`CF_ACCESS_CLIENT_SECRET` in `Local.private.xcconfig`. Confirm `app_ios_*`
+appears in Prometheus. The endpoint is HTTPS and Cloudflare Access-protected.
 
 ## Environments
 
