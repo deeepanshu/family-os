@@ -208,7 +208,7 @@ enum AppMetrics {
             attributes: [
                 "reason": reason,
                 "group": group,
-                "code": (error as? HealthAPIError)?.metricCode ?? "other"
+                "code": ((error as? HealthAPIError)?.metricCode ?? .other).rawValue
             ]
         )
     }

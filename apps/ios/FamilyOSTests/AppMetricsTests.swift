@@ -178,10 +178,11 @@ final class AppMetricsTests: XCTestCase {
     }
 
     func testHealthAPIErrorMetricCodeAllowlist() {
-        XCTAssertEqual(HealthAPIError.missingToken.metricCode, "missing_token")
-        XCTAssertEqual(HealthAPIError.badStatus(401, "expired", code: "unauthorized").metricCode, "unauthorized")
-        XCTAssertEqual(HealthAPIError.badStatus(409, "locked", code: "healthkit_locked").metricCode, "healthkit_locked")
-        XCTAssertEqual(HealthAPIError.badStatus(500, "boom", code: "not_a_real_code").metricCode, "other")
+        XCTAssertEqual(HealthAPIError.missingToken.metricCode, .missingToken)
+        XCTAssertEqual(HealthAPIError.badStatus(401, "expired", code: "unauthorized").metricCode, .unauthorized)
+        XCTAssertEqual(HealthAPIError.badStatus(409, "locked", code: "healthkit_locked").metricCode, .healthkitLocked)
+        XCTAssertEqual(HealthAPIError.badStatus(500, "boom", code: "not_a_real_code").metricCode, .other)
+        XCTAssertNil(HealthAPIError.MetricCode(rawValue: "healthkit_loced"))
     }
 }
 

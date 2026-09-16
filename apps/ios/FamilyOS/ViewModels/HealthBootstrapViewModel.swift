@@ -417,7 +417,7 @@ final class HealthBootstrapViewModel: ObservableObject {
 
     /// Internal so the HealthKit command extension can refresh before throwing saves.
     func refreshSessionIfNeeded() async throws {
-        if auth.accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if !hasAccessToken {
             AppMetrics.recordRefresh(source: .ui, outcome: .missingToken)
             AppMetrics.recordSignOut(reason: .refreshFailed)
             auth.clear(defaults: defaults, keychain: keychain)
@@ -426,8 +426,7 @@ final class HealthBootstrapViewModel: ObservableObject {
         guard AccessTokenExpiry.requiresRefresh(auth.accessToken) else {
             return
         }
-        if connection.supabaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || connection.supabaseAnonKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if !hasSupabaseConfiguration {
             AppMetrics.recordRefresh(source: .ui, outcome: .missingConfig)
             throw SupabaseAuthError.requestFailed("Sign-in is not configured. Try again later.")
         }
