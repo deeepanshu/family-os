@@ -1,4 +1,4 @@
-name: Deploy RPi
+name: Deploy Service
 
 on:
   push:
@@ -13,7 +13,7 @@ on:
       - "package-lock.json"
       - "Dockerfile"
       - "infra/docker/**"
-      - ".github/workflows/deploy-rpi.yml"
+      - ".github/workflows/deploy-service.yml"
       - "!**/*.md"
   workflow_dispatch:
     inputs:
@@ -23,7 +23,7 @@ on:
         type: string
 
 concurrency:
-  group: deploy-rpi-${{ github.ref }}
+  group: deploy-service-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -54,7 +54,7 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE_RE='^(apps/api/|packages/shared/|db/|drizzle\.config\.ts$|scripts/docker-migrate\.sh$|package\.json$|package-lock\.json$|Dockerfile$)'
-          DEPLOY_RE='^(infra/docker/|\.github/workflows/deploy-rpi\.yml$)'
+          DEPLOY_RE='^(infra/docker/|\.github/workflows/deploy-service\.yml$)'
 
           build=false
           deploy=false
@@ -139,7 +139,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    name: Deploy on Pi via manager
+    name: Deploy via manager
     needs: [changes, build-and-push]
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -165,7 +165,7 @@ jobs:
             exit 1
           fi
 
-          # rpi-manager allowlists main. Pre-merge workflow_dispatch from a feature
+          # manager allowlists main. Pre-merge workflow_dispatch from a feature
           # branch still deploys the built image_tag/sha; report ref as main for the hook.
           HOOK_REF="${GITHUB_REF}"
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ "${GITHUB_REF}" != "refs/heads/main" ]; then
