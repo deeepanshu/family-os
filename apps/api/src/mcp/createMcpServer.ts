@@ -26,7 +26,7 @@ export function createFamilyOsMcpServer(options: {
   const { service, caller, config } = options;
   const server = new McpServer({
     name: "family-os-health-mcp",
-    version: "0.1.0"
+    version: "0.1.1"
   });
 
   server.registerTool(
