@@ -106,7 +106,7 @@ extension HealthBootstrapViewModel {
             rememberAppleUserId(userId)
         }
         rememberAppleFullName(credential?.fullName)
-        await request(showsFeedback: true) {
+        await request(requiresSession: false, showsFeedback: true) {
             guard let currentAppleNonce = auth.currentAppleNonce else {
                 return "Apple sign-in nonce was missing. Try again."
             }

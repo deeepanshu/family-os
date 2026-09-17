@@ -451,6 +451,20 @@ final class SoloFirstTests: XCTestCase {
         )
     }
 
+    func testUnauthenticatedRequestDoesNotRequireExistingSession() async {
+        let viewModel = makeViewModelWithMock([:])
+        var actionRan = false
+
+        await viewModel.request(requiresSession: false) {
+            actionRan = true
+            return "Signed in."
+        }
+
+        XCTAssertTrue(actionRan)
+        XCTAssertEqual(viewModel.statusMessage, "Signed in.")
+        XCTAssertFalse(viewModel.isError)
+    }
+
     func testStartupRefreshesExpiredSessionBeforeBootstrap() async {
         let viewModel = makeViewModelWithMock([
             "/auth/v1/token": """
