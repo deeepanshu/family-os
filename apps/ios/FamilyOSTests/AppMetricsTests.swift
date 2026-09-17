@@ -81,7 +81,10 @@ final class AppMetricsTests: XCTestCase {
         let delivered = expectation(description: "OTLP resource attributes")
         let recorder = RequestRecorder(expectation: delivered)
 
-        AppMetrics.configureForTesting(endpoint: try XCTUnwrap(URL(string: "http://telemetry.lab:4318/v1/metrics"))) { request in
+        AppMetrics.configureForTesting(
+            endpoint: try XCTUnwrap(URL(string: "http://telemetry.lab:4318/v1/metrics")),
+            installationID: "test-installation-id"
+        ) { request in
             recorder.record(request)
         }
         AppMetrics.flush(force: true)
@@ -105,6 +108,8 @@ final class AppMetricsTests: XCTestCase {
         XCTAssertEqual(values["ios.build"], "1")
         XCTAssertEqual(values["deployment.environment"], "test")
         XCTAssertEqual(values["ios.build_configuration"], "debug")
+        XCTAssertEqual(values["device.id"], "test-installation-id")
+        XCTAssertEqual(values["installation.id"], "test-installation-id")
     }
 
     func testFlushEmitsBootstrapUnauthorizedCounter() throws {

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Stable installation id for HealthKit settings fencing (Keychain only).
+/// Stable app-install UUID used for HealthKit settings fencing and telemetry correlation (Keychain only).
 ///
 /// Intentionally tiny. The old UserDefaults + SQLite dual ledger is gone.
 enum HealthKitInstallationId {
