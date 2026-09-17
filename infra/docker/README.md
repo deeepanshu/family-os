@@ -28,7 +28,7 @@ inside the same release image as the API.
 ```sh
 cd <repo>
 export IMAGE_TAG=<git-sha-or-main>
-docker compose --env-file .env -f infra/docker/compose.prod.yml --profile migrate run --rm migrate
+docker compose --env-file .env -f infra/docker/compose.yml -f infra/docker/compose.homelab.yml --profile migrate run --rm migrate
 ```
 
 The `.env` file must keep `APNS_PRIVATE_KEY_PATH` aligned with the container
@@ -43,15 +43,15 @@ APNS_PRIVATE_KEY_PATH=/run/secrets/family-os/AuthKey_ZG4ATXBAJW.p8
 ```sh
 cd <repo>
 export IMAGE_TAG=<git-sha-or-main>
-docker compose --env-file .env -f infra/docker/compose.prod.yml pull
-docker compose --env-file .env -f infra/docker/compose.prod.yml up -d
+docker compose --env-file .env -f infra/docker/compose.yml -f infra/docker/compose.homelab.yml pull
+docker compose --env-file .env -f infra/docker/compose.yml -f infra/docker/compose.homelab.yml up -d
 ```
 
 Local rebuild (dev only):
 
 ```sh
 export IMAGE_TAG=local
-docker compose --env-file .env -f infra/docker/compose.prod.yml up -d --build
+docker compose --env-file .env -f infra/docker/compose.yml -f infra/docker/compose.homelab.yml up -d --build
 ```
 
 Smoke test:
@@ -62,10 +62,10 @@ curl http://localhost:3001/health/api/v1/healthcheck
 
 ## Single process (API + MCP)
 
-One container serves both the iOS Health API and the MCP/OAuth surface on
-loopback port `3001`. The Cloudflare Tunnel ingress for
-`familyos.deepanshujain.me` must route to `http://localhost:3001`.
-Port `3002` and `compose.mcp.prod.yml` are gone (consolidated 2026-09).
+One container serves both the iOS Health API and the MCP/OAuth surface. The
+Cloudflare Tunnel ingress for `familyos.deepanshujain.me` routes to
+`http://apps.lab:3001`. The homelab overlay (`compose.homelab.yml`) publishes
+the port on all interfaces; the base file keeps it loopback-only for local dev.
 
 ## Database (homelab Postgres)
 
