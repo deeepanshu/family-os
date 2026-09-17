@@ -50,67 +50,67 @@
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
     },
     {
-      "title": "Sync events (rolling 24h) by trigger",
+      "title": "Sync events (cumulative) by trigger",
       "type": "timeseries",
       "gridPos": { "h": 9, "w": 12, "x": 12, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum by (reason, outcome) (increase(app_ios_healthkit_sync_runs_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{reason}} {{outcome}}", "refId": "A" }],
+      "targets": [{ "expr": "sum by (reason, outcome) (app_ios_healthkit_sync_runs_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{reason}} {{outcome}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
     },
     {
-      "title": "Sync failures (rolling 24h) by group",
+      "title": "Sync failures (cumulative) by group",
       "type": "timeseries",
       "gridPos": { "h": 9, "w": 24, "x": 0, "y": 17 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum by (group, reason) (increase(app_ios_healthkit_sync_failures_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{group}} · {{reason}}", "refId": "A" }],
+      "targets": [{ "expr": "sum by (group, reason) (app_ios_healthkit_sync_failures_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{group}} · {{reason}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
     },
     {
-      "title": "Bootstrap (rolling 24h) events",
+      "title": "Bootstrap (cumulative) events",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum by (outcome) (increase(app_ios_bootstrap_requests_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{outcome}}", "refId": "A" }],
+      "targets": [{ "expr": "sum by (outcome) (app_ios_bootstrap_requests_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{outcome}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
     },
     {
-      "title": "HealthKit skips (rolling 24h) by reason",
+      "title": "HealthKit skips (cumulative) by reason",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum by (skip_reason) (increase(app_ios_healthkit_sync_skips_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{skip_reason}}", "refId": "A" }],
+      "targets": [{ "expr": "sum by (skip_reason) (app_ios_healthkit_sync_skips_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{skip_reason}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
     },
     {
-      "title": "Sign-in (rolling 24h) events",
+      "title": "Sign-in (cumulative) events",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum by (outcome) (increase(app_ios_auth_sign_in_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{outcome}}", "refId": "A" }],
+      "targets": [{ "expr": "sum by (outcome) (app_ios_auth_sign_in_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{outcome}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
     },
     {
-      "title": "Token refresh (rolling 24h) events",
+      "title": "Token refresh (cumulative) events",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 34 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum by (source, outcome) (increase(app_ios_auth_refresh_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{source}} {{outcome}}", "refId": "A" }],
+      "targets": [{ "expr": "sum by (source, outcome) (app_ios_auth_refresh_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{source}} {{outcome}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
     },
     {
-      "title": "Sign-out (rolling 24h) events",
+      "title": "Sign-out (cumulative) events",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum by (reason) (increase(app_ios_auth_sign_out_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{reason}}", "refId": "A" }],
+      "targets": [{ "expr": "sum by (reason) (app_ios_auth_sign_out_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{reason}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
     },
     {
-      "title": "Auth API 401 retries (rolling 24h)",
+      "title": "Auth API 401 retries (cumulative)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum by (outcome) (increase(app_ios_auth_api_retry_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{outcome}}", "refId": "A" }],
+      "targets": [{ "expr": "sum by (outcome) (app_ios_auth_api_retry_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{outcome}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
     },
     {
@@ -128,6 +128,7 @@
   ],
   "schemaVersion": 39,
   "tags": ["family-os", "ios", "metrics"],
+  "description": "Event lines are cumulative counters. A flat line means no new event; a downward reset indicates an app-process restart. Use the Installation filter to isolate one device.",
   "templating": {
     "list": [
       {
