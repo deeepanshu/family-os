@@ -1,8 +1,14 @@
 import { SignJWT } from "jose";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { HEALTH_API_PREFIX } from "@family-os/shared";
+import { configureOtelLogs, flushOtelLogs, _resetOtelLogsForTests } from "../src/logging/otelLogs";
 import { createApp } from "../src/app";
 import { InMemoryFamilyRepository } from "../src/repositories/families";
+
+afterEach(() => {
+  _resetOtelLogsForTests();
+  vi.unstubAllGlobals();
+});
 
 const testUserId = "00000000-0000-4000-8000-000000000001";
 const jwtSecret = "test-supabase-jwt-secret-with-enough-length";
@@ -204,6 +210,39 @@ describe("health API bootstrap", () => {
         code: "invalid_token"
       }
     });
+  });
+
+  it("exports JWT verification failures through the OTEL logger", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal("fetch", fetchMock);
+    configureOtelLogs({
+      endpoint: "http://otel-collector:4318",
+      serviceName: "family-os-health-api",
+      environment: "prod",
+      enabled: true
+    });
+
+    const token = await jwtFor(testUserId, { secret: "wrong-secret" });
+    const response = await app().request(`${HEALTH_API_PREFIX}/me`, {
+      headers: {
+        authorization: `Bearer ${token}`
+      }
+    });
+
+    expect(response.status).toBe(401);
+    await flushOtelLogs();
+
+    const [, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit];
+    const body = JSON.parse(String(init.body));
+    const record = body.resourceLogs[0].scopeLogs[0].logRecords[0];
+    expect(record.body.stringValue).toBe("auth_token_verification_failed");
+    expect(record.attributes).toEqual(
+      expect.arrayContaining([
+        { key: "alg", value: { stringValue: "HS256" } },
+        { key: "kid", value: { stringValue: "missing" } },
+        { key: "aud", value: { stringValue: "authenticated" } }
+      ])
+    );
   });
 
   it("rejects JWTs without a Supabase subject", async () => {
