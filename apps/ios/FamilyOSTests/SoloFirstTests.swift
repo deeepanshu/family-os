@@ -859,6 +859,7 @@ final class SoloFirstTests: XCTestCase {
     }
 
     func testStartupAccountDeletedSignsOut() async throws {
+        addTeardownBlock { AppMetrics.resetForTesting() }
         let delivered = expectation(description: "OTLP bootstrap unauthorized")
         delivered.assertForOverFulfill = false
         let recorder = MetricsRequestRecorder(expectation: delivered)
@@ -1116,7 +1117,12 @@ private func makeViewModelWithMock(_ handlers: [String: String]) -> HealthBootst
     defaults.removeObject(forKey: DefaultsKey.pendingAppleDisplayName)
     defaults.removeObject(forKey: DefaultsKey.pendingAppleUserId)
     let dependencies = HealthBootstrapDependencies(
-        environment: AppEnvironment(name: .local, apiBaseURL: "https://test.example.com", supabaseURL: "https://test.supabase.co"),
+        environment: AppEnvironment(
+            name: .local,
+            apiBaseURL: "https://test.example.com",
+            supabaseURL: "https://test.supabase.co",
+            supabaseAnonKey: "test-anon-key"
+        ),
         healthClient: HealthAPIClient(session: session),
         healthKitClient: HealthKitClient(),
         authClient: SupabaseAuthClient(session: session),

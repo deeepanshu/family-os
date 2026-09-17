@@ -79,6 +79,16 @@ enum AppMetrics {
             )
         )
     }
+    /// Clears the process-global exporter state between tests.
+    static func resetForTesting() {
+        storage.lock.lock()
+        storage.configuration = nil
+        storage.counters.removeAll(keepingCapacity: true)
+        storage.histograms.removeAll(keepingCapacity: true)
+        storage.isFlushInFlight = false
+        storage.lastFlush = .distantPast
+        storage.lock.unlock()
+    }
 
     private static func activate(_ configuration: Configuration) {
         storage.lock.lock()
