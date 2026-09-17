@@ -42,6 +42,7 @@
       "targets": [
         {
           "expr": "sum by (service_name) (app_http_server_inflight_requests_ratio)",
+          "legendFormat": "{{service_name}}",
           "refId": "A"
         }
       ]
