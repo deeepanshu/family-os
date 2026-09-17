@@ -106,32 +106,13 @@
       ]
     },
     {
-      "title": "Health API logs",
+      "title": "API logs (API + MCP)",
       "type": "logs",
-      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 16 },
+      "gridPos": { "h": 16, "w": 24, "x": 0, "y": 16 },
       "datasource": { "type": "loki", "uid": "loki" },
       "targets": [
         {
           "expr": "{service_name=\"family-os-health-api\"}",
-          "refId": "A"
-        }
-      ],
-      "options": {
-        "showTime": true,
-        "showLabels": true,
-        "wrapLogMessage": true,
-        "enableLogDetails": true,
-        "sortOrder": "Descending"
-      }
-    },
-    {
-      "title": "MCP logs",
-      "type": "logs",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 26 },
-      "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [
-        {
-          "expr": "{service_name=\"family-os-mcp\"}",
           "refId": "A"
         }
       ],

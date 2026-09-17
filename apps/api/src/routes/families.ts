@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppConfig } from "../config";
 import { requireAuth, type AppVariables } from "../auth";
+import { logInfo } from "../logging/otelLogs";
 import { mcpPublicOrigin } from "../mcp/publicUrl";
 import type { FamilyStore } from "../repositories/contracts";
 import { attachHouseholdUrls } from "./inviteUrls";
@@ -39,6 +40,7 @@ export function createFamilyRoutes(repository: FamilyStore, config: AppConfig) {
 
   families.delete("/current", async (c) => {
     await repository.deleteFamily(c.get("user").id);
+    logInfo("family deleted", { userId: c.get("user").id });
     return c.body(null, 204);
   });
 

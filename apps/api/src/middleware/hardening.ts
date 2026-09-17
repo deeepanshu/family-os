@@ -5,6 +5,7 @@ import type { AppConfig } from "../config";
 import { HttpError } from "../errors";
 import type { AppVariables } from "../auth";
 import { httpStatusClass, normalizeHttpRoute } from "../logging/otelConfig";
+import { httpActionName } from "../logging/httpActions";
 import { logError, logInfo, logWarn } from "../logging/otelLogs";
 import {
   httpRequestFinished,
@@ -59,13 +60,13 @@ export function requestLoggingMiddleware() {
         has_auth: Boolean(c.req.header("authorization")),
         user_agent: truncate(c.req.header("user-agent"), 120)
       };
-
+      const action = httpActionName(method, path);
       if (status >= 500) {
-        logError("http_request", attrs);
+        logError(action, attrs);
       } else if (status >= 400) {
-        logWarn("http_request", attrs);
+        logWarn(action, attrs);
       } else {
-        logInfo("http_request", attrs);
+        logInfo(action, attrs);
       }
     }
   });

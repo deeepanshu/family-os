@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { requireAuth, type AppVariables } from "../auth";
 import { deleteSupabaseAuthUser } from "../authAdmin";
+import { logInfo } from "../logging/otelLogs";
 import type { AppConfig } from "../config";
 import type { ProfileStore } from "../repositories/contracts";
 
@@ -28,8 +29,10 @@ export function createMeRoutes(profileRepository: ProfileStore, config: AppConfi
 
   me.delete("/", async (c) => {
     const user = c.get("user");
+    logInfo("account deletion requested", { userId: user.id });
     await profileRepository.deleteAccount(user.id);
     await deleteSupabaseAuthUser(c.get("config") ?? config, user.id);
+    logInfo("account deleted", { userId: user.id });
     return c.body(null, 204);
   });
 
