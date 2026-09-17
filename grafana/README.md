@@ -10,3 +10,4 @@ See: [homelab app-dashboards docs](https://github.com/deeepanshu/homelab/blob/ma
 | File | Grafana folder | UID |
 |------|----------------|-----|
 | `dashboards/family-os-api.json` | Apps | `family-os-api` |
+| `dashboards/family-os-ios.json` | Apps | `family-os-ios` |
