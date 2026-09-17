@@ -1,0 +1,12 @@
+# Homelab-host overlay (PVE CT "apis"): publishes the API on all interfaces so
+# the cloudflared container (CT "cloudflared") can reach it across the LAN.
+# Local dev never includes this file — default stays loopback-only.
+services:
+  migrate:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel.lab:4318
+  health-api:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel.lab:4318
+    ports: !override
+      - "3001:3001"
