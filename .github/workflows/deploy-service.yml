@@ -152,7 +152,7 @@ jobs:
     steps:
       - name: Deploy and wait for Pi success
         env:
-          DEPLOY_SECRET: ${{ secrets.RPI_DEPLOY_SECRET }}
+          DEPLOY_SECRET: ${{ secrets.DEPLOY_SECRET }}
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag || needs.changes.outputs.image_tag }}
           # Short curl per request; overall wait is the poll loop (~15 min).
           POLL_INTERVAL: "10"
@@ -161,7 +161,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${DEPLOY_SECRET}" ]; then
-            echo "Missing repo secret RPI_DEPLOY_SECRET" >&2
+            echo "Missing repo secret DEPLOY_SECRET" >&2
             exit 1
           fi
 
