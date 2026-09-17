@@ -55,7 +55,8 @@
       "gridPos": { "h": 9, "w": 12, "x": 12, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{ "expr": "sum by (reason, outcome) (app_ios_healthkit_sync_runs_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{reason}} {{outcome}}", "refId": "A" }],
-      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": false, "showPoints": "always", "pointSize": 4 }
     },
     {
       "title": "Sync failures (cumulative) by group",
@@ -63,7 +64,8 @@
       "gridPos": { "h": 9, "w": 24, "x": 0, "y": 17 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{ "expr": "sum by (group, reason) (app_ios_healthkit_sync_failures_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{group}} · {{reason}}", "refId": "A" }],
-      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": false, "showPoints": "always", "pointSize": 4 }
     },
     {
       "title": "Bootstrap (cumulative) events",
@@ -71,7 +73,8 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{ "expr": "sum by (outcome) (app_ios_bootstrap_requests_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{outcome}}", "refId": "A" }],
-      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": false, "showPoints": "always", "pointSize": 4 }
     },
     {
       "title": "HealthKit skips (cumulative) by reason",
@@ -79,7 +82,8 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{ "expr": "sum by (skip_reason) (app_ios_healthkit_sync_skips_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{skip_reason}}", "refId": "A" }],
-      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": false, "showPoints": "always", "pointSize": 4 }
     },
     {
       "title": "Sign-in (cumulative) events",
@@ -87,7 +91,8 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{ "expr": "sum by (outcome) (app_ios_auth_sign_in_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{outcome}}", "refId": "A" }],
-      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": false, "showPoints": "always", "pointSize": 4 }
     },
     {
       "title": "Token refresh (cumulative) events",
@@ -95,7 +100,8 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 34 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{ "expr": "sum by (source, outcome) (app_ios_auth_refresh_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{source}} {{outcome}}", "refId": "A" }],
-      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": false, "showPoints": "always", "pointSize": 4 }
     },
     {
       "title": "Sign-out (cumulative) events",
@@ -103,7 +109,8 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{ "expr": "sum by (reason) (app_ios_auth_sign_out_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{reason}}", "refId": "A" }],
-      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": false, "showPoints": "always", "pointSize": 4 }
     },
     {
       "title": "Auth API 401 retries (cumulative)",
@@ -111,7 +118,8 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{ "expr": "sum by (outcome) (app_ios_auth_api_retry_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{outcome}}", "refId": "A" }],
-      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": false, "showPoints": "always", "pointSize": 4 }
     },
     {
       "title": "App identity",
