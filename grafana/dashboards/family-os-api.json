@@ -118,7 +118,7 @@
       ],
       "options": {
         "showTime": true,
-        "showLabels": true,
+        "showLabels": false,
         "wrapLogMessage": true,
         "enableLogDetails": true,
         "sortOrder": "Descending"

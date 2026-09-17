@@ -1,20 +1,21 @@
+# Base compose file — the app as it is. Local dev runs this file alone:
+#   docker compose up -d
+# Production (homelab host) layers an overlay:
+#   docker compose -f infra/docker/compose.yml -f infra/docker/compose.homelab.yml up -d
 x-logging: &default-logging
   driver: json-file
   options:
     max-size: "10m"
     max-file: "3"
 
-x-family-os-image: &family-os-image
-  image: ghcr.io/deeepanshu/family-os-health-api:${IMAGE_TAG:-local}
-  build:
-    context: ../..
-    dockerfile: Dockerfile
-
 services:
   # One-shot: docker compose --profile migrate run --rm migrate
   # Safe no-op when schema is already up to date.
   migrate:
-    <<: *family-os-image
+    image: ghcr.io/deeepanshu/family-os-health-api:${IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
     logging: *default-logging
     profiles: ["migrate"]
     env_file:
@@ -26,10 +27,12 @@ services:
       - homelab
 
   # Single API process serving both the iOS Health API and the MCP/OAuth
-  # surface on one port. Cloudflare Tunnel ingress for
-  # familyos.deepanshujain.me routes to http://localhost:3001 (loopback only).
+  # surface on one port.
   health-api:
-    <<: *family-os-image
+    image: ghcr.io/deeepanshu/family-os-health-api:${IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
     logging: *default-logging
     container_name: family-os-health-api
     env_file:
@@ -37,10 +40,8 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 3001
-      # Must be the Docker DNS name — do not use host .env 127.0.0.1 (that is the container loopback).
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel.lab:4318
-      OTEL_SERVICE_NAME: family-os-health-api
-      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=prod
+    # Loopback-only default so local dev never exposes the API. Production
+    # overrides the binding in compose.homelab.yml.
     ports:
       - "127.0.0.1:3001:3001"
     restart: unless-stopped

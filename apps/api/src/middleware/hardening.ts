@@ -48,10 +48,10 @@ export function requestLoggingMiddleware() {
 
       recordHttpRequest({ method, route, status, durationMs });
 
+      const action = httpActionName(method, path);
       const attrs = {
+        action,
         requestId,
-        method,
-        path,
         route,
         status,
         status_class: statusClass,
@@ -60,13 +60,13 @@ export function requestLoggingMiddleware() {
         has_auth: Boolean(c.req.header("authorization")),
         user_agent: truncate(c.req.header("user-agent"), 120)
       };
-      const action = httpActionName(method, path);
+      const message = `${method} ${path} → ${status} in ${durationMs}ms (${action})`;
       if (status >= 500) {
-        logError(action, attrs);
+        logError(message, attrs);
       } else if (status >= 400) {
-        logWarn(action, attrs);
+        logWarn(message, attrs);
       } else {
-        logInfo(action, attrs);
+        logInfo(message, attrs);
       }
     }
   });
