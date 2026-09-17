@@ -44,8 +44,8 @@
       "gridPos": { "h": 9, "w": 12, "x": 0, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
-        { "expr": "histogram_quantile(0.50, sum by (installation_id, le) (rate(app_ios_healthkit_sync_duration_seconds_bucket{installation_id=~\"$installation_id\"}[24h])))", "legendFormat": "{{installation_id}} p50", "refId": "A" },
-        { "expr": "histogram_quantile(0.95, sum by (installation_id, le) (rate(app_ios_healthkit_sync_duration_seconds_bucket{installation_id=~\"$installation_id\"}[24h])))", "legendFormat": "{{installation_id}} p95", "refId": "B" }
+        { "expr": "histogram_quantile(0.50, sum by (le) (rate(app_ios_healthkit_sync_duration_seconds_bucket{installation_id=~\"$installation_id\"}[24h])))", "legendFormat": "p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(app_ios_healthkit_sync_duration_seconds_bucket{installation_id=~\"$installation_id\"}[24h])))", "legendFormat": "p95", "refId": "B" }
       ],
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
     },
@@ -54,7 +54,7 @@
       "type": "timeseries",
       "gridPos": { "h": 9, "w": 12, "x": 12, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum by (installation_id, reason, outcome) (increase(app_ios_healthkit_sync_runs_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{installation_id}} {{reason}} {{outcome}}", "refId": "A" }],
+      "targets": [{ "expr": "sum by (reason, outcome) (increase(app_ios_healthkit_sync_runs_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{reason}} {{outcome}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
     },
     {
@@ -62,7 +62,7 @@
       "type": "timeseries",
       "gridPos": { "h": 9, "w": 24, "x": 0, "y": 17 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum by (installation_id, group, reason) (increase(app_ios_healthkit_sync_failures_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{installation_id}} {{group}} · {{reason}}", "refId": "A" }],
+      "targets": [{ "expr": "sum by (group, reason) (increase(app_ios_healthkit_sync_failures_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{group}} · {{reason}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
     },
     {
@@ -70,7 +70,7 @@
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum by (installation_id, outcome) (increase(app_ios_bootstrap_requests_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{installation_id}} {{outcome}}", "refId": "A" }],
+      "targets": [{ "expr": "sum by (outcome) (increase(app_ios_bootstrap_requests_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{outcome}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
     },
     {
@@ -78,7 +78,7 @@
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum by (installation_id, skip_reason, group) (increase(app_ios_healthkit_sync_skips_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{installation_id}} {{skip_reason}} {{group}}", "refId": "A" }],
+      "targets": [{ "expr": "sum by (skip_reason) (increase(app_ios_healthkit_sync_skips_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{skip_reason}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
     },
     {
@@ -86,7 +86,7 @@
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum by (installation_id, outcome) (increase(app_ios_auth_sign_in_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{installation_id}} {{outcome}}", "refId": "A" }],
+      "targets": [{ "expr": "sum by (outcome) (increase(app_ios_auth_sign_in_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{outcome}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
     },
     {
@@ -94,7 +94,7 @@
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 34 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum by (installation_id, source, outcome) (increase(app_ios_auth_refresh_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{installation_id}} {{source}} {{outcome}}", "refId": "A" }],
+      "targets": [{ "expr": "sum by (source, outcome) (increase(app_ios_auth_refresh_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{source}} {{outcome}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
     },
     {
@@ -102,7 +102,7 @@
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum by (installation_id, reason) (increase(app_ios_auth_sign_out_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{installation_id}} {{reason}}", "refId": "A" }],
+      "targets": [{ "expr": "sum by (reason) (increase(app_ios_auth_sign_out_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{reason}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
     },
     {
@@ -110,7 +110,7 @@
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum by (installation_id, outcome) (increase(app_ios_auth_api_retry_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{installation_id}} {{outcome}}", "refId": "A" }],
+      "targets": [{ "expr": "sum by (outcome) (increase(app_ios_auth_api_retry_total{installation_id=~\"$installation_id\"}[24h]))", "legendFormat": "{{outcome}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
     },
     {
