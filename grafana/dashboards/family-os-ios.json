@@ -56,7 +56,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{ "expr": "sum by (reason, outcome) (app_ios_healthkit_sync_runs_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{reason}} {{outcome}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
-      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": false, "showPoints": "always", "pointSize": 4 }
+      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": true, "showPoints": "always", "pointSize": 4 }
     },
     {
       "title": "Sync failures (cumulative) by group",
@@ -65,7 +65,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{ "expr": "sum by (group, reason) (app_ios_healthkit_sync_failures_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{group}} · {{reason}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
-      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": false, "showPoints": "always", "pointSize": 4 }
+      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": true, "showPoints": "always", "pointSize": 4 }
     },
     {
       "title": "Bootstrap (cumulative) events",
@@ -74,7 +74,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{ "expr": "sum by (outcome) (app_ios_bootstrap_requests_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{outcome}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
-      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": false, "showPoints": "always", "pointSize": 4 }
+      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": true, "showPoints": "always", "pointSize": 4 }
     },
     {
       "title": "HealthKit skips (cumulative) by reason",
@@ -83,7 +83,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{ "expr": "sum by (skip_reason) (app_ios_healthkit_sync_skips_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{skip_reason}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
-      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": false, "showPoints": "always", "pointSize": 4 }
+      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": true, "showPoints": "always", "pointSize": 4 }
     },
     {
       "title": "Sign-in (cumulative) events",
@@ -92,7 +92,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{ "expr": "sum by (outcome) (app_ios_auth_sign_in_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{outcome}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
-      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": false, "showPoints": "always", "pointSize": 4 }
+      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": true, "showPoints": "always", "pointSize": 4 }
     },
     {
       "title": "Token refresh (cumulative) events",
@@ -101,7 +101,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{ "expr": "sum by (source, outcome) (app_ios_auth_refresh_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{source}} {{outcome}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
-      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": false, "showPoints": "always", "pointSize": 4 }
+      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": true, "showPoints": "always", "pointSize": 4 }
     },
     {
       "title": "Sign-out (cumulative) events",
@@ -110,7 +110,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{ "expr": "sum by (reason) (app_ios_auth_sign_out_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{reason}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
-      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": false, "showPoints": "always", "pointSize": 4 }
+      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": true, "showPoints": "always", "pointSize": 4 }
     },
     {
       "title": "Auth API 401 retries (cumulative)",
@@ -119,7 +119,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{ "expr": "sum by (outcome) (app_ios_auth_api_retry_total{installation_id=~\"$installation_id\"})", "legendFormat": "{{outcome}}", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
-      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": false, "showPoints": "always", "pointSize": 4 }
+      "options": { "drawStyle": "line", "lineInterpolation": "stepAfter", "spanNulls": true, "showPoints": "always", "pointSize": 4 }
     },
     {
       "title": "App identity",
