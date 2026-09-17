@@ -25,6 +25,9 @@ services:
       - default
       - homelab
 
+  # Single API process serving both the iOS Health API and the MCP/OAuth
+  # surface on one port. Cloudflare Tunnel ingress for
+  # familyos.deepanshujain.me routes to http://localhost:3001 (loopback only).
   health-api:
     <<: *family-os-image
     logging: *default-logging
@@ -39,7 +42,7 @@ services:
       OTEL_SERVICE_NAME: family-os-health-api
       OTEL_RESOURCE_ATTRIBUTES: deployment.environment=prod
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     restart: unless-stopped
     volumes:
       - ${FAMILY_OS_SECRETS_DIR:?set FAMILY_OS_SECRETS_DIR in .env}:/run/secrets/family-os:ro

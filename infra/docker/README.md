@@ -18,7 +18,7 @@ The homelab manager deploys via `POST /hooks/deploy/family-os`, which sets
 
 1. `docker compose pull`
 2. **migrate** (one-shot `migrate` service — no-op if nothing pending)
-3. `docker compose up -d` for API + MCP
+3. `docker compose up -d`
 
 No image **build** on the host. Migrations use `DATABASE_URL` from `.env`
 inside the same release image as the API.
@@ -45,8 +45,6 @@ cd <repo>
 export IMAGE_TAG=<git-sha-or-main>
 docker compose --env-file .env -f infra/docker/compose.prod.yml pull
 docker compose --env-file .env -f infra/docker/compose.prod.yml up -d
-docker compose --env-file .env -f infra/docker/compose.mcp.prod.yml pull
-docker compose --env-file .env -f infra/docker/compose.mcp.prod.yml up -d
 ```
 
 Local rebuild (dev only):
@@ -62,13 +60,12 @@ Smoke test:
 curl http://localhost:3001/health/api/v1/healthcheck
 ```
 
-## Dedicated MCP process
+## Single process (API + MCP)
 
-Keep the iOS Health API on port `3001`. The MCP/OAuth surface runs the same API
-runtime as a separate container, bound only to loopback port `3002`.
-
-The Cloudflare Tunnel ingress for `familyos.deepanshujain.me` must route to
-`http://localhost:3002`.
+One container serves both the iOS Health API and the MCP/OAuth surface on
+loopback port `3001`. The Cloudflare Tunnel ingress for
+`familyos.deepanshujain.me` must route to `http://localhost:3001`.
+Port `3002` and `compose.mcp.prod.yml` are gone (consolidated 2026-09).
 
 ## Database (homelab Postgres)
 
@@ -88,12 +85,11 @@ Keep the previous Supabase `DATABASE_URL` in `.env.supabase.bak` for rollback.
 
 ## Observability (OTLP → Grafana)
 
-Production compose attaches both API and MCP to the external Docker network
-`observability` and sets:
+Production compose attaches the API (single process serving API + MCP) to the
+external Docker network `observability` and sets:
 
 ```text
-OTEL_EXPORTER_OTLP_ENDPOINT=http://otel.lab:4318
-OTEL_SERVICE_NAME=family-os-health-api   # or family-os-mcp
+OTEL_SERVICE_NAME=family-os-health-api
 OTEL_RESOURCE_ATTRIBUTES=deployment.environment=prod
 ```
 
@@ -113,7 +109,6 @@ Grafana: dashboard **Family OS API** (folder Apps), synced from
 
 ```logql
 {service_name="family-os-health-api"}
-{service_name="family-os-mcp"}
 ```
 
 Requires the shared stack from [homelab/observability](https://github.com/deeepanshu/homelab/tree/main/observability) to be up first (`make network && make up` in that tree).

@@ -18,6 +18,7 @@ import type {
   ProfileStore,
   RecordAuditInput
 } from "../repositories/contracts";
+import { logError, logInfo, logWarn } from "../logging/otelLogs";
 import { coverageComplete } from "../repositories/healthKitDomain";
 import { resolveMetricQuery } from "./metricRegistry";
 import { McpRateLimiter } from "./rateLimit";
@@ -465,8 +466,28 @@ export class HealthMcpReadService {
         correlationId,
         outcome: "allowed"
       });
+      logInfo("mcp tool call allowed", {
+        tool: toolName,
+        oauthClientId: caller.oauthClientId,
+        correlationId,
+        hasProfileId: Boolean(profileId)
+      });
       return result;
     } catch (error) {
+      const denied = error instanceof HttpError && (error.status === 403 || error.status === 404);
+      const errorCode = error instanceof HttpError ? error.code : "internal_error";
+      const toolLog = {
+        tool: toolName,
+        oauthClientId: caller.oauthClientId,
+        correlationId,
+        hasProfileId: Boolean(profileId),
+        errorCode
+      };
+      if (denied) {
+        logWarn("mcp tool call denied", toolLog);
+      } else {
+        logError("mcp tool call failed", toolLog);
+      }
       await this.recordToolAudit({
         familyId,
         actorUserId: caller.userId,
@@ -474,8 +495,8 @@ export class HealthMcpReadService {
         profileId,
         oauthClientId: caller.oauthClientId,
         correlationId,
-        outcome: error instanceof HttpError && (error.status === 403 || error.status === 404) ? "denied" : "failed",
-        errorCode: error instanceof HttpError ? error.code : "internal_error"
+        outcome: denied ? "denied" : "failed",
+        errorCode
       });
       throw error;
     }

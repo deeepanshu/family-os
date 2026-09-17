@@ -35,6 +35,7 @@ import type {
 import { BACKFILL_WINDOW_MS, HEALTHKIT_METRIC_REGISTRY, isStrengthWorkoutType } from "@family-os/shared";
 
 import { HttpError } from "../../errors";
+import { logError, logInfo } from "../../logging/otelLogs";
 import {
   assertOpCoherent,
   assertRunKindAllowed,
@@ -287,7 +288,17 @@ export class PostgresHealthKitStore {
         }
       }
     });
-
+    const applied = results.filter((r) => r.result === "applied").length;
+    const duplicate = results.filter((r) => r.result === "duplicate").length;
+    const rejected = results.filter((r) => r.result === "rejected").length;
+    logInfo("healthkit ops batch applied", {
+      personId: input.personId,
+      group: input.ops[0]?.group,
+      op_count: input.ops.length,
+      applied,
+      duplicate,
+      rejected
+    });
     await this.context.audit({
       familyId: access.familyId,
       actorUserId,
@@ -296,9 +307,9 @@ export class PostgresHealthKitStore {
       resourceId: input.personId,
       metadata: {
         op_count: input.ops.length,
-        applied: results.filter((r) => r.result === "applied").length,
-        duplicate: results.filter((r) => r.result === "duplicate").length,
-        rejected: results.filter((r) => r.result === "rejected").length
+        applied,
+        duplicate,
+        rejected
       }
     });
 
@@ -481,6 +492,13 @@ export class PostgresHealthKitStore {
       return range;
     });
 
+    logInfo("healthkit run begin", {
+      personId: input.personId,
+      group,
+      kind: input.kind,
+      coverageStartAt: descriptor.coverageStartAt,
+      coverageEndAt: descriptor.coverageEndAt
+    });
     await this.context.audit({
       familyId: access.familyId,
       actorUserId,
@@ -599,6 +617,14 @@ export class PostgresHealthKitStore {
       });
     });
 
+    logInfo("healthkit run complete", {
+      personId: input.personId,
+      group,
+      kind: input.kind,
+      coverageStartAt: completedCoverage.coverageStartAt,
+      coverageEndAt: completedCoverage.coverageEndAt,
+      deletedCount
+    });
     await this.context.audit({
       familyId: access.familyId,
       actorUserId,
@@ -679,6 +705,14 @@ export class PostgresHealthKitStore {
         coverageEndAt: state?.coverage_end_at ? toIso(state.coverage_end_at) : undefined,
         needsInitialImport
       };
+    });
+
+    logError("healthkit run failed", {
+      personId: input.personId,
+      group,
+      kind: input.kind,
+      errorCode: input.errorCode,
+      status: result.status
     });
 
     await this.context.audit({
