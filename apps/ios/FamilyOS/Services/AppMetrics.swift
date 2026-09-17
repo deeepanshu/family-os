@@ -5,6 +5,7 @@ import OSLog
 ///
 /// Metrics must be fixed operational counters or durations. Never include health
 /// readings, dates, free-text, tokens, email, or any other user data in names or attributes.
+/// Device identity is app-install scoped, never a hardware or advertising identifier.
 enum AppMetrics {
     private static let logger = Logger(subsystem: "com.deepanshujain.familyos", category: "AppMetrics")
     private static let storage = Storage()
@@ -53,6 +54,7 @@ enum AppMetrics {
             version: Self.nonEmpty(info["CFBundleShortVersionString"] as? String) ?? "unknown",
             build: Self.nonEmpty(info["CFBundleVersion"] as? String) ?? "unknown",
             buildConfiguration: Self.buildConfiguration,
+            installationID: currentInstallationID(),
             headers: headers,
             startedAtUnixNanoseconds: unixTimeNanoseconds(),
             requestSink: nil
@@ -64,6 +66,7 @@ enum AppMetrics {
     /// Test-only egress seam: captures the exact OTLP/HTTP request without a network dependency.
     static func configureForTesting(
         endpoint: URL,
+        installationID: String? = nil,
         send: @escaping @Sendable (URLRequest) -> Void
     ) {
         activate(
@@ -73,12 +76,14 @@ enum AppMetrics {
                 version: "1.0",
                 build: "1",
                 buildConfiguration: "debug",
+                installationID: Self.nonEmpty(installationID),
                 headers: [:],
                 startedAtUnixNanoseconds: unixTimeNanoseconds(),
                 requestSink: send
             )
         )
     }
+
     /// Clears the process-global exporter state between tests.
     static func resetForTesting() {
         storage.lock.lock()
@@ -368,16 +373,24 @@ enum AppMetrics {
             ])
         }
 
+        var resourceAttributes = [
+            MetricAttribute(key: "service.name", value: "family-os-ios"),
+            MetricAttribute(key: "service.version", value: snapshot.configuration.version),
+            MetricAttribute(key: "deployment.environment", value: snapshot.configuration.environment),
+            MetricAttribute(key: "ios.build", value: snapshot.configuration.build),
+            MetricAttribute(key: "ios.build_configuration", value: snapshot.configuration.buildConfiguration)
+        ]
+        if let installationID = snapshot.configuration.installationID {
+            resourceAttributes.append(contentsOf: [
+                MetricAttribute(key: "device.id", value: installationID),
+                MetricAttribute(key: "installation.id", value: installationID)
+            ])
+        }
+
         let root: [String: Any] = [
             "resourceMetrics": [[
                 "resource": [
-                    "attributes": otlpAttributes([
-                        MetricAttribute(key: "service.name", value: "family-os-ios"),
-                        MetricAttribute(key: "service.version", value: snapshot.configuration.version),
-                        MetricAttribute(key: "deployment.environment", value: snapshot.configuration.environment),
-                        MetricAttribute(key: "ios.build", value: snapshot.configuration.build),
-                        MetricAttribute(key: "ios.build_configuration", value: snapshot.configuration.buildConfiguration)
-                    ].sorted())
+                    "attributes": otlpAttributes(resourceAttributes.sorted())
                 ],
                 "scopeMetrics": [[
                     "scope": ["name": "com.deepanshujain.familyos.metrics"],
@@ -410,6 +423,13 @@ enum AppMetrics {
         #endif
     }
 
+    private static func currentInstallationID() -> String? {
+        guard let installationID = try? HealthKitInstallationId.current() else {
+            return nil
+        }
+        return nonEmpty(installationID)
+    }
+
     private static func nonEmpty(_ value: String?) -> String? {
         guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
             return nil
@@ -424,6 +444,7 @@ enum AppMetrics {
         let version: String
         let build: String
         let buildConfiguration: String
+        let installationID: String?
         let headers: [String: String]
         let startedAtUnixNanoseconds: UInt64
         let requestSink: (@Sendable (URLRequest) -> Void)?
