@@ -177,7 +177,10 @@ export class MemoryHealthKitEngine {
   readonly exerciseLogs = new Map<string, HealthWorkoutExerciseLog[]>();
 
 
-  constructor(private readonly host: MemoryHealthKitHost) {}
+  constructor(
+    private readonly host: MemoryHealthKitHost,
+    private readonly now: () => Date = () => new Date()
+  ) {}
 
   private async requireSelf(actorUserId: string): Promise<{ id: string; familyId: string | null }> {
     const self = await this.host.getSelfProfile(actorUserId);
@@ -205,7 +208,7 @@ export class MemoryHealthKitEngine {
     const uniqueGroups = [...new Set(input.enabledGroups)].filter((m): m is HealthKitMetric =>
       (HEALTHKIT_METRICS as readonly string[]).includes(m)
     );
-    const nowIso = new Date().toISOString();
+    const nowIso = this.now().toISOString();
     const existing = this.profileSettings.get(input.personId);
     let timezoneVersion = existing?.healthTimezoneVersion ?? 1;
     let timezoneChanged = false;
@@ -315,7 +318,7 @@ export class MemoryHealthKitEngine {
     }
 
     const results: HealthKitOpApplyResult[] = [];
-    const nowIso = toUtcIso(new Date());
+    const nowIso = toUtcIso(this.now());
 
     for (const op of input.ops) {
       try {
@@ -385,7 +388,7 @@ export class MemoryHealthKitEngine {
       throw new HttpError(403, "group_disabled", `Group ${group} is not enabled.`);
     }
 
-    const now = new Date();
+    const now = this.now();
     const nowIso = toUtcIso(now);
     const coverageStartAt = toUtcIso(backfillRangeStart(group, now));
     const coverageEndAt = nowIso;
@@ -415,7 +418,7 @@ export class MemoryHealthKitEngine {
       throw new HttpError(403, "group_disabled", `Group ${group} is not enabled.`);
     }
 
-    const now = new Date();
+    const now = this.now();
     const nowIso = toUtcIso(now);
     const prev = this.syncState.get(`${input.personId}:${group}`);
     const coverageStartAt =
@@ -459,7 +462,7 @@ export class MemoryHealthKitEngine {
     const needsInitialImport = this.needsInitialImport(input.personId, group);
     assertRunKindAllowed(input.kind, group, needsInitialImport);
 
-    const now = new Date();
+    const now = this.now();
     const range = deriveRunRange({
       kind: input.kind,
       group,
@@ -501,7 +504,7 @@ export class MemoryHealthKitEngine {
       throw new HttpError(403, "group_disabled", `Group ${group} is not enabled.`);
     }
 
-    const now = new Date();
+    const now = this.now();
     const nowIso = toUtcIso(now);
 
     if (input.kind === "repair_import") {
@@ -599,7 +602,7 @@ export class MemoryHealthKitEngine {
       throw new HttpError(403, "group_disabled", `Group ${group} is not enabled.`);
     }
 
-    const nowIso = toUtcIso(new Date());
+    const nowIso = toUtcIso(this.now());
     const prev = this.syncState.get(`${input.personId}:${group}`);
     const restoredStatus: HealthMetricSyncStatusCode = prev?.lastSuccessfulAt ? "ready" : "error";
     this.touchState({
@@ -649,7 +652,7 @@ export class MemoryHealthKitEngine {
           if (row.personId !== input.personId || row.deletedAt) continue;
           if (row.measuredAt < input.rangeStartAt || row.measuredAt > input.rangeEndAt) continue;
           if (!manifest.has(`blood_pressure:${key}`)) {
-            this.host.bloodPressureReadings.set(key, { ...row, deletedAt: new Date().toISOString() });
+            this.host.bloodPressureReadings.set(key, { ...row, deletedAt: this.now().toISOString() });
             deleted += 1;
           }
         }

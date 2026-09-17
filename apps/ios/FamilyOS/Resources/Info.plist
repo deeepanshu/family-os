@@ -26,12 +26,26 @@
 	<string>$(FAMILY_OS_ENV)</string>
 	<key>HEALTH_API_BASE_URL</key>
 	<string>$(HEALTH_API_BASE_URL)</string>
+	<key>OTLP_METRICS_ENDPOINT</key>
+	<string>$(OTLP_METRICS_ENDPOINT)</string>
+	<key>CF_ACCESS_CLIENT_ID</key>
+	<string>$(CF_ACCESS_CLIENT_ID)</string>
+	<key>CF_ACCESS_CLIENT_SECRET</key>
+	<string>$(CF_ACCESS_CLIENT_SECRET)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>telemetry.lab</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+		</dict>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>FamilyStack connects to your Mac’s local Health API during development so health sync can be tested on this network.</string>

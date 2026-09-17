@@ -116,7 +116,9 @@ export class HealthMcpReadService {
         coverageStartAt: freshness.coverageStartAt,
         coverageEndAt: freshness.coverageEndAt,
         rangeStart: `${rangeStart}T00:00:00.000Z`,
-        rangeEnd: `${rangeEnd}T23:59:59.999Z`
+        // Today is an open interval. Requiring 23:59:59 would make a run
+        // completed at 15:00 appear incomplete until the next day.
+        rangeEnd: this.now().toISOString()
       });
       // Data-first: return whatever rows exist in storage. Import lifecycle is
       // never a reason to withhold stored rows (plan §8.3); consent group must

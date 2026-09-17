@@ -11,6 +11,7 @@ extension HealthBootstrapViewModel {
         } catch {
             isError = true
             statusMessage = error.localizedDescription
+            AppMetrics.recordSignIn(.failed)
             reportActionFailure(statusMessage)
         }
     }
@@ -32,6 +33,8 @@ extension HealthBootstrapViewModel {
         case .success(let authorization):
             await signInWithApple(authorization)
         case .failure(let error):
+            let cancelled = Self.isAppleSignInCancelled(error)
+            AppMetrics.recordSignIn(cancelled ? .cancelled : .failed)
             isError = true
             statusMessage = error.localizedDescription
             reportActionFailure(statusMessage)
@@ -115,10 +118,20 @@ extension HealthBootstrapViewModel {
             )
             try storeSession(session)
             self.auth.currentAppleNonce = nil
+            AppMetrics.recordSignIn(.success)
+            AppMetrics.flush(force: true)
             return "Signed in with Apple as \(signedInSummary)."
         }
         if hasAccessToken {
             await startup()
+        } else {
+            AppMetrics.recordSignIn(.failed)
         }
+    }
+
+    static func isAppleSignInCancelled(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == ASAuthorizationError.errorDomain
+            && nsError.code == ASAuthorizationError.canceled.rawValue
     }
 }

@@ -2,5 +2,6 @@
 // Xcode Cloud does not receive ignored *.private.xcconfig files.
 SUPABASE_URL = https:/$()/ksnwafshxbhtezxwcsjq.supabase.co
 SUPABASE_ANON_KEY = sb_publishable_1qUu6v8qEAX6qogBR_MobQ_VrJ5FCAT
+OTLP_METRICS_ENDPOINT = https:/$()/telemetry.deepanshujain.me/v1/metrics
 
 #include? "Release.private.xcconfig"

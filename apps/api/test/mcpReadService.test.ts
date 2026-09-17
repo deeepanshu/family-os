@@ -577,7 +577,7 @@ describe("HealthMcpReadService", () => {
   });
 
   it("keeps completed coverage semantics when a newer attempt is in progress", async () => {
-    const repo = new InMemoryFamilyRepository();
+    const repo = new InMemoryFamilyRepository({ healthKitNow: fixedNow });
     const { api, token, profileId } = await seedUserWithHealthData(repo, userId);
     const service = await serviceFor(repo);
 

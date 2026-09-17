@@ -156,17 +156,20 @@ export class InMemoryFamilyRepository implements FamilyRepository {
   private readonly mcpConnectionGrants = new Map<string, McpConnectionGrant>();
   private readonly deletedUserIds = new Set<string>();
   private readonly appleDisplayNames = new Map<string, string>();
-  constructor() {
-    this.healthKit = new MemoryHealthKitEngine({
-      requireActiveMember: (userId) => this.requireActiveMember(userId),
-      getSelfProfile: (userId) => this.getSelfProfile(userId),
-      requireReadablePerson: (actorUserId, personId) => {
-        const profile = this.requireReadablePerson(actorUserId, personId);
-        return { id: profile.id, familyId: profile.familyId };
+  constructor(options: { healthKitNow?: () => Date } = {}) {
+    this.healthKit = new MemoryHealthKitEngine(
+      {
+        requireActiveMember: (userId) => this.requireActiveMember(userId),
+        getSelfProfile: (userId) => this.getSelfProfile(userId),
+        requireReadablePerson: (actorUserId, personId) => {
+          const profile = this.requireReadablePerson(actorUserId, personId);
+          return { id: profile.id, familyId: profile.familyId };
+        },
+        audit: (input) => this.audit(input),
+        bloodPressureReadings: this.bloodPressureReadings
       },
-      audit: (input) => this.audit(input),
-      bloodPressureReadings: this.bloodPressureReadings
-    });
+      options.healthKitNow
+    );
   }
 
   async createFamily(input: CreateFamilyInput): Promise<CurrentFamilyResponse> {

@@ -2,7 +2,7 @@ import { createRemoteJWKSet, decodeJwt, decodeProtectedHeader, jwtVerify, type J
 import { createMiddleware } from "hono/factory";
 import type { AppConfig } from "./config";
 import { HttpError } from "./errors";
-
+import { logWarn } from "./logging/otelLogs";
 export type AuthUser = {
   id: string;
   email?: string;
@@ -141,28 +141,28 @@ function jwksForIssuer(issuer: string) {
 }
 
 function logTokenVerificationFailure(token: string, error: unknown) {
+  const errorMessage = error instanceof Error ? error.message : String(error);
   try {
     const header = decodeProtectedHeader(token);
     const claims = decodeJwt(token);
-    console.warn(
-      JSON.stringify({
-        event: "auth_token_verification_failed",
-        alg: header.alg,
-        kid: typeof header.kid === "string" ? "present" : "missing",
-        iss: claims.iss,
-        aud: claims.aud,
-        role: claims.role,
-        hasSub: Boolean(claims.sub),
-        error: error instanceof Error ? error.message : String(error)
-      })
-    );
+    const audience = claims.aud;
+    logWarn("auth_token_verification_failed", {
+      alg: typeof header.alg === "string" ? header.alg : undefined,
+      kid: typeof header.kid === "string" ? "present" : "missing",
+      iss: typeof claims.iss === "string" ? claims.iss : undefined,
+      aud: Array.isArray(audience)
+        ? audience.join(",")
+        : typeof audience === "string"
+          ? audience
+          : undefined,
+      role: typeof claims.role === "string" ? claims.role : undefined,
+      hasSub: Boolean(claims.sub),
+      error: errorMessage
+    });
   } catch {
-    console.warn(
-      JSON.stringify({
-        event: "auth_token_verification_failed",
-        parseable: false,
-        error: error instanceof Error ? error.message : String(error)
-      })
-    );
+    logWarn("auth_token_verification_failed", {
+      parseable: false,
+      error: errorMessage
+    });
   }
 }

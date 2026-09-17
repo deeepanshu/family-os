@@ -322,6 +322,20 @@ final class HealthKitRunEngineTests: XCTestCase {
         XCTAssertEqual(eligibility.skipped, [.sleep, .activity])
     }
 
+    func testBackgroundSkipReasonDistinguishesActivityFromImport() {
+        XCTAssertEqual(
+            HealthKitBackgroundSync.backgroundSkipReason(for: .activity, needingInitialImport: []),
+            .notBackgroundEnabled
+        )
+        XCTAssertEqual(
+            HealthKitBackgroundSync.backgroundSkipReason(
+                for: .sleep,
+                needingInitialImport: [HealthKitSyncMetric.sleep.rawValue]
+            ),
+            .needsImport
+        )
+    }
+
     func testObserverWakeRunsSingleImportedMetricWhenBackgrounded() {
         guard let workout = Optional(HKObjectType.workoutType()) else {
             return XCTFail("Missing workout type")

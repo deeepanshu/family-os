@@ -416,6 +416,7 @@ enum HealthKitBackgroundSync {
     }
 
     private static func handleProcessingTask(_ task: BGProcessingTask) {
+        AppMetrics.increment("ios.bg.tasks", attributes: ["kind": "processing"])
         scheduleBackgroundSync()
         scheduleAppRefresh()
         let handle = BGProcessingHandle(task)
@@ -433,6 +434,7 @@ enum HealthKitBackgroundSync {
     }
 
     private static func handleRefreshTask(_ task: BGAppRefreshTask) {
+        AppMetrics.increment("ios.bg.tasks", attributes: ["kind": "refresh"])
         scheduleAppRefresh()
         let handle = BGRefreshHandle(task)
         task.expirationHandler = {
@@ -460,10 +462,12 @@ enum HealthKitBackgroundSync {
             let store = try HealthKitSyncStore.shared
             guard try store.configuration() != nil else {
                 CrashReporting.log("healthkit_fg_drain_skip_no_config")
+                AppMetrics.recordHealthKitSkip(reason: "become_active", skipReason: .noConfig)
                 return
             }
             guard let token = await HealthSessionRefresher.freshAccessToken(), !token.isEmpty else {
                 CrashReporting.log("healthkit_fg_drain_skip_no_token")
+                AppMetrics.recordHealthKitSkip(reason: "become_active", skipReason: .noToken)
                 return
             }
             let baseURL = loadBaseURL()
@@ -487,6 +491,7 @@ enum HealthKitBackgroundSync {
                 .drainFinished,
                 extra: ["reason": "become_active", "applied": String(applied)]
             )
+            AppMetrics.recordHealthKitDrain(applied > 0 ? .applied : .empty)
         } catch {
             CrashReporting.healthKitNonFatal(
                 .batchFailed,
@@ -494,6 +499,7 @@ enum HealthKitBackgroundSync {
                 message: "fg_drain_failed",
                 underlying: error
             )
+            AppMetrics.recordHealthKitDrain(.failed)
         }
     }
 
@@ -505,15 +511,29 @@ enum HealthKitBackgroundSync {
         metrics: Set<HealthKitSyncMetric>? = nil,
         wallTimeoutSeconds: TimeInterval? = nil
     ) async {
+        let syncStartedAt = Date()
+        var outcome = AppMetrics.SyncRunOutcome.skipped
+        defer {
+            AppMetrics.recordSyncRun(reason: reason, outcome: outcome)
+            AppMetrics.observeDuration(
+                "ios.healthkit.sync.duration.seconds",
+                seconds: Date().timeIntervalSince(syncStartedAt),
+                attributes: ["reason": reason, "outcome": outcome.rawValue]
+            )
+            AppMetrics.flush(force: true)
+        }
+
         CrashReporting.healthKit(.syncStarted, extra: ["reason": reason, "mode": "background"])
         do {
             let store = try HealthKitSyncStore.shared
             guard let config = try store.configuration() else {
                 CrashReporting.log("healthkit_bg_sync_skip_no_config")
+                AppMetrics.recordHealthKitSkip(reason: reason, skipReason: .noConfig)
                 return
             }
             guard await HealthSessionRefresher.freshAccessToken() != nil else {
                 CrashReporting.log("healthkit_bg_sync_skip_no_token")
+                AppMetrics.recordHealthKitSkip(reason: reason, skipReason: .noToken)
                 return
             }
 
@@ -523,6 +543,7 @@ enum HealthKitBackgroundSync {
             let scoped = enabled.intersection(requested)
             guard !scoped.isEmpty else {
                 CrashReporting.log("healthkit_bg_sync_skip_no_groups")
+                AppMetrics.recordHealthKitSkip(reason: reason, skipReason: .noGroups)
                 return
             }
 
@@ -535,6 +556,13 @@ enum HealthKitBackgroundSync {
             )
             let eligible = eligibility.eligible
             let skipped = eligibility.skipped
+            for metric in skipped {
+                AppMetrics.recordHealthKitSkip(
+                    reason: reason,
+                    skipReason: backgroundSkipReason(for: metric, needingInitialImport: needingImport),
+                    group: metric.scopeMetricKey
+                )
+            }
             if !skipped.isEmpty {
                 CrashReporting.log(
                     "healthkit_bg_sync_skip_needs_import groups=\(skipped.map(\.rawValue).joined(separator: ","))"
@@ -549,6 +577,7 @@ enum HealthKitBackgroundSync {
                 try await HealthKitDatabaseAccess.assertAccessible()
             } catch {
                 CrashReporting.log("healthkit_bg_sync_skip_database_inaccessible reason=\(reason)")
+                AppMetrics.recordHealthKitSkip(reason: reason, skipReason: .databaseInaccessible)
                 scheduleBackgroundSync()
                 scheduleAppRefresh()
                 return
@@ -645,6 +674,11 @@ enum HealthKitBackgroundSync {
                                 CrashReporting.log(
                                     "healthkit_bg_sync_skip_no_budget reason=\(reason) group=\(metric.rawValue) elapsed=\(Int(elapsed))"
                                 )
+                                AppMetrics.recordHealthKitSkip(
+                                    reason: reason,
+                                    skipReason: .noBudget,
+                                    group: metric.scopeMetricKey
+                                )
                                 break
                             }
                             let metricStarted = Date()
@@ -659,6 +693,7 @@ enum HealthKitBackgroundSync {
                                     appliedCount: result.appliedCount,
                                     reason: reason
                                 )
+                                AppMetrics.recordHealthKitCompleted(reason: reason, group: metric.scopeMetricKey)
                             } catch {
                                 CrashReporting.log(
                                     "healthkit_bg_metric_failed reason=\(reason) group=\(metric.rawValue) ms=\(Int(Date().timeIntervalSince(metricStarted) * 1000))"
@@ -666,6 +701,11 @@ enum HealthKitBackgroundSync {
                                 if isLockedHealthKitError(error) {
                                     CrashReporting.log(
                                         "healthkit_bg_sync_skip_database_inaccessible reason=\(reason) group=\(metric.rawValue)"
+                                    )
+                                    AppMetrics.recordHealthKitSkip(
+                                        reason: reason,
+                                        skipReason: .databaseInaccessible,
+                                        group: metric.scopeMetricKey
                                     )
                                     break
                                 }
@@ -677,6 +717,11 @@ enum HealthKitBackgroundSync {
                                     group: metric.rawValue,
                                     metric: metric.scopeMetricKey,
                                     underlying: error
+                                )
+                                AppMetrics.recordHealthKitFailed(
+                                    reason: reason,
+                                    group: metric.scopeMetricKey,
+                                    error: error
                                 )
                             }
                         }
@@ -693,11 +738,14 @@ enum HealthKitBackgroundSync {
                 }
             } catch HealthKitRunError.runInProgress {
                 CrashReporting.log("healthkit_bg_sync_skip_run_in_progress")
+                AppMetrics.recordHealthKitSkip(reason: reason, skipReason: .runInProgress)
                 return
             } catch {
+                outcome = .failed
                 CrashReporting.log("healthkit_observer_sync_timeout \(error.localizedDescription)")
                 return
             }
+            outcome = .completed
             CrashReporting.healthKit(.syncCompleted, extra: ["reason": reason, "mode": "background"])
         } catch {
             CrashReporting.healthKitNonFatal(
@@ -706,6 +754,7 @@ enum HealthKitBackgroundSync {
                 message: "bg_bounded_sync_failed",
                 underlying: error
             )
+            outcome = .failed
         }
     }
 
@@ -752,6 +801,16 @@ enum HealthKitBackgroundSync {
             enabled.contains($0) && (!backgroundMetrics.contains($0) || needingInitialImport.contains($0.rawValue))
         }
         return (eligible, skipped)
+    }
+
+    static func backgroundSkipReason(
+        for metric: HealthKitSyncMetric,
+        needingInitialImport: Set<String>
+    ) -> AppMetrics.SkipReason {
+        if !backgroundMetrics.contains(metric) {
+            return .notBackgroundEnabled
+        }
+        return .needsImport
     }
 
     private static func loadBaseURL() -> String {

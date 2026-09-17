@@ -86,6 +86,67 @@ Do not leave a test-crash control in production UI.
 Do not send blood pressure/glucose values, free-text notes, or auth tokens through
 `CrashReporting.record` / `log`. Prefer error domain/code and short, non-PHI context.
 
+
+## iOS Metrics (self-hosted)
+
+Release builds emit fixed operational metrics through OTLP/HTTP:
+
+```text
+FamilyStack → https://telemetry.deepanshujain.me/v1/metrics
+           → Cloudflare Access → telemetry.lab:4318
+           → otel-collector → Prometheus → Grafana
+```
+
+- DEBUG collection is off by default. Use the `-FamilyOSMetricsSmoke` launch
+  argument to send to `https://telemetry.deepanshujain.me/v1/metrics`.
+- Release metrics require `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`.
+  Add both as Xcode Cloud environment variables; `ci_pre_xcodebuild.sh` writes
+  them to the ignored release xcconfig before building. Xcode Cloud archives
+  **fail closed** if either variable is unset, so a Release IPA cannot ship
+  with metrics silently disabled.
+- The Access service token is a write-only anti-abuse control, not a durable
+  secret: it ships in the signed app. Scope its Cloudflare Access policy only
+  to `telemetry.deepanshujain.me`.
+- Metrics are launch/background counts, bootstrap outcomes, and HealthKit-sync
+  outcomes/durations/skips only. Never add health values, dates, free-text,
+  tokens, email, user IDs, or request IDs as metric attributes.
+- `ios.bootstrap.requests{outcome}` — `success`, `unauthorized`, or `error`.
+- `ios.auth.sign_in{outcome}` — `success`, `cancelled`, or `failed`.
+- `ios.auth.refresh{source,outcome}` — `source` is `ui` or `background`.
+  `outcome` is `success`, `failed`, `missing_token`, `missing_refresh`, or
+  `missing_config`.
+- `ios.auth.sign_out{reason}` — `user`, `unauthorized`, `refresh_failed`, or
+  `account_deleted`.
+- `ios.auth.api_retry{outcome}` — Health API `401` recovered by a forced
+  refresh, or not (`recovered` / `failed`).
+- `ios.healthkit.sync.skips{reason,skip_reason,group}` — why a wake did not
+  upload. `reason` is the trigger (`bg_task`, `bg_refresh`, `observer`,
+  `become_active`, `foreground`, `sync`, `initial_import`, `repair_import`).
+  `skip_reason` is a fixed enum (`no_token`, `no_config`,
+  `not_background_enabled`, `needs_import`, `database_inaccessible`,
+  `run_in_progress`, `no_budget`, `no_groups`, `missing_profile`,
+  `wrong_profile`, `unavailable`, `consent_missing`).
+- `ios.healthkit.sync.failures{reason,group,code}` — `code` is an allowlisted
+  API error (`unauthorized`, `missing_token`, `healthkit_locked`, …) or
+  `other`.
+- `ios.healthkit.drain{outcome}` — leftover-queue drain: `applied`, `empty`,
+  or `failed`.
+
+- Each export includes resource identity:
+  - `service.version` — marketing version (`CFBundleShortVersionString`)
+  - `ios.build` — build number (`CFBundleVersion`)
+  - `deployment.environment` — Family OS env (`local` or `release`)
+  - `ios.build_configuration` — Xcode configuration (`debug` or `release`)
+
+The dashboard is **Family OS iOS** (`family-os-ios`) in Grafana's Apps folder.
+It is synced from `grafana/dashboards/family-os-ios.json` during app deploy.
+
+### Metrics smoke test
+
+Debug builds need `-FamilyOSMetricsSmoke` plus `CF_ACCESS_CLIENT_ID` /
+`CF_ACCESS_CLIENT_SECRET` in `Local.private.xcconfig`. Confirm `app_ios_*`
+appears in Prometheus. The endpoint is HTTPS and Cloudflare Access-protected.
+
 ## Environments
 
 Debug builds use the `local` environment:
@@ -107,6 +168,9 @@ The app reads these generated Info.plist keys:
 - `HEALTH_API_BASE_URL`
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
+- `OTLP_METRICS_ENDPOINT`
+- `CF_ACCESS_CLIENT_ID`
+- `CF_ACCESS_CLIENT_SECRET`
 
 `SUPABASE_URL` and `SUPABASE_ANON_KEY` are read from the tracked base config
 files. The Release values are intentionally tracked because they are

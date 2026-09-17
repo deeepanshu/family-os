@@ -3,7 +3,7 @@ import Foundation
 enum HealthAPIError: LocalizedError {
     case invalidURL
     case missingToken
-    case badStatus(Int, String?, code: String? = nil)
+    case badStatus(Int, String?, code: String? = nil, requestId: String? = nil)
 
     var errorDescription: String? {
         switch self {
@@ -11,18 +11,64 @@ enum HealthAPIError: LocalizedError {
             return "The Health API base URL is invalid."
         case .missingToken:
             return "Paste a Supabase access token first."
-        case .badStatus(let status, let message, _):
+        case .badStatus(let status, let message, _, _):
             return message.map { "Health API returned HTTP \(status): \($0)" } ?? "Health API returned HTTP \(status)."
         }
     }
 
     var errorCode: String? {
         switch self {
-        case let .badStatus(_, _, code):
+        case let .badStatus(_, _, code, _):
             return code
         default:
             return nil
         }
+    }
+
+    var requestId: String? {
+        switch self {
+        case let .badStatus(_, _, _, requestId):
+            return requestId
+        default:
+            return nil
+        }
+    }
+
+    var httpStatus: Int? {
+        switch self {
+        case let .badStatus(status, _, _, _):
+            return status
+        default:
+            return nil
+        }
+    }
+
+    enum MetricCode: String, Sendable {
+        case unauthorized
+        case missingToken = "missing_token"
+        case healthkitLocked = "healthkit_locked"
+        case syncTimeout = "sync_timeout"
+        case syncCancelled = "sync_cancelled"
+        case syncFailed = "sync_failed"
+        case syncIncomplete = "sync_incomplete"
+        case bpSamplesEmpty = "bp_samples_empty"
+        case consentMissing = "consent_missing"
+        case installationInactive = "installation_inactive"
+        case other
+    }
+
+    /// Low-cardinality failure label for OTLP. Unknown server codes collapse to `other`.
+    var metricCode: MetricCode {
+        if httpStatus == 401 {
+            return .unauthorized
+        }
+        if case .missingToken = self {
+            return .missingToken
+        }
+        if let code = errorCode, let known = MetricCode(rawValue: code), known != .other {
+            return known
+        }
+        return .other
     }
 }
 
@@ -534,7 +580,12 @@ struct HealthAPIClient {
         }
         guard (200..<300).contains(http.statusCode) else {
             let error = try? JSONDecoder().decode(APIErrorEnvelope.self, from: data)
-            throw HealthAPIError.badStatus(http.statusCode, error?.error.message, code: error?.error.code)
+            throw HealthAPIError.badStatus(
+                http.statusCode,
+                error?.error.message,
+                code: error?.error.code,
+                requestId: Self.correlationId(from: http)
+            )
         }
     }
 
@@ -566,7 +617,12 @@ struct HealthAPIClient {
             }
             #endif
             let error = try? JSONDecoder().decode(APIErrorEnvelope.self, from: data)
-            throw HealthAPIError.badStatus(http.statusCode, error?.error.message, code: error?.error.code)
+            throw HealthAPIError.badStatus(
+                http.statusCode,
+                error?.error.message,
+                code: error?.error.code,
+                requestId: Self.correlationId(from: http)
+            )
         }
 
         #if DEBUG
@@ -582,6 +638,15 @@ struct HealthAPIClient {
         let trimmedBase = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let trimmedPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         return URL(string: "\(trimmedBase)/\(trimmedPath)")
+    }
+
+    private static func correlationId(from http: HTTPURLResponse) -> String? {
+        guard let value = http.value(forHTTPHeaderField: "x-request-id")?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else {
+            return nil
+        }
+        return String(value.prefix(64))
     }
 }
 
