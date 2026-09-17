@@ -3,6 +3,10 @@ import XCTest
 @testable import FamilyOS
 
 final class AppMetricsTests: XCTestCase {
+    override func tearDown() {
+        AppMetrics.resetForTesting()
+        super.tearDown()
+    }
     func testFlushEmitsCumulativeOperationalCountersAsOTLPHTTP() throws {
         let delivered = expectation(description: "OTLP metrics request")
         let recorder = RequestRecorder(expectation: delivered)
