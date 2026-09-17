@@ -57,7 +57,7 @@ export function createApp(options: AppOptions = {}) {
         config.OTEL_RESOURCE_ATTRIBUTES,
         config.NODE_ENV
       ),
-      serviceVersion: "0.1.0",
+      serviceVersion: "0.1.1",
       enabled: Boolean(config.OTEL_EXPORTER_OTLP_ENDPOINT)
     });
     if (config.OTEL_EXPORTER_OTLP_ENDPOINT) {
