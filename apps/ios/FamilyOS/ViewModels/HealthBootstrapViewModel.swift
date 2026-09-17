@@ -374,11 +374,17 @@ final class HealthBootstrapViewModel: ObservableObject {
         healthKit.linkedProfileId = response.selfProfile?.id
     }
 
-    func request(showsFeedback: Bool = false, _ action: () async throws -> String) async {
+    func request(
+        requiresSession: Bool = true,
+        showsFeedback: Bool = false,
+        _ action: () async throws -> String
+    ) async {
         isError = false
         statusMessage = "Contacting Health API..."
         do {
-            try await refreshSessionIfNeeded()
+            if requiresSession {
+                try await refreshSessionIfNeeded()
+            }
             statusMessage = try await action()
             if showsFeedback {
                 reportActionResult(statusMessage)
