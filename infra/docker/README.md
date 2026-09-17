@@ -3,6 +3,15 @@
 Production deployment runs the Health API with Docker Compose and
 loads secrets from the repo-local ignored `.env` file.
 
+## Compose layout
+
+- `compose.yml` — base file (the app: services, networks, secrets, logging).
+  Local dev runs this file alone; the API binds loopback-only.
+- `compose.homelab.yml` — production overlay used only by the homelab manager
+  (`compose_files: [compose.yml, compose.homelab.yml]`). Publishes port 3001
+  on all interfaces for the Cloudflare Tunnel container and sets the OTLP
+  endpoint.
+
 Images are published by GitHub Actions to:
 
 ```text
