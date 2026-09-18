@@ -2,7 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
 import { extractBearerToken, requireAuth, type AppVariables } from "../auth";
-import { isMcpOAuthClientAllowed, type AppConfig } from "../config";
+import type { AppConfig } from "../config";
 import { HttpError } from "../errors";
 import { renderOAuthConsentPage } from "../oauth/consentPageHtml";
 import {
@@ -30,8 +30,7 @@ export type OAuthConsentRouteDeps = {
  * - POST /consent/decision        Create Family OS grant (approve) then approve/deny in Supabase
  *
  * The OAuth client ID is always taken from Supabase authorization details, never from the browser body.
- * Optional MCP_ALLOWED_OAUTH_CLIENT_IDS may further restrict which clients can receive a grant;
- * when empty, any client the user consents to is allowed (DCR-friendly).
+ * An active Family OS connection grant binds consent to that client.
  */
 export function createOAuthConsentRoutes(deps: OAuthConsentRouteDeps) {
   const routes = new Hono<{ Variables: AppVariables }>();
@@ -62,10 +61,6 @@ export function createOAuthConsentRoutes(deps: OAuthConsentRouteDeps) {
       });
     }
 
-    const oauthClientId = details.client.client_id?.trim();
-    if (oauthClientId) {
-      assertMcpOAuthClientAllowed(deps.config, oauthClientId);
-    }
 
     return c.json({
       data: {
@@ -108,7 +103,6 @@ export function createOAuthConsentRoutes(deps: OAuthConsentRouteDeps) {
       );
     }
 
-    assertMcpOAuthClientAllowed(deps.config, oauthClientId);
 
     // Create the Family OS grant before Supabase approval so the client has access
     // as soon as it exchanges the code. If Supabase approval fails, revoke immediately
@@ -142,16 +136,6 @@ export function createOAuthConsentRoutes(deps: OAuthConsentRouteDeps) {
   return routes;
 }
 
-function assertMcpOAuthClientAllowed(config: AppConfig, oauthClientId: string): void {
-  if (isMcpOAuthClientAllowed(config, oauthClientId)) {
-    return;
-  }
-  throw new HttpError(
-    403,
-    "oauth_client_not_allowed",
-    "This OAuth client is not allowlisted for Family OS MCP health access."
-  );
-}
 
 function requireAccessToken(authorizationHeader: string | undefined): string {
   const token = extractBearerToken(authorizationHeader);

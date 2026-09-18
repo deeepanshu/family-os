@@ -222,21 +222,17 @@ Environment:
 
 ```text
 MCP_PUBLIC_ORIGIN=https://familyos.deepanshujain.me
-MCP_PUBLIC_PATH=/health/api/mcp
-# Optional. Empty = any OAuth client the user consents to (DCR-friendly).
-# MCP_ALLOWED_OAUTH_CLIENT_IDS=chatgpt-client-uuid,other-uuid
 SUPABASE_URL=https://<project>.supabase.co
 SUPABASE_ANON_KEY=...
 ```
 
 - `MCP_PUBLIC_ORIGIN` is **origin only** (scheme + host). Paths, queries, and
-  fragments are rejected so they are not silently combined into
-  `.../health/api/mcp`. Production requires `https:`. Non-production may use
+  fragments are rejected. Production requires `https:`. Non-production may use
   `http:` only on loopback (`localhost`, `127.0.0.1`, `::1`).
-- `MCP_ALLOWED_OAUTH_CLIENT_IDS` is **optional**. When empty (recommended with
-  Dynamic Client Registration — Grok/ChatGPT mint a new client id each connect),
-  any OAuth client may receive a Family OS health grant after user consent.
-  When set, only those Supabase OAuth client IDs may grant.
+- `MCP_PUBLIC_PATH` defaults to `/health/api/mcp`; leave it out of production
+  environment configuration unless the public MCP route changes.
+- Dynamic OAuth clients may receive a health grant after user consent. The API
+  still requires an active `mcp_connection_grants` row for that user and client.
 
 Supabase Auth OAuth Server settings:
 
@@ -245,9 +241,8 @@ Supabase Auth OAuth Server settings:
 
 Consent flow creates the Family OS `mcp_connection_grants` row using the OAuth
 `client_id` from Supabase `getAuthorizationDetails`, never from a browser body.
-Optional client-id allowlist may restrict grants; empty allowlist accepts any
-client after user consent. If Supabase approval then fails, the grant is revoked
-immediately. `POST /health/api/v1/mcp/connections` is not used for grant creation.
+If Supabase approval fails, the grant is revoked immediately.
+`POST /health/api/v1/mcp/connections` is not used for grant creation.
 
 ### JWT audience for MCP tokens
 

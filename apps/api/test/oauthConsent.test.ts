@@ -211,35 +211,11 @@ describe("OAuth consent", () => {
     expect(await repo.listConnections(userId)).toHaveLength(0);
   });
 
-  it("rejects approve when OAuth client is not on the MCP allowlist", async () => {
+
+  it("creates a grant for a dynamically registered OAuth client", async () => {
     const repo = new InMemoryFamilyRepository();
     const oauth = mockOAuthClient();
-    const api = consentApp(repo, oauth, {
-      MCP_ALLOWED_OAUTH_CLIENT_IDS: "only-this-client,another-allowed"
-    });
-    const token = await sessionJwt(userId);
-
-    const response = await api.request("/api/oauth/consent/decision", {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${token}`,
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({ authorizationId, decision: "approve" })
-    });
-    expect(response.status).toBe(403);
-    const body = await response.json();
-    expect(body.error.code).toBe("oauth_client_not_allowed");
-    expect(await repo.listConnections(userId)).toHaveLength(0);
-    expect(oauth.approveAuthorization).not.toHaveBeenCalled();
-  });
-
-  it("allows approve when OAuth client is on the MCP allowlist", async () => {
-    const repo = new InMemoryFamilyRepository();
-    const oauth = mockOAuthClient();
-    const api = consentApp(repo, oauth, {
-      MCP_ALLOWED_OAUTH_CLIENT_IDS: `${oauthClientId},other-client`
-    });
+    const api = consentApp(repo, oauth);
     const token = await sessionJwt(userId);
 
     const response = await api.request("/api/oauth/consent/decision", {

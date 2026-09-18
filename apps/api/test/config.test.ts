@@ -89,8 +89,7 @@ describe("configuration", () => {
       })
     ).toThrow("SUPABASE_SERVICE_ROLE_KEY must be configured in production");
 
-    // Empty OAuth client allowlist is allowed (DCR clients mint a new id each connect).
-    const open = loadConfig({
+    const valid = loadConfig({
       NODE_ENV: "production",
       DATABASE_URL: "postgres://family_os:family_os@localhost:5432/family_os",
       MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
@@ -98,7 +97,7 @@ describe("configuration", () => {
       SUPABASE_ANON_KEY: "anon-key",
       SUPABASE_SERVICE_ROLE_KEY: "service-role-key"
     });
-    expect(open.MCP_ALLOWED_OAUTH_CLIENT_IDS).toEqual([]);
+    expect(valid.MCP_PUBLIC_ORIGIN).toBe("https://familyos.deepanshujain.me");
   });
 
   it("normalizes MCP public path", () => {
@@ -148,7 +147,6 @@ describe("configuration", () => {
         MCP_PUBLIC_ORIGIN: "http://familyos.deepanshujain.me",
         SUPABASE_URL: "https://project.supabase.co",
         SUPABASE_ANON_KEY: "anon-key",
-        MCP_ALLOWED_OAUTH_CLIENT_IDS: "chatgpt-prod"
       })
     ).toThrow(/must use https: in production/);
 
@@ -183,11 +181,4 @@ describe("configuration", () => {
     expect(secure.MCP_PUBLIC_ORIGIN).toBe("https://familyos.deepanshujain.me");
   });
 
-  it("parses MCP OAuth client allowlist", () => {
-    const config = loadConfig({
-      NODE_ENV: "test",
-      MCP_ALLOWED_OAUTH_CLIENT_IDS: " client-a , client-b,client-a "
-    });
-    expect(config.MCP_ALLOWED_OAUTH_CLIENT_IDS).toEqual(["client-a", "client-b"]);
-  });
 });

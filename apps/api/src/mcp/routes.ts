@@ -70,7 +70,6 @@ export function createMcpRoutes(deps: McpRouteDeps) {
       healthKit: deps.repositories.healthKit,
       mcpConnections: deps.repositories.mcpConnections,
       auditLogs: deps.repositories.auditLogs,
-      allowedOAuthClientIds: deps.config.MCP_ALLOWED_OAUTH_CLIENT_IDS,
       rateLimiter: new McpRateLimiter(
         deps.config.MCP_RATE_LIMIT_WINDOW_MS,
         deps.config.MCP_RATE_LIMIT_MAX_CALLS

@@ -129,7 +129,7 @@ async function seedUserWithHealthData(
   return { api, token, profileId };
 }
 
-async function serviceFor(repo: InMemoryFamilyRepository, options: { allowedOAuthClientIds?: string[] } = {}) {
+async function serviceFor(repo: InMemoryFamilyRepository) {
   const repositories = repositoriesFromFamilyRepository(repo);
   await repositories.mcpConnections.createConnection({
     userId,
@@ -137,10 +137,10 @@ async function serviceFor(repo: InMemoryFamilyRepository, options: { allowedOAut
     capabilities: ["health_read"],
     consentVersion: "2026-07-18"
   });
-  return new HealthMcpReadService({ ...repositories, now: fixedNow, ...options });
+  return new HealthMcpReadService({ ...repositories, now: fixedNow });
 }
 
-describe("MCP product allowlist contract", () => {
+describe("MCP read service", () => {
   it("exposes exactly steps, blood_pressure, sleep, and workout", () => {
     expect([...MCP_HEALTH_METRICS].sort()).toEqual(["blood_pressure", "sleep", "steps", "workout"]);
   });
@@ -312,18 +312,6 @@ describe("HealthMcpReadService", () => {
   });
 
 
-  it("denies clients not on the MCP OAuth allowlist even with an active grant", async () => {
-    const repo = new InMemoryFamilyRepository();
-    const { profileId } = await seedUserWithHealthData(repo, userId);
-    const service = await serviceFor(repo, { allowedOAuthClientIds: ["only-other-client"] });
-
-    await expect(
-      service.getHealthData(
-        { userId, oauthClientId },
-        { personId: profileId, healthMetric: "sleep", rangeDays: 7 }
-      )
-    ).rejects.toMatchObject({ status: 403, code: "oauth_client_not_allowed" });
-  });
 
   it("denies a different-family profile even when the UUID is supplied by the model", async () => {
     const repo = new InMemoryFamilyRepository();
