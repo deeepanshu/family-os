@@ -13,14 +13,15 @@ afterEach(() => {
 const testUserId = "00000000-0000-4000-8000-000000000001";
 const jwtSecret = "test-supabase-jwt-secret-with-enough-length";
 
-function app() {
+function app(corsOrigin?: string) {
   return createApp({
     config: {
       NODE_ENV: "test",
       PORT: 3001,
       HEALTH_API_ENABLE_DEV_AUTH: false,
       SUPABASE_JWT_SECRET: jwtSecret,
-      SUPABASE_URL: "https://project.supabase.co"
+      SUPABASE_URL: "https://project.supabase.co",
+      ...(corsOrigin ? { HEALTH_API_CORS_ORIGIN: corsOrigin } : {})
     }
   });
 }
@@ -55,18 +56,30 @@ describe("health API bootstrap", () => {
     });
   });
 
-  it("returns CORS headers for health API preflight requests", async () => {
+  it("does not enable CORS without an allowed origin", async () => {
     const response = await app().request(`${HEALTH_API_PREFIX}/families`, {
       method: "OPTIONS",
       headers: {
-        origin: "http://localhost:5173",
+        origin: "https://console.familyos.test",
+        "access-control-request-method": "POST"
+      }
+    });
+
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("returns CORS headers for the configured origin", async () => {
+    const response = await app("https://console.familyos.test").request(`${HEALTH_API_PREFIX}/families`, {
+      method: "OPTIONS",
+      headers: {
+        origin: "https://console.familyos.test",
         "access-control-request-method": "POST",
         "access-control-request-headers": "authorization,content-type"
       }
     });
 
     expect(response.status).toBe(204);
-    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://console.familyos.test");
     expect(response.headers.get("access-control-allow-methods")).toContain("POST");
     expect(response.headers.get("access-control-allow-headers")).toContain("authorization");
   });

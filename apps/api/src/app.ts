@@ -85,7 +85,9 @@ export function createApp(options: AppOptions = {}) {
     await next();
   });
   app.use("*", requestLoggingMiddleware());
-  app.use(`${HEALTH_API_PREFIX}/*`, corsMiddleware());
+  if (config.HEALTH_API_CORS_ORIGIN) {
+    app.use(`${HEALTH_API_PREFIX}/*`, corsMiddleware(config.HEALTH_API_CORS_ORIGIN));
+  }
   app.use(`${HEALTH_API_PREFIX}/*`, writeRateLimitMiddleware(config));
 
   health.get("/healthcheck", (c) => {

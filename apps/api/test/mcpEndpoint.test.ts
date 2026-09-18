@@ -15,7 +15,7 @@ const mcpPath = "/health/api/mcp";
 const mcpResource = `${mcpOrigin}${mcpPath}`;
 const mcpMetadata = `${mcpOrigin}/.well-known/oauth-protected-resource${mcpPath}`;
 
-function app(repo = new InMemoryFamilyRepository()) {
+function app(repo = new InMemoryFamilyRepository(), corsOrigin?: string) {
   return {
     api: createApp({
       config: {
@@ -27,7 +27,8 @@ function app(repo = new InMemoryFamilyRepository()) {
         SUPABASE_ANON_KEY: "test-anon-key",
         MCP_PUBLIC_ORIGIN: mcpOrigin,
         MCP_PUBLIC_PATH: mcpPath,
-        MCP_RESOURCE_NAME: "FamilyStack Health MCP"
+        MCP_RESOURCE_NAME: "FamilyStack Health MCP",
+        ...(corsOrigin ? { HEALTH_API_CORS_ORIGIN: corsOrigin } : {})
       },
       familyRepository: repo
     }),
@@ -158,19 +159,32 @@ describe("MCP endpoint", () => {
     expect((await root.json()).resource).toBe(mcpResource);
   });
 
-  it("returns wildcard CORS headers for MCP preflight requests", async () => {
+  it("does not enable CORS without an allowed origin", async () => {
     const { api } = app();
     const response = await api.request(mcpPath, {
       method: "OPTIONS",
       headers: {
-        origin: "https://chatgpt.com",
+        origin: "https://console.familyos.test",
+        "access-control-request-method": "POST"
+      }
+    });
+
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("returns CORS headers for the configured origin", async () => {
+    const { api } = app(undefined, "https://console.familyos.test");
+    const response = await api.request(mcpPath, {
+      method: "OPTIONS",
+      headers: {
+        origin: "https://console.familyos.test",
         "access-control-request-method": "POST",
         "access-control-request-headers": "authorization,mcp-protocol-version"
       }
     });
 
     expect(response.status).toBe(204);
-    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://console.familyos.test");
     expect(response.headers.get("access-control-allow-headers")).toContain("mcp-protocol-version");
   });
 

@@ -77,24 +77,26 @@ export function createMcpRoutes(deps: McpRouteDeps) {
       )
     });
 
-  routes.use(
-    "*",
-    cors({
-      origin: "*",
-      allowHeaders: [
-        "authorization",
-        "content-type",
-        "accept",
-        "mcp-protocol-version",
-        "mcp-session-id",
-        "last-event-id",
-        "x-request-id"
-      ],
-      allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
-      exposeHeaders: ["mcp-session-id", "mcp-protocol-version", "www-authenticate", "x-request-id"],
-      maxAge: 600
-    })
-  );
+  if (deps.config.HEALTH_API_CORS_ORIGIN) {
+    routes.use(
+      "*",
+      cors({
+        origin: deps.config.HEALTH_API_CORS_ORIGIN,
+        allowHeaders: [
+          "authorization",
+          "content-type",
+          "accept",
+          "mcp-protocol-version",
+          "mcp-session-id",
+          "last-event-id",
+          "x-request-id"
+        ],
+        allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
+        exposeHeaders: ["mcp-session-id", "mcp-protocol-version", "www-authenticate", "x-request-id"],
+        maxAge: 600
+      })
+    );
+  }
 
   routes.get("/healthcheck", (c) => {
     return c.json({

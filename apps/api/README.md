@@ -197,7 +197,7 @@ Runtime hardening knobs:
 
 - The in-memory repository is test-only; the API uses Postgres in every other environment.
 - `HEALTH_API_SYNC_LOCAL_AUTH_USERS` defaults to `true` for non-production Postgres runs and `false` in production.
-- API and MCP endpoints send wildcard CORS headers for browser clients; authentication remains bearer-token based.
+- `HEALTH_API_CORS_ORIGIN` is optional. Unset disables CORS; set one exact browser origin only when a browser client needs it.
 - `SUPABASE_SERVICE_ROLE_KEY` is required in production so account deletion can remove the Auth identity. Missing or blank fails startup.
 - `HEALTH_API_RATE_LIMIT_WINDOW_MS` defaults to `60000`.
 - `HEALTH_API_RATE_LIMIT_MAX_WRITES` defaults to `120` writes per window per bearer token, falling back to IP when no bearer token is present.

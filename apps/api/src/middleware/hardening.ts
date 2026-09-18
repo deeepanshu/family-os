@@ -15,9 +15,9 @@ import {
 
 const writeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
-export function corsMiddleware() {
+export function corsMiddleware(origin: string) {
   return cors({
-    origin: "*",
+    origin,
     allowHeaders: ["authorization", "content-type", "accept", "x-request-id"],
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     exposeHeaders: ["x-request-id"],

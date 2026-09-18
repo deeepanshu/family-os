@@ -26,6 +26,10 @@ describe("configuration", () => {
     });
   });
 
+  it("leaves CORS disabled when its origin is blank", () => {
+    expect(loadConfig({ NODE_ENV: "test", HEALTH_API_CORS_ORIGIN: "" }).HEALTH_API_CORS_ORIGIN).toBeUndefined();
+  });
+
   it("uses the in-memory repository in tests", () => {
     expect(loadConfig({ NODE_ENV: "test" })).toMatchObject({
       repository: "memory",
