@@ -142,7 +142,7 @@ jobs:
     name: Deploy via Komodo
     needs: [changes, build-and-push]
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     if: |
       always() &&
       needs.changes.result == 'success' &&
@@ -150,27 +150,40 @@ jobs:
       (needs.changes.outputs.build != 'true' || needs.build-and-push.result == 'success') &&
       (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
     steps:
-      - name: Trigger Komodo stack deploy
+      - name: Pin IMAGE_TAG and deploy stack
         env:
-          KOMODO_WEBHOOK_SECRET: ${{ secrets.KOMODO_WEBHOOK_SECRET }}
+          KOMODO_API_KEY: ${{ secrets.KOMODO_API_KEY }}
+          KOMODO_API_SECRET: ${{ secrets.KOMODO_API_SECRET }}
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag || needs.changes.outputs.image_tag }}
         run: |
           set -euo pipefail
-          if [ -z "${KOMODO_WEBHOOK_SECRET}" ]; then
-            echo "Missing repo secret KOMODO_WEBHOOK_SECRET" >&2
+          if [ -z "${KOMODO_API_KEY}" ] || [ -z "${KOMODO_API_SECRET}" ]; then
+            echo "Missing KOMODO_API_KEY or KOMODO_API_SECRET" >&2
             exit 1
           fi
 
-          # Stack env IMAGE_TAG=main. This fires after GHCR push of :main.
-          # Synthetic GitHub payload so Komodo's listener matches branch main.
-          BODY="$(jq -nc --arg ref "refs/heads/main" '{ref:$ref}')"
-          SIG="$(printf '%s' "${BODY}" | openssl dgst -sha256 -hmac "${KOMODO_WEBHOOK_SECRET}" | awk '{print $2}')"
+          komodo() {
+            local path="$1"
+            local body="$2"
+            curl -fsS --max-time 120 -X POST \
+              "https://komodo.deepanshujain.me${path}" \
+              -H "content-type: application/json" \
+              -H "x-api-key: ${KOMODO_API_KEY}" \
+              -H "x-api-secret: ${KOMODO_API_SECRET}" \
+              -d "${body}"
+            echo
+          }
 
-          echo "Triggering Komodo deploy (image_tag=${IMAGE_TAG}, stack pulls :main)"
-          curl -fsS --max-time 60 -X POST \
-            "https://komodo.deepanshujain.me/listener/github/stack/family-os/deploy" \
-            -H "Content-Type: application/json" \
-            -H "X-Hub-Signature-256: sha256=${SIG}" \
-            -d "${BODY}"
-          echo
-          echo "Komodo accepted the webhook (deploy runs async). Watch the stack in the UI."
+          # Compose-only deploys keep the current SHA (tag is "main" as a sentinel).
+          if [ "${IMAGE_TAG}" != "main" ]; then
+            echo "FAMILY_OS_IMAGE_TAG=${IMAGE_TAG}"
+            komodo /write "$(jq -nc --arg v "${IMAGE_TAG}" \
+              '{type:"UpdateVariableValue",params:{name:"FAMILY_OS_IMAGE_TAG",value:$v}}')"
+          else
+            echo "Compose-only deploy; leaving FAMILY_OS_IMAGE_TAG unchanged"
+          fi
+
+          echo "DeployStack family-os"
+          komodo /execute "$(jq -nc \
+            '{type:"DeployStack",params:{stack:"family-os"}}')"
+
