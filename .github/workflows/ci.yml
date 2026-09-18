@@ -192,6 +192,7 @@ jobs:
 
       - name: Build iOS app
         run: |
+          xcrun simctl boot "${{ steps.simulator.outputs.udid }}" >/dev/null 2>&1 &
           xcodebuild \
             -project apps/ios/FamilyOS.xcodeproj \
             -scheme FamilyOS \
@@ -201,6 +202,7 @@ jobs:
 
       - name: Test iOS app
         run: |
+          xcrun simctl bootstatus "${{ steps.simulator.outputs.udid }}" -b
           xcodebuild \
             -project apps/ios/FamilyOS.xcodeproj \
             -scheme FamilyOS \
