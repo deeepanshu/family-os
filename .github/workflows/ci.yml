@@ -13,7 +13,7 @@ concurrency:
 jobs:
   changes:
     name: Changed paths
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       api: ${{ steps.filter.outputs.api }}
       ios: ${{ steps.filter.outputs.ios }}
@@ -66,7 +66,7 @@ jobs:
 
   workspace:
     name: Workspace Typecheck
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -87,7 +87,7 @@ jobs:
     name: API Tests
     needs: changes
     if: needs.changes.outputs.api == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgres://family_os:family_os@localhost:5432/family_os
       HEALTH_API_SYNC_LOCAL_AUTH_USERS: "true"
@@ -126,7 +126,7 @@ jobs:
     name: Drizzle Migrations
     needs: changes
     if: needs.changes.outputs.api == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgres://family_os:family_os@localhost:5432/family_os
     steps:
@@ -212,7 +212,7 @@ jobs:
     name: Merge Gate
     if: always()
     needs: [changes, workspace, api, drizzle, ios]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - name: Require jobs for changed paths
         env:
