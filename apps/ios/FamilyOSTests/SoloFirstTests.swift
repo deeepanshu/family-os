@@ -927,6 +927,50 @@ final class SoloFirstTests: XCTestCase {
         MockURLProtocol.headerFieldsByPath = [:]
     }
 
+    /// Correlation is one-directional today: the API echoes `x-request-id` and the
+    /// client reads it back, but never sends one. Without an outbound id, a retry
+    /// or an abandoned run cannot be tied to the server log line.
+    func testHealthAPIClientSendsOutboundRequestId() async throws {
+        MockURLProtocol.statusByPath = [:]
+        MockURLProtocol.headerFieldsByPath = [:]
+        MockURLProtocol.lastRequestByPath = [:]
+        let session = makeMockSession([
+            "/health/api/v1/healthcheck": #"{"data":{"service":"family-os-health-api","status":"ok"}}"#
+        ])
+        let client = HealthAPIClient(session: session)
+
+        _ = try await client.healthcheck(baseURL: "https://test.example.com/health/api/v1")
+
+        let sent = MockURLProtocol.lastRequestByPath["/health/api/v1/healthcheck"]
+        let requestId = try XCTUnwrap(sent?.value(forHTTPHeaderField: "x-request-id"))
+        XCTAssertFalse(requestId.isEmpty, "Every request must carry a correlation id")
+        XCTAssertNotNil(UUID(uuidString: requestId), "The id must be a UUID, got \(requestId)")
+
+        MockURLProtocol.lastRequestByPath = [:]
+    }
+
+    /// Server-side `duration_ms` cannot separate a slow API from a slow phone
+    /// network. A client-observed round trip makes the two comparable on one route.
+    func testHealthAPIClientRecordsRoundTripDuration() async throws {
+        addTeardownBlock { AppMetrics.resetForTesting() }
+        let delivered = expectation(description: "OTLP round trip")
+        delivered.assertForOverFulfill = false
+        let recorder = MetricsRequestRecorder(expectation: delivered)
+        AppMetrics.configureForTesting(endpoint: try XCTUnwrap(URL(string: "http://telemetry.lab:4318/v1/metrics"))) { request in
+            recorder.record(request)
+        }
+        let session = makeMockSession([
+            "/health/api/v1/healthcheck": #"{"data":{"service":"family-os-health-api","status":"ok"}}"#
+        ])
+        let client = HealthAPIClient(session: session)
+        _ = try await client.healthcheck(baseURL: "https://test.example.com/health/api/v1")
+        AppMetrics.flush(force: true)
+
+        await fulfillment(of: [delivered], timeout: 1)
+        let names = try otlpMetricNames(in: recorder.request)
+        XCTAssertTrue(names.contains("ios.http.client.duration.seconds"))
+    }
+
     func testAppleSignInCancelIsNotAFailure() {
         let cancelled = NSError(
             domain: ASAuthorizationError.errorDomain,
@@ -1088,6 +1132,9 @@ private final class MockURLProtocol: URLProtocol {
     nonisolated(unsafe) static var statusByPath: [String: Int] = [:]
     nonisolated(unsafe) static var headerFieldsByPath: [String: [String: String]] = [:]
     nonisolated(unsafe) static var lastBodyByPath: [String: Data] = [:]
+    /// Full request capture (method + headers), for seams a body-only capture
+    /// cannot observe, such as outbound correlation ids.
+    nonisolated(unsafe) static var lastRequestByPath: [String: URLRequest] = [:]
 
     override class func canInit(with request: URLRequest) -> Bool {
         true
@@ -1103,6 +1150,7 @@ private final class MockURLProtocol: URLProtocol {
             return
         }
         let path = url.path
+        MockURLProtocol.lastRequestByPath[path] = request
         MockURLProtocol.lastBodyByPath[path] = request.httpBody
         guard let data = MockURLProtocol.handlers[path] else {
             client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))

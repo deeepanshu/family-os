@@ -25,6 +25,8 @@ type HistogramState = {
 const requestTotals = new Map<CounterKey, { labels: Labels; value: number }>();
 const errorTotals = new Map<CounterKey, { labels: Labels; value: number }>();
 const durationHist = new Map<CounterKey, HistogramState>();
+const healthKitRunFailures = new Map<CounterKey, { labels: Labels; value: number }>();
+
 let inFlight = 0;
 
 let flushTimer: ReturnType<typeof setInterval> | undefined;
@@ -117,6 +119,41 @@ export function recordHttpRequest(input: {
   }
 }
 
+export function healthKitAbandonmentKind(
+  errorCode: string
+): "abandoned" | "failed" | "other" {
+  if (errorCode === "sync_abandoned") {
+    return "abandoned";
+  }
+  if (
+    errorCode === "sync_timeout" ||
+    errorCode === "sync_cancelled" ||
+    errorCode === "sync_failed" ||
+    errorCode === "sync_incomplete"
+  ) {
+    return "failed";
+  }
+  return "other";
+}
+
+export function recordHealthKitRunFailure(input: {
+  group: string;
+  errorCode: string;
+}): void {
+  if (!isOtelEnabled()) {
+    return;
+  }
+  const labels: Labels = {
+    group: input.group,
+    error_code: input.errorCode,
+    abandonment_kind: healthKitAbandonmentKind(input.errorCode)
+  };
+  const key = labelsKey(labels);
+  const counter = healthKitRunFailures.get(key) ?? { labels, value: 0 };
+  counter.value += 1;
+  healthKitRunFailures.set(key, counter);
+}
+
 export function httpRequestStarted(): void {
   inFlight += 1;
 }
@@ -171,6 +208,25 @@ export async function flushOtelMetrics(): Promise<void> {
         unit: "1",
         sum: {
           dataPoints: errPoints,
+          aggregationTemporality: 2,
+          isMonotonic: true
+        }
+      });
+    }
+
+    const hkPoints = [...healthKitRunFailures.values()].map((c) => ({
+      attributes: labelAttrs(c.labels),
+      startTimeUnixNano: now,
+      timeUnixNano: now,
+      asInt: String(c.value)
+    }));
+    if (hkPoints.length > 0) {
+      metrics.push({
+        name: "healthkit_run_failures_total",
+        description: "Total failed or abandoned HealthKit sync runs",
+        unit: "1",
+        sum: {
+          dataPoints: hkPoints,
           aggregationTemporality: 2,
           isMonotonic: true
         }
@@ -273,6 +329,7 @@ export function _resetOtelMetricsForTests(): void {
   requestTotals.clear();
   errorTotals.clear();
   durationHist.clear();
+  healthKitRunFailures.clear();
   inFlight = 0;
   if (flushTimer) {
     clearInterval(flushTimer);

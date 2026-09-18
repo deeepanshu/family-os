@@ -46,6 +46,7 @@ struct FamilyOSApp: App {
                         }
                     } else if phase == .background {
                         AppMetrics.flush(force: true)
+                        AppLogs.flush(force: true)
                     }
                 }
         }
@@ -62,6 +63,7 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, @preconcur
         CrashReporting.configure()
         AppMetrics.configure()
         AppMetrics.flush(force: true)
+        AppLogs.configure()
         _ = HealthKitSyncStore.retryPendingWipe()
         UNUserNotificationCenter.current().delegate = self
         // Nonisolated BG registration — never own handlers on a @MainActor coordinator.

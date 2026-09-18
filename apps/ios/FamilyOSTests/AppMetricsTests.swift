@@ -72,8 +72,8 @@ final class AppMetricsTests: XCTestCase {
 
         XCTAssertEqual(point["count"] as? String, "1")
         XCTAssertEqual(point["sum"] as? Double, 1.5)
-        XCTAssertEqual(point["bucketCounts"] as? [String], ["0", "0", "1", "0", "0", "0", "0"])
-        XCTAssertEqual(point["explicitBounds"] as? [Double], [0.25, 1, 5, 15, 30, 60])
+        XCTAssertEqual(point["bucketCounts"] as? [String], ["0", "0", "1", "0", "0", "0", "0", "0", "0", "0", "0"])
+        XCTAssertEqual(point["explicitBounds"] as? [Double], [0.25, 1, 5, 15, 30, 60, 300, 900, 1800, 3600])
         XCTAssertEqual(histogram["aggregationTemporality"] as? Int, 2)
     }
 
@@ -192,6 +192,64 @@ final class AppMetricsTests: XCTestCase {
         XCTAssertEqual(HealthAPIError.badStatus(409, "locked", code: "healthkit_locked").metricCode, .healthkitLocked)
         XCTAssertEqual(HealthAPIError.badStatus(500, "boom", code: "not_a_real_code").metricCode, .other)
         XCTAssertNil(HealthAPIError.MetricCode(rawValue: "healthkit_loced"))
+    }
+
+    /// `Date()` keeps advancing while iOS has the process suspended, so a frozen
+    /// run looked like hours of work. Accounting the two clocks together is what
+    /// separates "genuinely slow" from "the OS froze us".
+    func testSuspensionAccountingSeparatesActiveTimeFromFreezeTime() {
+        let suspended = SyncDurationAccounting.account(activeSeconds: 2, wallSeconds: 3599.88)
+        XCTAssertEqual(suspended.activeSeconds, 2)
+        XCTAssertEqual(suspended.wallSeconds, 3599.88)
+        XCTAssertEqual(suspended.suspendedSeconds, 3597.88, accuracy: 0.01)
+        XCTAssertTrue(suspended.wasSuspended)
+
+        // A genuinely slow query advances the monotonic clock, so nothing is
+        // attributed to suspension.
+        let hung = SyncDurationAccounting.account(activeSeconds: 3599.88, wallSeconds: 3599.88)
+        XCTAssertEqual(hung.suspendedSeconds, 0, accuracy: 0.01)
+        XCTAssertFalse(hung.wasSuspended)
+    }
+
+    func testSuspensionAccountingIgnoresSmallClockSkew() {
+        let jitter = SyncDurationAccounting.account(activeSeconds: 3, wallSeconds: 3.4)
+        XCTAssertFalse(jitter.wasSuspended)
+        XCTAssertEqual(jitter.suspendedSeconds, 0, accuracy: 0.01)
+    }
+
+    /// The old top bound was 60s, so every freeze collapsed into `+Inf` and the
+    /// p95 panel read healthy while the tail was hours long.
+    func testDurationHistogramBoundsCoverSuspensionScaleDurations() throws {
+        let delivered = expectation(description: "OTLP histogram bounds")
+        let recorder = RequestRecorder(expectation: delivered)
+
+        AppMetrics.configureForTesting(endpoint: try XCTUnwrap(URL(string: "http://telemetry.lab:4318/v1/metrics"))) { request in
+            recorder.record(request)
+        }
+        AppMetrics.observeDuration(
+            "ios.healthkit.sync.duration.seconds",
+            seconds: 300,
+            attributes: ["group": "sleep"]
+        )
+        AppMetrics.flush(force: true)
+
+        wait(for: [delivered], timeout: 1)
+
+        let body = try XCTUnwrap(recorder.request?.httpBody)
+        let root = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let metrics = try XCTUnwrap(
+            (((root["resourceMetrics"] as? [[String: Any]])?.first?["scopeMetrics"] as? [[String: Any]])?.first?["metrics"] as? [[String: Any]])
+        )
+        let duration = try XCTUnwrap(metrics.first { $0["name"] as? String == "ios.healthkit.sync.duration.seconds" })
+        let histogram = try XCTUnwrap(duration["histogram"] as? [String: Any])
+        let point = try XCTUnwrap((histogram["dataPoints"] as? [[String: Any]])?.first)
+
+        let bounds = try XCTUnwrap(point["explicitBounds"] as? [Double])
+        XCTAssertTrue(bounds.contains(300), "A 300s observation must land in a real bucket, not +Inf")
+        XCTAssertEqual(bounds.last, 3600)
+
+        let buckets = try XCTUnwrap(point["bucketCounts"] as? [String])
+        XCTAssertEqual(buckets.last, "0", "Nothing may fall into the +Inf overflow bucket")
     }
 }
 
