@@ -17,12 +17,12 @@ const sql = postgres(databaseUrl, { prepare: false, max: 1 });
 
 function app() {
   return createApp({
+    familyRepository: PostgresFamilyRepository.fromDatabaseUrl(databaseUrl, {
+      syncLocalAuthUsers: true
+    }),
     config: {
       NODE_ENV: "test",
       PORT: 3001,
-      DATABASE_URL: databaseUrl,
-      HEALTH_API_REPOSITORY: "postgres",
-      HEALTH_API_SYNC_LOCAL_AUTH_USERS: true,
       SUPABASE_JWT_SECRET: jwtSecret,
       SUPABASE_URL: supabaseUrl
     }

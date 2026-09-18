@@ -10,7 +10,6 @@ const envSchema = z.object({
   HOST: z.preprocess(emptyToUndefined, z.string().default("0.0.0.0")),
   PORT: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(3001)),
   DATABASE_URL: z.preprocess(emptyToUndefined, z.string().optional()),
-  HEALTH_API_REPOSITORY: z.preprocess(emptyToUndefined, z.enum(["memory", "postgres"]).optional()),
   HEALTH_API_SYNC_LOCAL_AUTH_USERS: z.preprocess(emptyToUndefined, z.coerce.boolean().optional()),
   SUPABASE_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
   SUPABASE_ANON_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
@@ -18,7 +17,6 @@ const envSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
   HEALTH_API_ENABLE_DEV_AUTH: z.preprocess(emptyToUndefined, z.coerce.boolean().default(false)),
   HEALTH_API_DEV_AUTH_USER_ID: z.preprocess(emptyToUndefined, z.string().uuid().optional()),
-  HEALTH_API_CORS_ORIGIN: z.preprocess(emptyToUndefined, z.string().optional()),
   HEALTH_API_RATE_LIMIT_WINDOW_MS: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(60_000)),
   HEALTH_API_RATE_LIMIT_MAX_WRITES: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(120)),
   HEALTH_API_RATE_LIMIT_MAX_BUCKETS: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(10_000)),
@@ -33,11 +31,6 @@ const envSchema = z.object({
    * metadata at /.well-known/oauth-protected-resource/health/api/mcp
    */
   MCP_PUBLIC_PATH: z.preprocess(emptyToUndefined, z.string().default(DEFAULT_MCP_PUBLIC_PATH)),
-  /**
-   * @deprecated Prefer MCP_PUBLIC_ORIGIN + MCP_PUBLIC_PATH.
-   * If set without MCP_PUBLIC_ORIGIN, treated as the public origin (not the resource URL).
-   */
-  MCP_PUBLIC_BASE_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
   /**
    * Optional comma-separated Supabase OAuth client IDs allowed to receive Family
    * OS MCP health grants. When empty (default), any OAuth client the user
@@ -65,10 +58,9 @@ const envSchema = z.object({
 type ParsedAppConfig = z.infer<typeof envSchema>;
 export type AppConfig = Omit<
   ParsedAppConfig,
-  "HEALTH_API_CORS_ORIGIN" | "MCP_PUBLIC_ORIGIN" | "MCP_PUBLIC_PATH" | "MCP_ALLOWED_OAUTH_CLIENT_IDS"
+  "MCP_PUBLIC_ORIGIN" | "MCP_PUBLIC_PATH" | "MCP_ALLOWED_OAUTH_CLIENT_IDS"
 > & {
-  HEALTH_API_CORS_ORIGIN: string;
-  HEALTH_API_REPOSITORY: "memory" | "postgres";
+  repository: "memory" | "postgres";
   HEALTH_API_SYNC_LOCAL_AUTH_USERS: boolean;
   MCP_PUBLIC_ORIGIN?: string;
   MCP_PUBLIC_PATH: string;
@@ -163,13 +155,9 @@ export function isMcpOAuthClientAllowed(config: AppConfig, oauthClientId: string
 
 export function loadConfig(env: Record<string, unknown> = process.env): AppConfig {
   const config = envSchema.parse(env);
-  if (config.NODE_ENV === "production" && !config.HEALTH_API_CORS_ORIGIN) {
-    throw new Error("HEALTH_API_CORS_ORIGIN must be configured in production.");
-  }
 
-  const originRaw = config.MCP_PUBLIC_ORIGIN ?? config.MCP_PUBLIC_BASE_URL;
-  const mcpPublicOrigin = originRaw
-    ? parsePublicOrigin(originRaw, config.MCP_PUBLIC_ORIGIN ? "MCP_PUBLIC_ORIGIN" : "MCP_PUBLIC_BASE_URL", {
+  const mcpPublicOrigin = config.MCP_PUBLIC_ORIGIN
+    ? parsePublicOrigin(config.MCP_PUBLIC_ORIGIN, "MCP_PUBLIC_ORIGIN", {
         nodeEnv: config.NODE_ENV
       })
     : undefined;
@@ -191,17 +179,13 @@ export function loadConfig(env: Record<string, unknown> = process.env): AppConfi
   if (config.NODE_ENV === "production" && !config.SUPABASE_SERVICE_ROLE_KEY) {
     throw new Error("SUPABASE_SERVICE_ROLE_KEY must be configured in production so account deletion can remove the Auth identity.");
   }
-  const repository = config.HEALTH_API_REPOSITORY ?? (config.NODE_ENV === "test" ? "memory" : "postgres");
-  if (config.NODE_ENV === "production" && repository === "memory") {
-    throw new Error("HEALTH_API_REPOSITORY=memory is not allowed in production.");
-  }
+  const repository = config.NODE_ENV === "test" ? "memory" : "postgres";
   if (repository === "postgres" && !config.DATABASE_URL) {
-    throw new Error("DATABASE_URL must be configured when HEALTH_API_REPOSITORY=postgres.");
+    throw new Error("DATABASE_URL must be configured outside tests.");
   }
   return {
     ...config,
-    HEALTH_API_CORS_ORIGIN: config.HEALTH_API_CORS_ORIGIN ?? "*",
-    HEALTH_API_REPOSITORY: repository,
+    repository,
     HEALTH_API_SYNC_LOCAL_AUTH_USERS:
       config.HEALTH_API_SYNC_LOCAL_AUTH_USERS ?? (repository === "postgres" && config.NODE_ENV !== "production"),
     MCP_PUBLIC_ORIGIN: mcpPublicOrigin,

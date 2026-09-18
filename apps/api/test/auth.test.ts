@@ -85,9 +85,8 @@ describe("health API bootstrap", () => {
   it("rate limits write requests by bearer token", async () => {
     const responseOne = await createApp({
       config: {
-        NODE_ENV: "development",
+        NODE_ENV: "test",
         PORT: 3001,
-        HEALTH_API_REPOSITORY: "memory",
         HEALTH_API_ENABLE_DEV_AUTH: true,
         HEALTH_API_DEV_AUTH_USER_ID: testUserId,
         HEALTH_API_RATE_LIMIT_MAX_WRITES: 1
@@ -103,9 +102,8 @@ describe("health API bootstrap", () => {
 
     const appWithRateLimit = createApp({
       config: {
-        NODE_ENV: "development",
+        NODE_ENV: "test",
         PORT: 3001,
-        HEALTH_API_REPOSITORY: "memory",
         HEALTH_API_ENABLE_DEV_AUTH: true,
         HEALTH_API_DEV_AUTH_USER_ID: testUserId,
         HEALTH_API_RATE_LIMIT_MAX_WRITES: 1
@@ -141,9 +139,8 @@ describe("health API bootstrap", () => {
   it("normalizes bearer scheme and whitespace for rate-limit keys", async () => {
     const appWithRateLimit = createApp({
       config: {
-        NODE_ENV: "development",
+        NODE_ENV: "test",
         PORT: 3001,
-        HEALTH_API_REPOSITORY: "memory",
         HEALTH_API_ENABLE_DEV_AUTH: true,
         HEALTH_API_DEV_AUTH_USER_ID: testUserId,
         HEALTH_API_RATE_LIMIT_MAX_WRITES: 1
@@ -301,9 +298,8 @@ describe("health API bootstrap", () => {
   it("supports an explicit non-production dev token for local iOS smoke tests", async () => {
     const response = await createApp({
       config: {
-        NODE_ENV: "development",
+        NODE_ENV: "test",
         PORT: 3001,
-        HEALTH_API_REPOSITORY: "memory",
         HEALTH_API_ENABLE_DEV_AUTH: true,
         HEALTH_API_DEV_AUTH_USER_ID: testUserId
       }
@@ -324,9 +320,8 @@ describe("health API bootstrap", () => {
   it("does not allow the dev token unless explicitly enabled", async () => {
     const response = await createApp({
       config: {
-        NODE_ENV: "development",
+        NODE_ENV: "test",
         PORT: 3001,
-        HEALTH_API_REPOSITORY: "memory",
         HEALTH_API_ENABLE_DEV_AUTH: false,
         HEALTH_API_DEV_AUTH_USER_ID: testUserId,
         SUPABASE_JWT_SECRET: jwtSecret
@@ -353,8 +348,7 @@ describe("health API bootstrap", () => {
         MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
         SUPABASE_ANON_KEY: "test-anon-key",
         SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
-        MCP_ALLOWED_OAUTH_CLIENT_IDS: "chatgpt-prod",
-        HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com"
+        MCP_ALLOWED_OAUTH_CLIENT_IDS: "chatgpt-prod"
       },
       familyRepository: new InMemoryFamilyRepository()
     }).request(`${HEALTH_API_PREFIX}/me`, {

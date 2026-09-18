@@ -158,6 +158,22 @@ describe("MCP endpoint", () => {
     expect((await root.json()).resource).toBe(mcpResource);
   });
 
+  it("returns wildcard CORS headers for MCP preflight requests", async () => {
+    const { api } = app();
+    const response = await api.request(mcpPath, {
+      method: "OPTIONS",
+      headers: {
+        origin: "https://chatgpt.com",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "authorization,mcp-protocol-version"
+      }
+    });
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-headers")).toContain("mcp-protocol-version");
+  });
+
   it("exposes MCP healthcheck without auth at the public MCP path", async () => {
     const { api } = app();
     const response = await api.request(`${mcpPath}/healthcheck`);

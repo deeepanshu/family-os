@@ -15,9 +15,9 @@ import {
 
 const writeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
-export function corsMiddleware(config: AppConfig) {
+export function corsMiddleware() {
   return cors({
-    origin: config.HEALTH_API_CORS_ORIGIN,
+    origin: "*",
     allowHeaders: ["authorization", "content-type", "accept", "x-request-id"],
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     exposeHeaders: ["x-request-id"],

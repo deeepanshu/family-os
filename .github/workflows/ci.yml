@@ -90,7 +90,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgres://family_os:family_os@localhost:5432/family_os
-      HEALTH_API_REPOSITORY: postgres
       HEALTH_API_SYNC_LOCAL_AUTH_USERS: "true"
       SUPABASE_URL: https://project.supabase.co
       SUPABASE_JWT_SECRET: test-supabase-jwt-secret-with-enough-length

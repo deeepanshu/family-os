@@ -9,7 +9,7 @@ export type AppDependencies = {
 };
 
 export function createDependencies(config: AppConfig): AppDependencies {
-  if (config.HEALTH_API_REPOSITORY === "memory") {
+  if (config.repository === "memory") {
     const familyRepository = new InMemoryFamilyRepository();
     return {
       familyRepository,

@@ -80,7 +80,7 @@ export function createMcpRoutes(deps: McpRouteDeps) {
   routes.use(
     "*",
     cors({
-      origin: deps.config.HEALTH_API_CORS_ORIGIN,
+      origin: "*",
       allowHeaders: [
         "authorization",
         "content-type",
