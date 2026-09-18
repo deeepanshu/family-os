@@ -25,6 +25,9 @@ on:
 jobs:
   deploy:
     uses: deeepanshu/homelab-ci/.github/workflows/komodo-deploy.yml@main
+    permissions:
+      contents: read
+      packages: write
     with:
       stack: family-os
       image_name: deeepanshu/family-os-health-api
