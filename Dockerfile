@@ -30,6 +30,7 @@ COPY scripts/docker-migrate.sh ./scripts/docker-migrate.sh
 RUN chmod +x ./scripts/docker-migrate.sh
 
 LABEL org.opencontainers.image.source="https://github.com/deeepanshu/family-os"
+LABEL org.opencontainers.image.title="family-os-health-api"
 
 EXPOSE 3001
 
