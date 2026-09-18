@@ -14,7 +14,6 @@ on:
       - "Dockerfile"
       - "infra/docker/**"
       - "grafana/dashboards/**"
-      - "scripts/sync-grafana-dashboards.sh"
       - ".github/workflows/deploy-service.yml"
       - "!**/*.md"
   workflow_dispatch:
@@ -35,7 +34,7 @@ jobs:
       image_name: deeepanshu/family-os-health-api
       image_tag_variable: FAMILY_OS_IMAGE_TAG
       image_path_regex: '^(apps/api/|packages/shared/|db/|drizzle\.config\.ts$|scripts/docker-migrate\.sh$|package\.json$|package-lock\.json$|Dockerfile$)'
-      deploy_path_regex: '^(infra/docker/|grafana/dashboards/|scripts/sync-grafana-dashboards\.sh$|\.github/workflows/deploy-service\.yml$)'
+      deploy_path_regex: '^(infra/docker/|grafana/dashboards/|\.github/workflows/deploy-service\.yml$)'
       caller_event: ${{ github.event_name }}
       caller_before: ${{ github.event.before }}
       image_tag: ${{ github.event.inputs.image_tag }}
