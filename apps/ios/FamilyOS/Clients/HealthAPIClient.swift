@@ -574,7 +574,7 @@ struct HealthAPIClient {
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "accept")
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "authorization")
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await perform(request)
         guard let http = response as? HTTPURLResponse else {
             throw HealthAPIError.badStatus(-1, nil, code: nil)
         }
@@ -605,7 +605,7 @@ struct HealthAPIClient {
     }
 
     private func decodeEnvelope<T: Decodable>(_ type: T.Type, from request: URLRequest) async throws -> T {
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await perform(request)
         guard let http = response as? HTTPURLResponse else {
             throw HealthAPIError.badStatus(-1, nil, code: nil)
         }
@@ -632,6 +632,52 @@ struct HealthAPIClient {
         }
         #endif
         return try JSONDecoder().decode(APIEnvelope<T>.self, from: data).data
+    }
+
+    /// Single transport seam for every request: stamps an outbound correlation id
+    /// so client logs can be joined to server log lines, and records the
+    /// client-observed round trip so a slow API can be told apart from a slow
+    /// network on the same route.
+    private func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        var request = request
+        if request.value(forHTTPHeaderField: "x-request-id") == nil {
+            request.setValue(UUID().uuidString.lowercased(), forHTTPHeaderField: "x-request-id")
+        }
+        let route = normalizedMetricRoute(path: request.url?.path ?? "")
+        let clock = ContinuousClock()
+        let startedAt = clock.now
+
+        do {
+            let (data, response) = try await session.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            AppMetrics.observeDuration(
+                "ios.http.client.duration.seconds",
+                seconds: seconds(clock.now - startedAt),
+                attributes: [
+                    "route": route,
+                    "method": request.httpMethod ?? "GET",
+                    "outcome": (200..<300).contains(status) ? "success" : "failure"
+                ]
+            )
+            return (data, response)
+        } catch {
+            AppMetrics.observeDuration(
+                "ios.http.client.duration.seconds",
+                seconds: seconds(clock.now - startedAt),
+                attributes: [
+                    "route": route,
+                    "method": request.httpMethod ?? "GET",
+                    "outcome": "error"
+                ]
+            )
+            throw error
+        }
+    }
+
+    /// Trims path parameters so the label stays low-cardinality.
+    private func normalizedMetricRoute(path: String) -> String {
+        guard !path.isEmpty else { return "unknown" }
+        return String(path.prefix(120))
     }
 
     private func endpointURL(baseURL: String, path: String) -> URL? {

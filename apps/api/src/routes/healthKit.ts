@@ -11,6 +11,7 @@ import type { HealthKitOpsBatchInput } from "@family-os/shared";
 import { requireAuth, type AppVariables } from "../auth";
 import { HttpError } from "../errors";
 import { isValidIanaTimezone } from "../repositories/healthKitDomain";
+import { recordHealthKitRunFailure } from "../logging/otelMetrics";
 import type { HealthKitStore } from "../repositories/contracts";
 
 const group = z.enum(HEALTHKIT_CONSENT_GROUPS);
@@ -273,11 +274,15 @@ export function createHealthKitRoutes(repository: HealthKitStore) {
     if (!group.safeParse(groupKey).success) {
       throw new HttpError(400, "payload_invalid", "group is not allowlisted.");
     }
+    const body = c.req.valid("json");
     const data = await repository.failHealthKitRun(
       c.get("user").id,
       groupKey as (typeof HEALTHKIT_CONSENT_GROUPS)[number],
-      c.req.valid("json")
+      body
     );
+    // Record the outcome so abandonment rate is queryable alongside HTTP RED
+    // metrics. `sync_abandoned` marks a run that lost its background time.
+    recordHealthKitRunFailure({ group: groupKey, errorCode: body.errorCode });
     return c.json({ data });
   });
 

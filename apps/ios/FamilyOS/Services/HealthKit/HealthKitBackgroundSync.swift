@@ -511,16 +511,37 @@ enum HealthKitBackgroundSync {
         metrics: Set<HealthKitSyncMetric>? = nil,
         wallTimeoutSeconds: TimeInterval? = nil
     ) async {
-        let syncStartedAt = Date()
+        // Wall clock for the suspension split; monotonic for budget, so time the
+        // process spent frozen never counts against the run's own allowance.
+        let wallStartedAt = Date()
+        let clock = ContinuousClock()
+        let activeStartedAt = clock.now
         var outcome = AppMetrics.SyncRunOutcome.skipped
         defer {
+            let accounting = SyncDurationAccounting.account(
+                activeSeconds: seconds(clock.now - activeStartedAt),
+                wallSeconds: Date().timeIntervalSince(wallStartedAt)
+            )
             AppMetrics.recordSyncRun(reason: reason, outcome: outcome)
             AppMetrics.observeDuration(
                 "ios.healthkit.sync.duration.seconds",
-                seconds: Date().timeIntervalSince(syncStartedAt),
+                seconds: accounting.activeSeconds,
                 attributes: ["reason": reason, "outcome": outcome.rawValue]
             )
+            AppMetrics.observeDuration(
+                "ios.healthkit.sync.wall_seconds",
+                seconds: accounting.wallSeconds,
+                attributes: ["reason": reason, "outcome": outcome.rawValue]
+            )
+            if accounting.wasSuspended {
+                AppMetrics.observeDuration(
+                    "ios.healthkit.sync.suspended_seconds",
+                    seconds: accounting.suspendedSeconds,
+                    attributes: ["reason": reason, "outcome": outcome.rawValue]
+                )
+            }
             AppMetrics.flush(force: true)
+            AppLogs.flush(force: true)
         }
 
         CrashReporting.healthKit(.syncStarted, extra: ["reason": reason, "mode": "background"])
@@ -661,7 +682,8 @@ enum HealthKitBackgroundSync {
                 let waitSeconds = exclusiveWaitSeconds(for: reason)
                 try await HealthKitRunGate.shared.withExclusiveRun(waitSeconds: waitSeconds, reason: reason) {
                     let work: @Sendable () async throws -> Void = {
-                        let loopStarted = Date()
+                        let loopClock = ContinuousClock()
+                        let loopStarted = loopClock.now
                         for metric in eligible {
                             if Task.isCancelled {
                                 CrashReporting.log(
@@ -669,7 +691,8 @@ enum HealthKitBackgroundSync {
                                 )
                                 break
                             }
-                            let elapsed = Date().timeIntervalSince(loopStarted)
+                            // Monotonic: a freeze must not consume the allowance.
+                            let elapsed = seconds(loopClock.now - loopStarted)
                             if !canStartMetric(elapsed: elapsed, wallTimeoutSeconds: wallTimeoutSeconds) {
                                 CrashReporting.log(
                                     "healthkit_bg_sync_skip_no_budget reason=\(reason) group=\(metric.rawValue) elapsed=\(Int(elapsed))"
@@ -681,12 +704,20 @@ enum HealthKitBackgroundSync {
                                 )
                                 break
                             }
-                            let metricStarted = Date()
+                            let metricStarted = loopClock.now
+                            let metricWallStarted = Date()
                             CrashReporting.log("healthkit_bg_metric_start reason=\(reason) group=\(metric.rawValue)")
                             do {
                                 let result = try await engine.run(HealthKitRunRequest(metric: metric, kind: .sync))
+                                observeMetricDuration(
+                                    group: metric.scopeMetricKey,
+                                    reason: reason,
+                                    outcome: "completed",
+                                    activeSeconds: seconds(loopClock.now - metricStarted),
+                                    wallSeconds: Date().timeIntervalSince(metricWallStarted)
+                                )
                                 CrashReporting.log(
-                                    "healthkit_bg_metric_complete reason=\(reason) group=\(metric.rawValue) applied=\(result.appliedCount) ms=\(Int(Date().timeIntervalSince(metricStarted) * 1000))"
+                                    "healthkit_bg_metric_complete reason=\(reason) group=\(metric.rawValue) applied=\(result.appliedCount) ms=\(Int(seconds(loopClock.now - metricStarted) * 1000))"
                                 )
                                 HealthKitBackgroundSyncAlert.notifyIfNeeded(
                                     metric: metric,
@@ -695,8 +726,15 @@ enum HealthKitBackgroundSync {
                                 )
                                 AppMetrics.recordHealthKitCompleted(reason: reason, group: metric.scopeMetricKey)
                             } catch {
+                                observeMetricDuration(
+                                    group: metric.scopeMetricKey,
+                                    reason: reason,
+                                    outcome: "failed",
+                                    activeSeconds: seconds(loopClock.now - metricStarted),
+                                    wallSeconds: Date().timeIntervalSince(metricWallStarted)
+                                )
                                 CrashReporting.log(
-                                    "healthkit_bg_metric_failed reason=\(reason) group=\(metric.rawValue) ms=\(Int(Date().timeIntervalSince(metricStarted) * 1000))"
+                                    "healthkit_bg_metric_failed reason=\(reason) group=\(metric.rawValue) ms=\(Int(seconds(loopClock.now - metricStarted) * 1000))"
                                 )
                                 if isLockedHealthKitError(error) {
                                     CrashReporting.log(
@@ -766,6 +804,35 @@ enum HealthKitBackgroundSync {
             return []
         }
         return Set(decoded.compactMap { HealthKitSyncMetric(rawValue: $0) })
+    }
+
+    /// Per-metric timing, so a wedge can be attributed to one group instead of
+    /// only being visible as a whole-run total. The wall/active pair is what
+    /// distinguishes real work from time the process spent frozen.
+    private static func observeMetricDuration(
+        group: String,
+        reason: String,
+        outcome: String,
+        activeSeconds: TimeInterval,
+        wallSeconds: TimeInterval
+    ) {
+        let attributes = ["reason": reason, "group": group, "outcome": outcome]
+        AppMetrics.observeDuration(
+            "ios.healthkit.metric.duration.seconds",
+            seconds: activeSeconds,
+            attributes: attributes
+        )
+        let accounting = SyncDurationAccounting.account(
+            activeSeconds: activeSeconds,
+            wallSeconds: wallSeconds
+        )
+        if accounting.wasSuspended {
+            AppMetrics.observeDuration(
+                "ios.healthkit.metric.suspended_seconds",
+                seconds: accounting.suspendedSeconds,
+                attributes: attributes
+            )
+        }
     }
 
     /// Pure policy seam for background tests: only already-imported metrics may

@@ -330,13 +330,27 @@ struct HealthKitRunEngine: HealthKitRunning {
             throw Self.mapError(error)
         }
 
+        // Measure this run's own clocks so a deadline blown while the process was
+        // frozen reports as abandoned rather than as a HealthKit failure.
+        let wallStartedAt = Date()
+        let clock = ContinuousClock()
+        let activeStartedAt = clock.now
         do {
             return try await finishStartedRun(
                 request: request,
                 descriptor: descriptor
             )
         } catch {
-            await abandonStartedRun(metric: metric, kind: kind, error: Self.mapError(error))
+            let accounting = SyncDurationAccounting.account(
+                activeSeconds: seconds(clock.now - activeStartedAt),
+                wallSeconds: Date().timeIntervalSince(wallStartedAt)
+            )
+            await abandonStartedRun(
+                metric: metric,
+                kind: kind,
+                error: Self.mapError(error),
+                wasSuspended: accounting.wasSuspended
+            )
             throw error
         }
     }
@@ -560,8 +574,16 @@ struct HealthKitRunEngine: HealthKitRunning {
         }
     }
 
-    private func abandonStartedRun(metric: HealthKitSyncMetric, kind: HealthKitRunKind, error: HealthAPIError) async {
-        let code = error.errorCode ?? "sync_failed"
+    private func abandonStartedRun(
+        metric: HealthKitSyncMetric,
+        kind: HealthKitRunKind,
+        error: HealthAPIError,
+        wasSuspended: Bool = false
+    ) async {
+        let code = Self.abandonmentErrorCode(
+            errorCode: error.errorCode ?? "sync_failed",
+            wasSuspended: wasSuspended
+        )
         guard let failRun = deps.failRun else {
             CrashReporting.log(
                 "healthkit_run_abandon_skipped_no_hook group=\(metric.rawValue) code=\(code)"
@@ -583,6 +605,23 @@ struct HealthKitRunEngine: HealthKitRunning {
         }
     }
 
+    /// Classifies how a started run ended, so the server can separate a real
+    /// HealthKit failure from a run that ran out of background time.
+    ///
+    /// A scheduling outcome (deadline blown, or the work cancelled because iOS
+    /// reclaimed the task) only means "abandoned" when the process was actually
+    /// frozen; otherwise the work genuinely did not finish and the underlying
+    /// code stands.
+    static func abandonmentErrorCode(errorCode: String, wasSuspended: Bool) -> String {
+        guard wasSuspended else { return errorCode }
+        switch errorCode {
+        case "sync_timeout", "sync_cancelled":
+            return "sync_abandoned"
+        default:
+            return errorCode
+        }
+    }
+
     static func parseISODate(_ value: String) -> Date? {
         let withFractional = ISO8601DateFormatter()
         withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -592,28 +631,32 @@ struct HealthKitRunEngine: HealthKitRunning {
         return ISO8601DateFormatter().date(from: value)
     }
 
+    /// Bounded wait that can abandon work it cannot cancel.
+    ///
+    /// A HealthKit read bridged through a checked continuation resumes only from
+    /// its callback, so it never observes cancellation. `withThrowingTaskGroup`
+    /// drains every child before it rethrows, which made the previous deadline
+    /// unreachable: the caller waited for the query, not for the clock. This
+    /// races the work against the deadline and resumes on the first outcome, so
+    /// the caller always returns at the deadline whatever the abandoned work does.
     static func withTimeout<T: Sendable>(
         seconds: TimeInterval,
         label: String,
         operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
-        try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask {
-                try await operation()
+        let timeoutError = HealthAPIError.badStatus(
+            408,
+            "HealthKit step timed out after \(Int(seconds))s (\(label)). Try again.",
+            code: "sync_timeout"
+        )
+        let race = TimeoutRace(seconds: seconds, timeoutError: timeoutError, operation: operation)
+
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                race.begin(continuation: continuation)
             }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-                throw HealthAPIError.badStatus(
-                    408,
-                    "HealthKit step timed out after \(Int(seconds))s (\(label)). Try again.",
-                    code: "sync_timeout"
-                )
-            }
-            guard let result = try await group.next() else {
-                throw HealthAPIError.badStatus(500, "HealthKit step ended without a result (\(label)).", code: "sync_timeout")
-            }
-            group.cancelAll()
-            return result
+        } onCancel: {
+            race.cancel()
         }
     }
 
@@ -644,6 +687,90 @@ struct HealthKitRunEngine: HealthKitRunning {
                 ? "healthkit_error"
                 : "sync_failed"
         )
+    }
+}
+
+/// Resumes a `withTimeout` continuation on whichever comes first: the work, the
+/// deadline, or outer task cancellation. Exactly one outcome wins; the losing
+/// work is abandoned (cancelled) but never awaited, so it cannot stall the caller.
+private final class TimeoutRace<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private let seconds: TimeInterval
+    private let timeoutError: HealthAPIError
+    private let operation: @Sendable () async throws -> T
+    private var continuation: CheckedContinuation<T, Error>?
+    private var work: Task<Void, Never>?
+    private var timer: Task<Void, Never>?
+    private var isResolved = false
+
+    init(
+        seconds: TimeInterval,
+        timeoutError: HealthAPIError,
+        operation: @escaping @Sendable () async throws -> T
+    ) {
+        self.seconds = seconds
+        self.timeoutError = timeoutError
+        self.operation = operation
+    }
+
+    func begin(continuation: CheckedContinuation<T, Error>) {
+        lock.lock()
+        if isResolved {
+            lock.unlock()
+            continuation.resume(throwing: CancellationError())
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+
+        let work = Task { [self] in
+            do {
+                resolve(.success(try await operation()))
+            } catch {
+                resolve(.failure(error))
+            }
+        }
+        let timer = Task { [self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            resolve(.failure(timeoutError))
+        }
+
+        lock.lock()
+        if isResolved {
+            lock.unlock()
+            work.cancel()
+            timer.cancel()
+            return
+        }
+        self.work = work
+        self.timer = timer
+        lock.unlock()
+    }
+
+    func cancel() {
+        resolve(.failure(CancellationError()))
+    }
+
+    private func resolve(_ result: Result<T, Error>) {
+        lock.lock()
+        guard !isResolved else {
+            lock.unlock()
+            return
+        }
+        isResolved = true
+        let continuation = self.continuation
+        self.continuation = nil
+        let work = self.work
+        let timer = self.timer
+        self.work = nil
+        self.timer = nil
+        lock.unlock()
+
+        // Abandon the losers without awaiting them.
+        work?.cancel()
+        timer?.cancel()
+        continuation?.resume(with: result)
     }
 }
 

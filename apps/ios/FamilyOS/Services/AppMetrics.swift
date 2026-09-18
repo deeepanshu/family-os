@@ -9,7 +9,10 @@ import OSLog
 enum AppMetrics {
     private static let logger = Logger(subsystem: "com.deepanshujain.familyos", category: "AppMetrics")
     private static let storage = Storage()
-    private static let durationBounds: [Double] = [0.25, 1, 5, 15, 30, 60]
+    /// Bounds must reach suspension/backlog scale. A 60s ceiling collapsed every
+    /// frozen or backlogged run into `+Inf`, so p95 looked healthy while the tail
+    /// spanned hours.
+    private static let durationBounds: [Double] = [0.25, 1, 5, 15, 30, 60, 300, 900, 1800, 3600]
 
     /// DEBUG builds remain silent unless this launch argument is present.
     private static let smokeLaunchArgument = "-FamilyOSMetricsSmoke"
@@ -498,5 +501,42 @@ enum AppMetrics {
         var histograms: [MetricKey: Histogram] = [:]
         var isFlushInFlight = false
         var lastFlush = Date.distantPast
+    }
+}
+
+/// Monotonic elapsed seconds. `ContinuousClock` does not advance while the
+/// process is suspended, so this measures work rather than wall time.
+func seconds(_ duration: Duration) -> TimeInterval {
+    TimeInterval(duration.components.seconds) + TimeInterval(duration.components.attoseconds) / 1e18
+}
+
+/// Splits a run's elapsed time into work actually performed and time the process
+///
+/// `Date()` keeps advancing while suspended, so wall time alone cannot tell a
+/// hung HealthKit query from a normal freeze — both looked like hours. `active`
+/// comes from a monotonic clock that stops while suspended, so the difference is
+/// the suspension. Deltas below the skew tolerance are jitter, not suspension.
+struct SyncDurationAccounting: Sendable, Equatable {
+    /// Clock skew between the two clocks that must not read as suspension.
+    static let skewTolerance: TimeInterval = 1
+
+    let activeSeconds: TimeInterval
+    let wallSeconds: TimeInterval
+    let suspendedSeconds: TimeInterval
+    let wasSuspended: Bool
+
+    static func account(
+        activeSeconds: TimeInterval,
+        wallSeconds: TimeInterval,
+        skewTolerance: TimeInterval = SyncDurationAccounting.skewTolerance
+    ) -> SyncDurationAccounting {
+        let raw = wallSeconds - activeSeconds
+        let suspended = raw > skewTolerance ? raw : 0
+        return SyncDurationAccounting(
+            activeSeconds: activeSeconds,
+            wallSeconds: wallSeconds,
+            suspendedSeconds: suspended,
+            wasSuspended: suspended > 0
+        )
     }
 }
