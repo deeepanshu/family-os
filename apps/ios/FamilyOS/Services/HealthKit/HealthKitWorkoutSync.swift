@@ -373,24 +373,29 @@ enum HealthKitWorkoutSync {
     }
 
     private static func querySamples<T: HKSample>(
-        store: HKHealthStore,
+        store: HealthKitQueryRunning,
         sampleType: HKSampleType,
         predicate: NSPredicate
     ) async throws -> [T] {
-        try await withCheckedThrowingContinuation { continuation in
-            let query = HKSampleQuery(
-                sampleType: sampleType,
-                predicate: predicate,
-                limit: HKObjectQueryNoLimit,
-                sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
-            ) { _, samples, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
+        let state = HealthKitQueryState<[T]>()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let query = HKSampleQuery(
+                    sampleType: sampleType,
+                    predicate: predicate,
+                    limit: HKObjectQueryNoLimit,
+                    sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
+                ) { _, samples, error in
+                    if let error {
+                        state.finish(.failure(error))
+                        return
+                    }
+                    state.finish(.success((samples as? [T]) ?? []))
                 }
-                continuation.resume(returning: (samples as? [T]) ?? [])
+                state.installAndExecute(query, store: store, continuation: continuation)
             }
-            store.execute(query)
+        } onCancel: {
+            state.cancel()
         }
     }
 

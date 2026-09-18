@@ -85,13 +85,16 @@ enum CrashReporting {
 
     /// Breadcrumb-style log. Always writes OSLog; Crashlytics only when collection is on.
     /// Keep messages free of PHI and secrets.
-    static func log(_ message: String) {
+    static func log(_ message: String, severity: AppLogs.Severity = .info) {
         logger.info("\(message, privacy: .public)")
         #if canImport(FirebaseCrashlytics)
         if isEnabled {
             Crashlytics.crashlytics().log(message)
         }
         #endif
+        // Ship the breadcrumb to the observability stack too, so the client
+        // narrative is queryable instead of stranded on the device.
+        AppLogs.record(message, severity: severity)
     }
 
     /// Crash context must be fixed, operational metadata only. Do not pass

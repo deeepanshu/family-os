@@ -582,6 +582,108 @@ final class HealthKitRunEngineTests: XCTestCase {
         XCTAssertFalse(HealthSessionRefresher.isUnauthorized(.missingToken))
     }
 
+    /// A HealthKit query bridged through a checked continuation resumes only
+    /// from its callback, so it cannot observe cancellation. The wall timeout
+    /// must still return at its deadline instead of waiting for that work.
+    func testWallTimeoutReturnsAtTheDeadlineWhenWorkIgnoresCancellation() async throws {
+        let hang = UnCancellableHang()
+        let returned = expectation(description: "withTimeout returned")
+
+        let call = Task {
+            defer { returned.fulfill() }
+            return try await HealthKitRunEngine.withTimeout(seconds: 0.25, label: "fetch") {
+                await hang.wait()
+                return 0
+            }
+        }
+
+        // Independent oracle: the deadline is honored only if the call resolves
+        // inside this window while the work is still unfinished.
+        await fulfillment(of: [returned], timeout: 3)
+        hang.release()
+
+        let result = await call.result
+        guard case .failure(let error) = result else {
+            return XCTFail("Expected the deadline to throw")
+        }
+        XCTAssertEqual((error as? HealthAPIError)?.errorCode, "sync_timeout")
+    }
+
+    /// The deadline must not pre-empt work that finishes in time.
+    func testWallTimeoutReturnsTheResultWhenWorkFinishesInTime() async throws {
+        let value = try await HealthKitRunEngine.withTimeout(seconds: 5, label: "fetch") {
+            42
+        }
+        XCTAssertEqual(value, 42)
+    }
+
+    /// The gate must not stay held by work that blew its deadline, or every later
+    /// wake soft-skips as `run_in_progress` until the process is reclaimed.
+    func testGateIsReleasedWhenTheBoundedWorkTimesOut() async throws {
+        let gate = HealthKitRunGate()
+        let hang = UnCancellableHang()
+
+        do {
+            try await gate.withExclusiveRun(waitSeconds: 0, reason: "observer") {
+                try await HealthKitRunEngine.withTimeout(seconds: 0.25, label: "observer_wall") {
+                    await hang.wait()
+                }
+            }
+            XCTFail("Expected the deadline to throw")
+        } catch let error as HealthAPIError {
+            XCTAssertEqual(error.errorCode, "sync_timeout")
+        }
+
+        // Independent oracle: the next wake must be able to run.
+        let acquired = try await gate.withExclusiveRun(waitSeconds: 0, reason: "next") { 1 }
+        XCTAssertEqual(acquired, 1)
+        let stillRunning = await gate.runInProgress
+        XCTAssertFalse(stillRunning)
+        hang.release()
+    }
+
+    /// A deadline blown because iOS froze the process is a normal lifecycle event,
+    /// not a failed sync. It must be reported as abandoned so it can be told apart
+    /// from a genuinely unreachable HealthKit query.
+    func testSuspensionMapsToSyncAbandonedRatherThanTimeout() {
+        XCTAssertEqual(
+            HealthKitRunEngine.abandonmentErrorCode(
+                errorCode: "sync_timeout",
+                wasSuspended: true
+            ),
+            "sync_abandoned"
+        )
+        XCTAssertEqual(
+            HealthKitRunEngine.abandonmentErrorCode(
+                errorCode: "sync_timeout",
+                wasSuspended: false
+            ),
+            "sync_timeout"
+        )
+        XCTAssertEqual(
+            HealthKitRunEngine.abandonmentErrorCode(
+                errorCode: "sync_failed",
+                wasSuspended: true
+            ),
+            "sync_failed"
+        )
+        // iOS reclaiming the task cancels the work; frozen means abandoned too.
+        XCTAssertEqual(
+            HealthKitRunEngine.abandonmentErrorCode(
+                errorCode: "sync_cancelled",
+                wasSuspended: true
+            ),
+            "sync_abandoned"
+        )
+        XCTAssertEqual(
+            HealthKitRunEngine.abandonmentErrorCode(
+                errorCode: "sync_cancelled",
+                wasSuspended: false
+            ),
+            "sync_cancelled"
+        )
+    }
+
     private func makeEngine(
         enabled: Set<HealthKitSyncMetric>,
         needsImport: Set<HealthKitSyncMetric>,
@@ -701,5 +803,35 @@ private actor GateBlocker {
         wasReleased = true
         continuation?.resume()
         continuation = nil
+    }
+}
+
+/// Mirrors a HealthKit query bridged through a checked continuation: resuming
+/// depends solely on an external callback, so `Task.cancel()` cannot complete it.
+private final class UnCancellableHang: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var wasReleased = false
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if wasReleased {
+                lock.unlock()
+                continuation.resume()
+                return
+            }
+            self.continuation = continuation
+            lock.unlock()
+        }
+    }
+
+    func release() {
+        lock.lock()
+        wasReleased = true
+        let pending = continuation
+        continuation = nil
+        lock.unlock()
+        pending?.resume()
     }
 }

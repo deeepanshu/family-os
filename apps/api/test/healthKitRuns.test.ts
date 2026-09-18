@@ -1,6 +1,11 @@
 import { SignJWT } from "jose";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { HEALTH_API_PREFIX, bloodPressureNaturalKey } from "@family-os/shared";
+import {
+  _resetOtelMetricsForTests,
+  flushOtelMetrics
+} from "../src/logging/otelMetrics";
+import { resetOtelConfigForTests, setOtelConfig } from "../src/logging/otelConfig";
 import { createApp } from "../src/app";
 import { HealthMcpReadService } from "../src/mcp/HealthMcpReadService";
 import { repositoriesFromFamilyRepository } from "../src/dependencies";
@@ -421,6 +426,40 @@ describe("HealthKit run lifecycle", () => {
     expect(sleep.status).toBe("error");
     expect(sleep.needsInitialImport).toBe(true);
     expect(sleep.lastErrorCode).toBe("sync_timeout");
+  });
+
+  it("records an abandoned run as a metric when the client reports sync_abandoned", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal("fetch", fetchMock);
+    setOtelConfig({
+      endpoint: "http://otel-collector:4318",
+      serviceName: "family-os-health-api",
+      environment: "prod",
+      enabled: true
+    });
+
+    const { api } = app();
+    const { token, profileId } = await setup(api);
+    await putSettings(api, token, profileId);
+
+    const begin = await beginRun(api, token, profileId, installationId, "sleep", "initial_import");
+    expect(begin.status).toBe(200);
+
+    const failed = await failRun(api, token, profileId, installationId, "sleep", "initial_import", "sync_abandoned");
+    expect(failed.status).toBe(200);
+
+    await flushOtelMetrics();
+
+    expect(fetchMock).toHaveBeenCalled();
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init.body));
+    const metrics = body.resourceMetrics[0].scopeMetrics[0].metrics as Array<{ name: string }>;
+    const abandoned = metrics.find((m) => m.name === "healthkit_run_failures_total");
+    expect(abandoned).toBeDefined();
+
+    _resetOtelMetricsForTests();
+    resetOtelConfigForTests();
+    vi.unstubAllGlobals();
   });
 
   it("replayed completion is idempotent", async () => {
