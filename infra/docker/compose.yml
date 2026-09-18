@@ -1,20 +1,14 @@
-# Base compose file — the app as it is. Local dev runs this file alone:
-#   docker compose up -d
-# Production (homelab host) layers an overlay:
-#   docker compose -f infra/docker/compose.yml -f infra/docker/compose.homelab.yml up -d
+# Local dev: docker compose up -d
+# Prod:     docker compose -f infra/docker/compose.yml -f infra/docker/compose.homelab.yml up -d
 x-logging: &default-logging
   driver: json-file
   options:
     max-size: "10m"
     max-file: "3"
 
-# Project name: "family-os" (instead of the directory name "docker").
-# Resources become family-os_health-api-1, family-os_default, etc.
 name: family-os
 
 services:
-  # One-shot: docker compose --profile migrate run --rm migrate
-  # Safe no-op when schema is already up to date.
   migrate:
     image: ghcr.io/deeepanshu/family-os-health-api:${IMAGE_TAG:-local}
     build:
@@ -29,9 +23,7 @@ services:
     networks:
       - default
       - homelab
-
-  # Single API process serving both the iOS Health API and the MCP/OAuth
-  # surface on one port.
+  # API + MCP in one process.
   health-api:
     image: ghcr.io/deeepanshu/family-os-health-api:${IMAGE_TAG:-local}
     build:
@@ -44,8 +36,6 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 3001
-    # Loopback-only default so local dev never exposes the API. Production
-    # overrides the binding in compose.homelab.yml.
     ports:
       - "127.0.0.1:3001:3001"
     restart: unless-stopped
@@ -56,7 +46,6 @@ services:
       - observability
       - homelab
     healthcheck:
-      # Runtime image is bun-slim: no curl/wget. Probe via bun fetch.
       test: ["CMD", "bun", "-e", "const r = await fetch('http://localhost:3001/health/api/v1/healthcheck'); if (!r.ok) process.exit(1);"]
       interval: 30s
       timeout: 5s
