@@ -106,9 +106,23 @@
       ]
     },
     {
+      "title": "Slowest routes (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "topk(8, histogram_quantile(0.95, sum by (route, le) (rate(app_http_server_request_duration_seconds_bucket[5m]))) and on(route) (sum by (route) (rate(app_http_server_request_duration_seconds_count[5m])) > 0))",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
       "title": "API logs (API + MCP)",
       "type": "logs",
-      "gridPos": { "h": 16, "w": 24, "x": 0, "y": 16 },
+      "gridPos": { "h": 16, "w": 24, "x": 0, "y": 24 },
       "datasource": { "type": "loki", "uid": "loki" },
       "targets": [
         {
