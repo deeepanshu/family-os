@@ -195,9 +195,9 @@ For local smoke tests only, set both `HEALTH_API_ENABLE_DEV_AUTH=true` and
 
 Runtime hardening knobs:
 
-- `HEALTH_API_REPOSITORY` defaults to `memory` for tests and `postgres` otherwise. Production rejects `memory`.
+- The in-memory repository is test-only; the API uses Postgres in every other environment.
 - `HEALTH_API_SYNC_LOCAL_AUTH_USERS` defaults to `true` for non-production Postgres runs and `false` in production.
-- `HEALTH_API_CORS_ORIGIN` defaults to `*` outside production for local app/API smoke tests. Production must set an explicit origin.
+- `HEALTH_API_CORS_ORIGIN` is optional. Unset disables CORS; set one exact browser origin only when a browser client needs it.
 - `SUPABASE_SERVICE_ROLE_KEY` is required in production so account deletion can remove the Auth identity. Missing or blank fails startup.
 - `HEALTH_API_RATE_LIMIT_WINDOW_MS` defaults to `60000`.
 - `HEALTH_API_RATE_LIMIT_MAX_WRITES` defaults to `120` writes per window per bearer token, falling back to IP when no bearer token is present.
@@ -222,21 +222,17 @@ Environment:
 
 ```text
 MCP_PUBLIC_ORIGIN=https://familyos.deepanshujain.me
-MCP_PUBLIC_PATH=/health/api/mcp
-# Optional. Empty = any OAuth client the user consents to (DCR-friendly).
-# MCP_ALLOWED_OAUTH_CLIENT_IDS=chatgpt-client-uuid,other-uuid
 SUPABASE_URL=https://<project>.supabase.co
 SUPABASE_ANON_KEY=...
 ```
 
 - `MCP_PUBLIC_ORIGIN` is **origin only** (scheme + host). Paths, queries, and
-  fragments are rejected so they are not silently combined into
-  `.../health/api/mcp`. Production requires `https:`. Non-production may use
+  fragments are rejected. Production requires `https:`. Non-production may use
   `http:` only on loopback (`localhost`, `127.0.0.1`, `::1`).
-- `MCP_ALLOWED_OAUTH_CLIENT_IDS` is **optional**. When empty (recommended with
-  Dynamic Client Registration — Grok/ChatGPT mint a new client id each connect),
-  any OAuth client may receive a Family OS health grant after user consent.
-  When set, only those Supabase OAuth client IDs may grant.
+- `MCP_PUBLIC_PATH` defaults to `/health/api/mcp`; leave it out of production
+  environment configuration unless the public MCP route changes.
+- Dynamic OAuth clients may receive a health grant after user consent. The API
+  still requires an active `mcp_connection_grants` row for that user and client.
 
 Supabase Auth OAuth Server settings:
 
@@ -245,9 +241,8 @@ Supabase Auth OAuth Server settings:
 
 Consent flow creates the Family OS `mcp_connection_grants` row using the OAuth
 `client_id` from Supabase `getAuthorizationDetails`, never from a browser body.
-Optional client-id allowlist may restrict grants; empty allowlist accepts any
-client after user consent. If Supabase approval then fails, the grant is revoked
-immediately. `POST /health/api/v1/mcp/connections` is not used for grant creation.
+If Supabase approval fails, the grant is revoked immediately.
+`POST /health/api/v1/mcp/connections` is not used for grant creation.
 
 ### JWT audience for MCP tokens
 

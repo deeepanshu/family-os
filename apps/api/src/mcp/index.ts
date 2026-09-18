@@ -11,7 +11,6 @@ export {
 } from "./sampleAggregation";
 export {
   mcpResourceUrl,
-  mcpPublicBaseUrl,
   mcpPublicOrigin,
   mcpPublicPath,
   mcpProtectedResourceMetadataUrl

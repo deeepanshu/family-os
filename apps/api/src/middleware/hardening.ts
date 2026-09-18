@@ -15,14 +15,22 @@ import {
 
 const writeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
-export function corsMiddleware(config: AppConfig) {
-  return cors({
-    origin: config.HEALTH_API_CORS_ORIGIN,
-    allowHeaders: ["authorization", "content-type", "accept", "x-request-id"],
-    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    exposeHeaders: ["x-request-id"],
-    maxAge: 600
-  });
+type CorsPolicy = {
+  allowHeaders: string[];
+  allowMethods: string[];
+  exposeHeaders: string[];
+  maxAge: number;
+};
+
+const healthApiCorsPolicy: CorsPolicy = {
+  allowHeaders: ["authorization", "content-type", "accept", "x-request-id"],
+  allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  exposeHeaders: ["x-request-id"],
+  maxAge: 600
+};
+
+export function corsMiddleware(origin: string, policy: CorsPolicy = healthApiCorsPolicy) {
+  return cors({ origin, ...policy });
 }
 
 export function requestLoggingMiddleware() {

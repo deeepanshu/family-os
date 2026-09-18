@@ -46,8 +46,3 @@ export function mcpOAuthPath(config: AppConfig): string {
   }
   return `${path.slice(0, -"/mcp".length)}/oauth`;
 }
-
-/** @deprecated Use mcpPublicOrigin + mcpPublicPath. Kept for callers that need the resource origin only. */
-export function mcpPublicBaseUrl(config: AppConfig): string {
-  return mcpPublicOrigin(config);
-}

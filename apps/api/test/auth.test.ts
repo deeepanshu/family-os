@@ -13,14 +13,15 @@ afterEach(() => {
 const testUserId = "00000000-0000-4000-8000-000000000001";
 const jwtSecret = "test-supabase-jwt-secret-with-enough-length";
 
-function app() {
+function app(corsOrigin?: string) {
   return createApp({
     config: {
       NODE_ENV: "test",
       PORT: 3001,
       HEALTH_API_ENABLE_DEV_AUTH: false,
       SUPABASE_JWT_SECRET: jwtSecret,
-      SUPABASE_URL: "https://project.supabase.co"
+      SUPABASE_URL: "https://project.supabase.co",
+      ...(corsOrigin ? { HEALTH_API_CORS_ORIGIN: corsOrigin } : {})
     }
   });
 }
@@ -55,18 +56,30 @@ describe("health API bootstrap", () => {
     });
   });
 
-  it("returns CORS headers for health API preflight requests", async () => {
+  it("does not enable CORS without an allowed origin", async () => {
     const response = await app().request(`${HEALTH_API_PREFIX}/families`, {
       method: "OPTIONS",
       headers: {
-        origin: "http://localhost:5173",
+        origin: "https://console.familyos.test",
+        "access-control-request-method": "POST"
+      }
+    });
+
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("returns CORS headers for the configured origin", async () => {
+    const response = await app("https://console.familyos.test").request(`${HEALTH_API_PREFIX}/families`, {
+      method: "OPTIONS",
+      headers: {
+        origin: "https://console.familyos.test",
         "access-control-request-method": "POST",
         "access-control-request-headers": "authorization,content-type"
       }
     });
 
     expect(response.status).toBe(204);
-    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://console.familyos.test");
     expect(response.headers.get("access-control-allow-methods")).toContain("POST");
     expect(response.headers.get("access-control-allow-headers")).toContain("authorization");
   });
@@ -85,9 +98,8 @@ describe("health API bootstrap", () => {
   it("rate limits write requests by bearer token", async () => {
     const responseOne = await createApp({
       config: {
-        NODE_ENV: "development",
+        NODE_ENV: "test",
         PORT: 3001,
-        HEALTH_API_REPOSITORY: "memory",
         HEALTH_API_ENABLE_DEV_AUTH: true,
         HEALTH_API_DEV_AUTH_USER_ID: testUserId,
         HEALTH_API_RATE_LIMIT_MAX_WRITES: 1
@@ -103,9 +115,8 @@ describe("health API bootstrap", () => {
 
     const appWithRateLimit = createApp({
       config: {
-        NODE_ENV: "development",
+        NODE_ENV: "test",
         PORT: 3001,
-        HEALTH_API_REPOSITORY: "memory",
         HEALTH_API_ENABLE_DEV_AUTH: true,
         HEALTH_API_DEV_AUTH_USER_ID: testUserId,
         HEALTH_API_RATE_LIMIT_MAX_WRITES: 1
@@ -141,9 +152,8 @@ describe("health API bootstrap", () => {
   it("normalizes bearer scheme and whitespace for rate-limit keys", async () => {
     const appWithRateLimit = createApp({
       config: {
-        NODE_ENV: "development",
+        NODE_ENV: "test",
         PORT: 3001,
-        HEALTH_API_REPOSITORY: "memory",
         HEALTH_API_ENABLE_DEV_AUTH: true,
         HEALTH_API_DEV_AUTH_USER_ID: testUserId,
         HEALTH_API_RATE_LIMIT_MAX_WRITES: 1
@@ -301,9 +311,8 @@ describe("health API bootstrap", () => {
   it("supports an explicit non-production dev token for local iOS smoke tests", async () => {
     const response = await createApp({
       config: {
-        NODE_ENV: "development",
+        NODE_ENV: "test",
         PORT: 3001,
-        HEALTH_API_REPOSITORY: "memory",
         HEALTH_API_ENABLE_DEV_AUTH: true,
         HEALTH_API_DEV_AUTH_USER_ID: testUserId
       }
@@ -324,9 +333,8 @@ describe("health API bootstrap", () => {
   it("does not allow the dev token unless explicitly enabled", async () => {
     const response = await createApp({
       config: {
-        NODE_ENV: "development",
+        NODE_ENV: "test",
         PORT: 3001,
-        HEALTH_API_REPOSITORY: "memory",
         HEALTH_API_ENABLE_DEV_AUTH: false,
         HEALTH_API_DEV_AUTH_USER_ID: testUserId,
         SUPABASE_JWT_SECRET: jwtSecret
@@ -353,8 +361,6 @@ describe("health API bootstrap", () => {
         MCP_PUBLIC_ORIGIN: "https://familyos.deepanshujain.me",
         SUPABASE_ANON_KEY: "test-anon-key",
         SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
-        MCP_ALLOWED_OAUTH_CLIENT_IDS: "chatgpt-prod",
-        HEALTH_API_CORS_ORIGIN: "https://app.deepanshujain.com"
       },
       familyRepository: new InMemoryFamilyRepository()
     }).request(`${HEALTH_API_PREFIX}/me`, {

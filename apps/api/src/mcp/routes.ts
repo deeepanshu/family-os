@@ -1,11 +1,11 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { Hono } from "hono";
-import { cors } from "hono/cors";
 import { randomUUID } from "node:crypto";
 import type { AppConfig } from "../config";
 import { extractBearerToken, verifyBearerToken, type AppVariables } from "../auth";
 import { HttpError, jsonError } from "../errors";
 import type { AppRepositories } from "../repositories/contracts";
+import { corsMiddleware } from "../middleware/hardening";
 import { HealthMcpReadService } from "./HealthMcpReadService";
 import { createFamilyOsMcpServer } from "./createMcpServer";
 import {
@@ -70,31 +70,31 @@ export function createMcpRoutes(deps: McpRouteDeps) {
       healthKit: deps.repositories.healthKit,
       mcpConnections: deps.repositories.mcpConnections,
       auditLogs: deps.repositories.auditLogs,
-      allowedOAuthClientIds: deps.config.MCP_ALLOWED_OAUTH_CLIENT_IDS,
       rateLimiter: new McpRateLimiter(
         deps.config.MCP_RATE_LIMIT_WINDOW_MS,
         deps.config.MCP_RATE_LIMIT_MAX_CALLS
       )
     });
 
-  routes.use(
-    "*",
-    cors({
-      origin: deps.config.HEALTH_API_CORS_ORIGIN,
-      allowHeaders: [
-        "authorization",
-        "content-type",
-        "accept",
-        "mcp-protocol-version",
-        "mcp-session-id",
-        "last-event-id",
-        "x-request-id"
-      ],
-      allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
-      exposeHeaders: ["mcp-session-id", "mcp-protocol-version", "www-authenticate", "x-request-id"],
-      maxAge: 600
-    })
-  );
+  if (deps.config.HEALTH_API_CORS_ORIGIN) {
+    routes.use(
+      "*",
+      corsMiddleware(deps.config.HEALTH_API_CORS_ORIGIN, {
+        allowHeaders: [
+          "authorization",
+          "content-type",
+          "accept",
+          "mcp-protocol-version",
+          "mcp-session-id",
+          "last-event-id",
+          "x-request-id"
+        ],
+        allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
+        exposeHeaders: ["mcp-session-id", "mcp-protocol-version", "www-authenticate", "x-request-id"],
+        maxAge: 600
+      })
+    );
+  }
 
   routes.get("/healthcheck", (c) => {
     return c.json({

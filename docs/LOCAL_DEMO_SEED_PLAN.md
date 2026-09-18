@@ -20,7 +20,7 @@ Demo data lives in the API. The iOS app stays a real HTTP client (`dev-token` �
 | Debug / `FAMILY_OS_ENV=local` | `http://localhost:3001/health/api/v1` |
 | Local API | `npm run db:up && npm run db:migrate:local && npm run api:dev` |
 | Auth bypass | Debug **Continue** → `Bearer dev-token` |
-| In-memory store | `HEALTH_API_REPOSITORY=memory` — test fake; production rejects it |
+| In-memory store | `InMemoryFamilyRepository` — test fake, selected only under `NODE_ENV=test` |
 | Phone Debug | LAN IP in `HEALTH_API_BASE_URL`; `localhost` is the phone |
 | ATS | `NSAllowsLocalNetworking` already on |
 
@@ -131,7 +131,6 @@ Existing API:
 
 ```sh
 DATABASE_URL=postgres://family_os:family_os@localhost:5432/family_os \
-HEALTH_API_REPOSITORY=postgres \
 HEALTH_API_SYNC_LOCAL_AUTH_USERS=true \
 HEALTH_API_ENABLE_DEV_AUTH=true \
 HEALTH_API_DEV_AUTH_USER_ID=00000000-0000-4000-8000-000000000001 \
@@ -161,7 +160,7 @@ No production override flag in this pass. `NODE_ENV` alone is weak; the host che
 6. Run seed against local Postgres and confirm the seeded records are present. Exact totals are only asserted in the fresh in-memory contract test; existing local HealthKit rows are intentionally kept.
 7. One-line note in `AGENTS.md` and README local setup.
 
-`HEALTH_API_REPOSITORY=memory` stays a unit-test store. Do not use it as the phone backend: state dies on restart, and HealthKit sync is what must persist.
+`InMemoryFamilyRepository` is test-only. The API runtime uses Postgres outside `NODE_ENV=test`; do not use a non-persistent store as the phone backend.
 
 ## Out of scope
 

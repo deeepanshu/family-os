@@ -13,7 +13,6 @@ Run the local Health API with the local Postgres user and the dev-token smoke-te
 
 ```sh
 DATABASE_URL=postgres://family_os:family_os@localhost:5432/family_os \
-HEALTH_API_REPOSITORY=postgres \
 HEALTH_API_SYNC_LOCAL_AUTH_USERS=true \
 HEALTH_API_ENABLE_DEV_AUTH=true \
 HEALTH_API_DEV_AUTH_USER_ID=00000000-0000-4000-8000-000000000001 \

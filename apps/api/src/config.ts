@@ -10,7 +10,6 @@ const envSchema = z.object({
   HOST: z.preprocess(emptyToUndefined, z.string().default("0.0.0.0")),
   PORT: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(3001)),
   DATABASE_URL: z.preprocess(emptyToUndefined, z.string().optional()),
-  HEALTH_API_REPOSITORY: z.preprocess(emptyToUndefined, z.enum(["memory", "postgres"]).optional()),
   HEALTH_API_SYNC_LOCAL_AUTH_USERS: z.preprocess(emptyToUndefined, z.coerce.boolean().optional()),
   SUPABASE_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
   SUPABASE_ANON_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
@@ -33,18 +32,6 @@ const envSchema = z.object({
    * metadata at /.well-known/oauth-protected-resource/health/api/mcp
    */
   MCP_PUBLIC_PATH: z.preprocess(emptyToUndefined, z.string().default(DEFAULT_MCP_PUBLIC_PATH)),
-  /**
-   * @deprecated Prefer MCP_PUBLIC_ORIGIN + MCP_PUBLIC_PATH.
-   * If set without MCP_PUBLIC_ORIGIN, treated as the public origin (not the resource URL).
-   */
-  MCP_PUBLIC_BASE_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
-  /**
-   * Optional comma-separated Supabase OAuth client IDs allowed to receive Family
-   * OS MCP health grants. When empty (default), any OAuth client the user
-   * consents to may receive a grant — required for Dynamic Client Registration
-   * (Grok, ChatGPT, etc. mint a new client id per connect).
-   */
-  MCP_ALLOWED_OAUTH_CLIENT_IDS: z.preprocess(emptyToUndefined, z.string().optional()),
   MCP_RESOURCE_NAME: z.preprocess(emptyToUndefined, z.string().default("FamilyStack Health MCP")),
   MCP_CONSENT_VERSION: z.preprocess(emptyToUndefined, z.string().default("2026-07-18")),
   MCP_TOOL_TIMEOUT_MS: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(10_000)),
@@ -65,15 +52,12 @@ const envSchema = z.object({
 type ParsedAppConfig = z.infer<typeof envSchema>;
 export type AppConfig = Omit<
   ParsedAppConfig,
-  "HEALTH_API_CORS_ORIGIN" | "MCP_PUBLIC_ORIGIN" | "MCP_PUBLIC_PATH" | "MCP_ALLOWED_OAUTH_CLIENT_IDS"
+  "MCP_PUBLIC_ORIGIN" | "MCP_PUBLIC_PATH"
 > & {
-  HEALTH_API_CORS_ORIGIN: string;
-  HEALTH_API_REPOSITORY: "memory" | "postgres";
+  repository: "memory" | "postgres";
   HEALTH_API_SYNC_LOCAL_AUTH_USERS: boolean;
   MCP_PUBLIC_ORIGIN?: string;
   MCP_PUBLIC_PATH: string;
-  /** Parsed allowlist; empty means unrestricted (any consented OAuth client). */
-  MCP_ALLOWED_OAUTH_CLIENT_IDS: string[];
 };
 
 function normalizePublicPath(path: string): string {
@@ -141,40 +125,16 @@ export function parsePublicOrigin(
   return url.origin;
 }
 
-function parseOAuthClientAllowlist(raw: string | undefined): string[] {
-  if (!raw) {
-    return [];
-  }
-  const ids = raw
-    .split(",")
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0);
-  return [...new Set(ids)];
-}
-
-/** True when the OAuth client may receive / use MCP health grants. */
-export function isMcpOAuthClientAllowed(config: AppConfig, oauthClientId: string): boolean {
-  // Empty allowlist = open (DCR clients change every connect).
-  if (config.MCP_ALLOWED_OAUTH_CLIENT_IDS.length === 0) {
-    return true;
-  }
-  return config.MCP_ALLOWED_OAUTH_CLIENT_IDS.includes(oauthClientId);
-}
 
 export function loadConfig(env: Record<string, unknown> = process.env): AppConfig {
   const config = envSchema.parse(env);
-  if (config.NODE_ENV === "production" && !config.HEALTH_API_CORS_ORIGIN) {
-    throw new Error("HEALTH_API_CORS_ORIGIN must be configured in production.");
-  }
 
-  const originRaw = config.MCP_PUBLIC_ORIGIN ?? config.MCP_PUBLIC_BASE_URL;
-  const mcpPublicOrigin = originRaw
-    ? parsePublicOrigin(originRaw, config.MCP_PUBLIC_ORIGIN ? "MCP_PUBLIC_ORIGIN" : "MCP_PUBLIC_BASE_URL", {
+  const mcpPublicOrigin = config.MCP_PUBLIC_ORIGIN
+    ? parsePublicOrigin(config.MCP_PUBLIC_ORIGIN, "MCP_PUBLIC_ORIGIN", {
         nodeEnv: config.NODE_ENV
       })
     : undefined;
   const mcpPublicPath = normalizePublicPath(config.MCP_PUBLIC_PATH);
-  const allowedOAuthClientIds = parseOAuthClientAllowlist(config.MCP_ALLOWED_OAUTH_CLIENT_IDS);
 
   if (!mcpPublicPath.endsWith("/mcp")) {
     throw new Error("MCP_PUBLIC_PATH must end with /mcp so the OAuth consent path can be derived.");
@@ -191,21 +151,16 @@ export function loadConfig(env: Record<string, unknown> = process.env): AppConfi
   if (config.NODE_ENV === "production" && !config.SUPABASE_SERVICE_ROLE_KEY) {
     throw new Error("SUPABASE_SERVICE_ROLE_KEY must be configured in production so account deletion can remove the Auth identity.");
   }
-  const repository = config.HEALTH_API_REPOSITORY ?? (config.NODE_ENV === "test" ? "memory" : "postgres");
-  if (config.NODE_ENV === "production" && repository === "memory") {
-    throw new Error("HEALTH_API_REPOSITORY=memory is not allowed in production.");
-  }
+  const repository = config.NODE_ENV === "test" ? "memory" : "postgres";
   if (repository === "postgres" && !config.DATABASE_URL) {
-    throw new Error("DATABASE_URL must be configured when HEALTH_API_REPOSITORY=postgres.");
+    throw new Error("DATABASE_URL must be configured outside tests.");
   }
   return {
     ...config,
-    HEALTH_API_CORS_ORIGIN: config.HEALTH_API_CORS_ORIGIN ?? "*",
-    HEALTH_API_REPOSITORY: repository,
+    repository,
     HEALTH_API_SYNC_LOCAL_AUTH_USERS:
       config.HEALTH_API_SYNC_LOCAL_AUTH_USERS ?? (repository === "postgres" && config.NODE_ENV !== "production"),
     MCP_PUBLIC_ORIGIN: mcpPublicOrigin,
-    MCP_PUBLIC_PATH: mcpPublicPath,
-    MCP_ALLOWED_OAUTH_CLIENT_IDS: allowedOAuthClientIds
+    MCP_PUBLIC_PATH: mcpPublicPath
   };
 }
