@@ -1,11 +1,11 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { Hono } from "hono";
-import { cors } from "hono/cors";
 import { randomUUID } from "node:crypto";
 import type { AppConfig } from "../config";
 import { extractBearerToken, verifyBearerToken, type AppVariables } from "../auth";
 import { HttpError, jsonError } from "../errors";
 import type { AppRepositories } from "../repositories/contracts";
+import { corsMiddleware } from "../middleware/hardening";
 import { HealthMcpReadService } from "./HealthMcpReadService";
 import { createFamilyOsMcpServer } from "./createMcpServer";
 import {
@@ -80,8 +80,7 @@ export function createMcpRoutes(deps: McpRouteDeps) {
   if (deps.config.HEALTH_API_CORS_ORIGIN) {
     routes.use(
       "*",
-      cors({
-        origin: deps.config.HEALTH_API_CORS_ORIGIN,
+      corsMiddleware(deps.config.HEALTH_API_CORS_ORIGIN, {
         allowHeaders: [
           "authorization",
           "content-type",
