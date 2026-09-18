@@ -187,3 +187,54 @@ jobs:
           komodo /execute "$(jq -nc \
             '{type:"DeployStack",params:{stack:"family-os"}}')"
 
+
+  notify:
+    name: ntfy
+    needs: [changes, build-and-push, deploy]
+    runs-on: ubuntu-latest
+    if: |
+      always() &&
+      needs.changes.result == 'success' &&
+      needs.changes.outputs.deploy == 'true' &&
+      (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+    steps:
+      - name: Publish ntfy
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          BUILD: ${{ needs.build-and-push.result }}
+          DEPLOY: ${{ needs.deploy.result }}
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag || needs.changes.outputs.image_tag }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NTFY_TOPIC}" ]; then
+            echo "NTFY_TOPIC secret not set; skipping"
+            exit 0
+          fi
+
+          if [ "${DEPLOY}" = "success" ]; then
+            status=success
+            title="family-os deploy ok"
+            prio=default
+            tags="white_check_mark"
+          elif [ "${BUILD}" = "failure" ]; then
+            status=failed
+            title="family-os image build failed"
+            prio=high
+            tags="x"
+          else
+            status=failed
+            title="family-os deploy failed"
+            prio=high
+            tags="x"
+          fi
+
+          body="status=${status} tag=${IMAGE_TAG} sha=${SHA:0:12} build=${BUILD} deploy=${DEPLOY}"
+          curl -fsS --max-time 15 -X POST "https://ntfy.sh/${NTFY_TOPIC}" \
+            -H "Title: ${title}" \
+            -H "Priority: ${prio}" \
+            -H "Tags: ${tags}" \
+            -H "Click: https://komodo.deepanshujain.me/" \
+            -d "${body}"
+          echo "ntfy ${status}"
+
