@@ -29,6 +29,8 @@ COPY scripts/docker-migrate.sh ./scripts/docker-migrate.sh
 
 RUN chmod +x ./scripts/docker-migrate.sh
 
+LABEL org.opencontainers.image.source="https://github.com/deeepanshu/family-os"
+
 EXPOSE 3001
 
 CMD ["bun", "apps/api/src/server.ts"]
