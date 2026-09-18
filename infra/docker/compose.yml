@@ -8,6 +8,10 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "3"
 
+# Project name: "family-os" (instead of the directory name "docker").
+# Resources become family-os_health-api-1, family-os_default, etc.
+name: family-os
+
 services:
   # One-shot: docker compose --profile migrate run --rm migrate
   # Safe no-op when schema is already up to date.
