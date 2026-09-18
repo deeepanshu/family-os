@@ -51,6 +51,13 @@ services:
       - default
       - observability
       - homelab
+    healthcheck:
+      # Runtime image is bun-slim: no curl/wget. Probe via bun fetch.
+      test: ["CMD", "bun", "-e", "const r = await fetch('http://localhost:3001/health/api/v1/healthcheck'); if (!r.ok) process.exit(1);"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
 networks:
   observability:
