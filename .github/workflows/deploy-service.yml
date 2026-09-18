@@ -33,5 +33,5 @@ jobs:
       deploy_path_regex: '^(infra/docker/|\.github/workflows/deploy-service\.yml$)'
       caller_event: ${{ github.event_name }}
       caller_before: ${{ github.event.before }}
-      image_tag: ${{ inputs.image_tag }}
+      image_tag: ${{ github.event.inputs.image_tag }}
     secrets: inherit
