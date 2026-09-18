@@ -139,10 +139,10 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    name: Deploy via manager
+    name: Deploy via Komodo
     needs: [changes, build-and-push]
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 5
     if: |
       always() &&
       needs.changes.result == 'success' &&
@@ -150,73 +150,27 @@ jobs:
       (needs.changes.outputs.build != 'true' || needs.build-and-push.result == 'success') &&
       (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
     steps:
-      - name: Deploy and wait for Pi success
+      - name: Trigger Komodo stack deploy
         env:
-          DEPLOY_SECRET: ${{ secrets.DEPLOY_SECRET }}
+          KOMODO_WEBHOOK_SECRET: ${{ secrets.KOMODO_WEBHOOK_SECRET }}
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag || needs.changes.outputs.image_tag }}
-          # Short curl per request; overall wait is the poll loop (~15 min).
-          POLL_INTERVAL: "10"
-          MAX_ATTEMPTS: "90"
-          CURL_MAX_TIME: "30"
         run: |
           set -euo pipefail
-          if [ -z "${DEPLOY_SECRET}" ]; then
-            echo "Missing repo secret DEPLOY_SECRET" >&2
+          if [ -z "${KOMODO_WEBHOOK_SECRET}" ]; then
+            echo "Missing repo secret KOMODO_WEBHOOK_SECRET" >&2
             exit 1
           fi
 
-          # manager allowlists main. Pre-merge workflow_dispatch from a feature
-          # branch still deploys the built image_tag/sha; report ref as main for the hook.
-          HOOK_REF="${GITHUB_REF}"
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ "${GITHUB_REF}" != "refs/heads/main" ]; then
-            echo "Pre-merge deploy from ${GITHUB_REF}; using refs/heads/main for manager allowlist"
-            HOOK_REF="refs/heads/main"
-          fi
-          RESP="$(curl -fsS --max-time 60 -X POST \
-            "https://manager.deepanshujain.me/hooks/deploy/family-os" \
+          # Stack env IMAGE_TAG=main. This fires after GHCR push of :main.
+          # Synthetic GitHub payload so Komodo's listener matches branch main.
+          BODY="$(jq -nc --arg ref "refs/heads/main" '{ref:$ref}')"
+          SIG="$(printf '%s' "${BODY}" | openssl dgst -sha256 -hmac "${KOMODO_WEBHOOK_SECRET}" | awk '{print $2}')"
+
+          echo "Triggering Komodo deploy (image_tag=${IMAGE_TAG}, stack pulls :main)"
+          curl -fsS --max-time 60 -X POST \
+            "https://komodo.deepanshujain.me/listener/github/stack/family-os/deploy" \
             -H "Content-Type: application/json" \
-            -H "X-Deploy-Secret: ${DEPLOY_SECRET}" \
-            -d "$(jq -nc \
-              --arg ref "${HOOK_REF}" \
-              --arg sha "${GITHUB_SHA}" \
-              --arg tag "${IMAGE_TAG}" \
-              --arg repo "${GITHUB_REPOSITORY}" \
-              '{ref:$ref, sha:$sha, image_tag:$tag, repository:$repo}')")"
-          echo "${RESP}"
-          DEPLOY_ID="$(echo "${RESP}" | jq -r '.deploy_id // empty')"
-          if [ -z "${DEPLOY_ID}" ] || [ "${DEPLOY_ID}" = "null" ]; then
-            echo "Hook response missing deploy_id" >&2
-            exit 1
-          fi
-          echo "Waiting for deploy_id=${DEPLOY_ID} tag=${IMAGE_TAG}"
-
-          STATUS_URL="https://manager.deepanshujain.me/api/deploys/${DEPLOY_ID}"
-          for attempt in $(seq 1 "${MAX_ATTEMPTS}"); do
-            body="$(curl -fsS --max-time "${CURL_MAX_TIME}" \
-              -H "X-Deploy-Secret: ${DEPLOY_SECRET}" \
-              -H "Accept: application/json" \
-              "${STATUS_URL}" 2>/dev/null || true)"
-            if [ -z "${body}" ]; then
-              echo "[${attempt}/${MAX_ATTEMPTS}] poll error; retrying…"
-              sleep "${POLL_INTERVAL}"
-              continue
-            fi
-            status="$(echo "${body}" | jq -r '.status // empty')"
-            message="$(echo "${body}" | jq -r '.message // empty')"
-            echo "[${attempt}/${MAX_ATTEMPTS}] status=${status} ${message}"
-            case "${status}" in
-              success)
-                echo "Deploy ${DEPLOY_ID} succeeded"
-                exit 0
-                ;;
-              failed|rejected)
-                echo "Deploy ${DEPLOY_ID} ${status}" >&2
-                exit 1
-                ;;
-              *)
-                sleep "${POLL_INTERVAL}"
-                ;;
-            esac
-          done
-          echo "Deploy ${DEPLOY_ID} timed out" >&2
-          exit 1
+            -H "X-Hub-Signature-256: sha256=${SIG}" \
+            -d "${BODY}"
+          echo
+          echo "Komodo accepted the webhook (deploy runs async). Watch the stack in the UI."
