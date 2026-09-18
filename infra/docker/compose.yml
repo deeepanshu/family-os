@@ -10,7 +10,7 @@ name: family-os
 
 services:
   migrate:
-    image: ghcr.io/deeepanshu/family-os-health-api:${IMAGE_TAG:-local}
+    image: ghcr.io/deeepanshu/family-os-health-api:${IMAGE_TAG:?IMAGE_TAG must be set}
     build:
       context: ../..
       dockerfile: Dockerfile
@@ -25,7 +25,7 @@ services:
       - homelab
   # API + MCP in one process.
   health-api:
-    image: ghcr.io/deeepanshu/family-os-health-api:${IMAGE_TAG:-local}
+    image: ghcr.io/deeepanshu/family-os-health-api:${IMAGE_TAG:?IMAGE_TAG must be set}
     build:
       context: ../..
       dockerfile: Dockerfile

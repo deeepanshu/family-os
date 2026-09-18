@@ -4,7 +4,7 @@
 #   docker compose -f infra/docker/compose.yml -f infra/docker/compose.homelab.yml up -d
 #
 # Differences from base:
-# - IMAGE_TAG is pinned by the deploy pipeline (CI sets it; refuses :local).
+# - IMAGE_TAG is required (CI sets it to the deploy sha).
 # - health-api publishes 3001 on all interfaces so the cloudflared container
 #   can reach it across the LAN (tunnel target: http://apps.lab:3001).
 # - OTLP endpoint points at the homelab collector (otel.lab is Pi-hole DNS).
