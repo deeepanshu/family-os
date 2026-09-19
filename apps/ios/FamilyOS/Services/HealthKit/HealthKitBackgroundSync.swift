@@ -422,11 +422,19 @@ enum HealthKitBackgroundSync {
         let handle = BGProcessingHandle(task)
         task.expirationHandler = {
             processingWork.cancel()
-            handle.complete(success: false)
-            CrashReporting.log("healthkit_bg_task_expired")
+            Task {
+                CrashReporting.log(
+                    "healthkit_bg_task_expired",
+                    severity: .warn,
+                    attributes: ["reason": "bg_task", "error_code": "task_expired"]
+                )
+                _ = await AppLogs.flushAndWait(force: true, timeout: 1)
+                handle.complete(success: false)
+            }
         }
         let work = Task {
             await runBoundedSync(reason: "bg_task")
+            guard !Task.isCancelled else { return }
             CrashReporting.log("healthkit_bg_task_completed")
             _ = await AppLogs.flushAndWait(force: true)
             handle.complete(success: true)
@@ -440,11 +448,19 @@ enum HealthKitBackgroundSync {
         let handle = BGRefreshHandle(task)
         task.expirationHandler = {
             refreshWork.cancel()
-            handle.complete(success: false)
-            CrashReporting.log("healthkit_bg_refresh_expired")
+            Task {
+                CrashReporting.log(
+                    "healthkit_bg_refresh_expired",
+                    severity: .warn,
+                    attributes: ["reason": "bg_refresh", "error_code": "task_expired"]
+                )
+                _ = await AppLogs.flushAndWait(force: true, timeout: 1)
+                handle.complete(success: false)
+            }
         }
         let work = Task {
             await runBoundedSync(reason: "bg_refresh")
+            guard !Task.isCancelled else { return }
             CrashReporting.log("healthkit_bg_refresh_completed")
             _ = await AppLogs.flushAndWait(force: true)
             handle.complete(success: true)
@@ -756,16 +772,21 @@ enum HealthKitBackgroundSync {
                                     activeSeconds: seconds(loopClock.now - metricStarted),
                                     wallSeconds: Date().timeIntervalSince(metricWallStarted)
                                 )
+                                var failureAttributes = [
+                                    "reason": reason,
+                                    "group": metric.scopeMetricKey,
+                                    "error_code": (error as? HealthAPIError)?.errorCode ?? "other",
+                                    "active_ms": String(Int(seconds(loopClock.now - metricStarted) * 1000)),
+                                    "wall_ms": String(Int(Date().timeIntervalSince(metricWallStarted) * 1000)),
+                                    "was_suspended": accounting.wasSuspended ? "true" : "false"
+                                ]
+                                if let requestID = (error as? HealthAPIError)?.requestId {
+                                    failureAttributes["request_id"] = requestID
+                                }
                                 CrashReporting.log(
                                     "healthkit_bg_metric_failed",
                                     severity: .warn,
-                                    attributes: [
-                                        "reason": reason,
-                                        "group": metric.scopeMetricKey,
-                                        "active_ms": String(Int(seconds(loopClock.now - metricStarted) * 1000)),
-                                        "wall_ms": String(Int(Date().timeIntervalSince(metricWallStarted) * 1000)),
-                                        "was_suspended": accounting.wasSuspended ? "true" : "false"
-                                    ]
+                                    attributes: failureAttributes
                                 )
                                 if isLockedHealthKitError(error) {
                                     CrashReporting.log(

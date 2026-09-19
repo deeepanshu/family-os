@@ -137,14 +137,20 @@ enum AppLogs {
     /// handler returns, so callers reporting a background terminal state use
     /// this instead of the opportunistic flush below.
     @discardableResult
-    static func flushAndWait(force: Bool = false) async -> Bool {
+    static func flushAndWait(force: Bool = false, timeout: TimeInterval = 10) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
         let snapshot: Snapshot
         while true {
             switch prepareAwaitedFlush(force: force) {
             case let .ready(nextSnapshot):
                 snapshot = nextSnapshot
             case .waiting:
-                try? await Task.sleep(for: .milliseconds(25))
+                guard !Task.isCancelled, Date() < deadline else { return false }
+                do {
+                    try await Task.sleep(for: .milliseconds(25))
+                } catch {
+                    return false
+                }
                 continue
             case .unavailable:
                 return false
@@ -159,7 +165,7 @@ enum AppLogs {
 
         var request = URLRequest(url: snapshot.configuration.endpoint)
         request.httpMethod = "POST"
-        request.timeoutInterval = 10
+        request.timeoutInterval = max(0.1, deadline.timeIntervalSinceNow)
         request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         for (field, value) in snapshot.configuration.headers {

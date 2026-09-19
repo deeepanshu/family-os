@@ -265,7 +265,12 @@ enum AppMetrics {
             case let .ready(nextSnapshot):
                 snapshot = nextSnapshot
             case .waiting:
-                try? await Task.sleep(for: .milliseconds(25))
+                guard !Task.isCancelled else { return false }
+                do {
+                    try await Task.sleep(for: .milliseconds(25))
+                } catch {
+                    return false
+                }
                 continue
             case .unavailable:
                 return false
