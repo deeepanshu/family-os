@@ -39,13 +39,14 @@
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
     },
     {
-      "title": "HealthKit sync duration p50 / p95",
+      "title": "HealthKit sync active / wall duration",
       "type": "timeseries",
       "gridPos": { "h": 9, "w": 12, "x": 0, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
-        { "expr": "histogram_quantile(0.50, sum by (le) (rate(app_ios_healthkit_sync_duration_seconds_bucket{installation_id=~\"$installation_id\"}[24h])))", "legendFormat": "p50", "refId": "A" },
-        { "expr": "histogram_quantile(0.95, sum by (le) (rate(app_ios_healthkit_sync_duration_seconds_bucket{installation_id=~\"$installation_id\"}[24h])))", "legendFormat": "p95", "refId": "B" }
+        { "expr": "histogram_quantile(0.50, sum by (le) (rate(app_ios_healthkit_sync_duration_seconds_bucket{installation_id=~\"$installation_id\"}[24h])))", "legendFormat": "active p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(app_ios_healthkit_sync_duration_seconds_bucket{installation_id=~\"$installation_id\"}[24h])))", "legendFormat": "active p95", "refId": "B" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(app_ios_healthkit_sync_wall_seconds_bucket{installation_id=~\"$installation_id\"}[24h])))", "legendFormat": "wall p95", "refId": "C" }
       ],
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
     },
@@ -124,6 +125,69 @@
         "instant": true,
         "refId": "A"
       }]
+    },
+    {
+      "title": "Background sync runs with system-asleep gap (24h)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 58 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum(increase(app_ios_healthkit_sync_duration_seconds_count{installation_id=~\"$installation_id\",reason=~\"bg_task|bg_refresh|observer\",was_suspended=\"true\"}[24h])) or vector(0)", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] } }, "overrides": [] }
+    },
+    {
+      "title": "Background terminal events",
+      "type": "logs",
+      "gridPos": { "h": 16, "w": 18, "x": 6, "y": 58 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{
+        "expr": "{service_name=\"family-os-ios\"} |~ \"healthkit_(bg_sync_skip|bg_metric_failed|observer_sync_timeout|run_abandon(ed|_failed|_skipped_no_hook)|bg_(task|refresh)_expired)\"",
+        "refId": "A"
+      }],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      }
+    },
+    {
+      "title": "Background skips and failures (24h)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 74 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (skip_reason) (increase(app_ios_healthkit_sync_skips_total{installation_id=~\"$installation_id\"}[24h]))",
+          "legendFormat": "skip · {{skip_reason}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (group, code) (increase(app_ios_healthkit_sync_failures_total{installation_id=~\"$installation_id\"}[24h]))",
+          "legendFormat": "failure · {{group}} · {{code}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
+    },
+    {
+      "title": "Per-group active / wall p95",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 74 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (group, le) (rate(app_ios_healthkit_metric_duration_seconds_bucket{installation_id=~\"$installation_id\"}[24h])))",
+          "legendFormat": "{{group}} active",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (group, le) (rate(app_ios_healthkit_metric_wall_seconds_bucket{installation_id=~\"$installation_id\"}[24h])))",
+          "legendFormat": "{{group}} wall",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
     }
   ],
   "schemaVersion": 39,

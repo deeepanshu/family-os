@@ -422,13 +422,17 @@ enum HealthKitBackgroundSync {
         let handle = BGProcessingHandle(task)
         task.expirationHandler = {
             processingWork.cancel()
-            handle.complete(success: false)
-            CrashReporting.log("healthkit_bg_task_expired")
+            Task {
+                await flushForBackgroundExpiration(reason: "bg_task", message: "healthkit_bg_task_expired")
+                handle.complete(success: false)
+            }
         }
         let work = Task {
             await runBoundedSync(reason: "bg_task")
-            handle.complete(success: true)
+            guard !Task.isCancelled else { return }
             CrashReporting.log("healthkit_bg_task_completed")
+            _ = await AppLogs.flushAndWait(force: true)
+            handle.complete(success: true)
         }
         processingWork.replace(work)
     }
@@ -439,15 +443,33 @@ enum HealthKitBackgroundSync {
         let handle = BGRefreshHandle(task)
         task.expirationHandler = {
             refreshWork.cancel()
-            handle.complete(success: false)
-            CrashReporting.log("healthkit_bg_refresh_expired")
+            Task {
+                await flushForBackgroundExpiration(reason: "bg_refresh", message: "healthkit_bg_refresh_expired")
+                handle.complete(success: false)
+            }
         }
         let work = Task {
             await runBoundedSync(reason: "bg_refresh")
-            handle.complete(success: true)
+            guard !Task.isCancelled else { return }
             CrashReporting.log("healthkit_bg_refresh_completed")
+            _ = await AppLogs.flushAndWait(force: true)
+            handle.complete(success: true)
         }
         refreshWork.replace(work)
+    }
+    /// Terminal flush shared by both BG expiration handlers, extracted so tests
+    /// can exercise it without a BGTask object. The cancelled work Task is
+    /// cancellation-poisoned (its own trailing flushAndWaits return early), so
+    /// this runs in the unstructured expiration Task — which is not cancelled —
+    /// and flushes both signals before completion.
+    static func flushForBackgroundExpiration(reason: String, message: String) async {
+        CrashReporting.log(
+            message,
+            severity: .warn,
+            attributes: ["reason": reason, "error_code": "task_expired"]
+        )
+        _ = await AppMetrics.flushAndWait(force: true)
+        _ = await AppLogs.flushAndWait(force: true, timeout: 1)
     }
 
     /// Lightweight path for leftover outbox (including activity) after incremental sync.
@@ -511,10 +533,24 @@ enum HealthKitBackgroundSync {
         metrics: Set<HealthKitSyncMetric>? = nil,
         wallTimeoutSeconds: TimeInterval? = nil
     ) async {
+        await runBoundedSyncWork(
+            reason: reason,
+            metrics: metrics,
+            wallTimeoutSeconds: wallTimeoutSeconds
+        )
+        _ = await AppMetrics.flushAndWait(force: true)
+        _ = await AppLogs.flushAndWait(force: true)
+    }
+
+    private static func runBoundedSyncWork(
+        reason: String,
+        metrics: Set<HealthKitSyncMetric>? = nil,
+        wallTimeoutSeconds: TimeInterval? = nil
+    ) async {
         // Wall clock for the suspension split; monotonic for budget, so time the
         // process spent frozen never counts against the run's own allowance.
         let wallStartedAt = Date()
-        let clock = ContinuousClock()
+        let clock = SuspendingClock()
         let activeStartedAt = clock.now
         var outcome = AppMetrics.SyncRunOutcome.skipped
         defer {
@@ -523,25 +559,28 @@ enum HealthKitBackgroundSync {
                 wallSeconds: Date().timeIntervalSince(wallStartedAt)
             )
             AppMetrics.recordSyncRun(reason: reason, outcome: outcome)
+            let attributes = [
+                "reason": reason,
+                "outcome": outcome.rawValue,
+                "was_suspended": accounting.wasSuspended ? "true" : "false"
+            ]
             AppMetrics.observeDuration(
                 "ios.healthkit.sync.duration.seconds",
                 seconds: accounting.activeSeconds,
-                attributes: ["reason": reason, "outcome": outcome.rawValue]
+                attributes: attributes
             )
             AppMetrics.observeDuration(
                 "ios.healthkit.sync.wall_seconds",
                 seconds: accounting.wallSeconds,
-                attributes: ["reason": reason, "outcome": outcome.rawValue]
+                attributes: attributes
             )
             if accounting.wasSuspended {
                 AppMetrics.observeDuration(
                     "ios.healthkit.sync.suspended_seconds",
                     seconds: accounting.suspendedSeconds,
-                    attributes: ["reason": reason, "outcome": outcome.rawValue]
+                    attributes: attributes
                 )
             }
-            AppMetrics.flush(force: true)
-            AppLogs.flush(force: true)
         }
 
         CrashReporting.healthKit(.syncStarted, extra: ["reason": reason, "mode": "background"])
@@ -597,7 +636,11 @@ enum HealthKitBackgroundSync {
             do {
                 try await HealthKitDatabaseAccess.assertAccessible()
             } catch {
-                CrashReporting.log("healthkit_bg_sync_skip_database_inaccessible reason=\(reason)")
+                CrashReporting.log(
+                    "healthkit_bg_sync_skip_database_inaccessible",
+                    severity: .warn,
+                    attributes: ["reason": reason, "skip_reason": "database_inaccessible"]
+                )
                 AppMetrics.recordHealthKitSkip(reason: reason, skipReason: .databaseInaccessible)
                 scheduleBackgroundSync()
                 scheduleAppRefresh()
@@ -682,7 +725,7 @@ enum HealthKitBackgroundSync {
                 let waitSeconds = exclusiveWaitSeconds(for: reason)
                 try await HealthKitRunGate.shared.withExclusiveRun(waitSeconds: waitSeconds, reason: reason) {
                     let work: @Sendable () async throws -> Void = {
-                        let loopClock = ContinuousClock()
+                        let loopClock = SuspendingClock()
                         let loopStarted = loopClock.now
                         for metric in eligible {
                             if Task.isCancelled {
@@ -726,15 +769,28 @@ enum HealthKitBackgroundSync {
                                 )
                                 AppMetrics.recordHealthKitCompleted(reason: reason, group: metric.scopeMetricKey)
                             } catch {
-                                observeMetricDuration(
+                                let accounting = observeMetricDuration(
                                     group: metric.scopeMetricKey,
                                     reason: reason,
                                     outcome: "failed",
                                     activeSeconds: seconds(loopClock.now - metricStarted),
                                     wallSeconds: Date().timeIntervalSince(metricWallStarted)
                                 )
+                                var failureAttributes = [
+                                    "reason": reason,
+                                    "group": metric.scopeMetricKey,
+                                    "error_code": (error as? HealthAPIError)?.errorCode ?? "other",
+                                    "active_ms": String(Int(seconds(loopClock.now - metricStarted) * 1000)),
+                                    "wall_ms": String(Int(Date().timeIntervalSince(metricWallStarted) * 1000)),
+                                    "was_suspended": accounting.wasSuspended ? "true" : "false"
+                                ]
+                                if let requestID = (error as? HealthAPIError)?.requestId {
+                                    failureAttributes["request_id"] = requestID
+                                }
                                 CrashReporting.log(
-                                    "healthkit_bg_metric_failed reason=\(reason) group=\(metric.rawValue) ms=\(Int(seconds(loopClock.now - metricStarted) * 1000))"
+                                    "healthkit_bg_metric_failed",
+                                    severity: .warn,
+                                    attributes: failureAttributes
                                 )
                                 if isLockedHealthKitError(error) {
                                     CrashReporting.log(
@@ -748,13 +804,23 @@ enum HealthKitBackgroundSync {
                                     break
                                 }
                                 // One metric's failure never stops later eligible metrics.
+                                // Pass only the run-context fields: error codes and
+                                // request_id come from `underlying` inside
+                                // healthKitNonFatal, and `group`/`metric` travel as
+                                // healthkit_group/healthkit_metric params.
                                 CrashReporting.healthKitNonFatal(
                                     .syncFailed,
                                     stage: .syncFailed,
                                     message: "bg_metric_sync_failed_continue",
                                     group: metric.rawValue,
                                     metric: metric.scopeMetricKey,
-                                    underlying: error
+                                    underlying: error,
+                                    extra: [
+                                        "reason": reason,
+                                        "active_ms": failureAttributes["active_ms"] ?? "0",
+                                        "wall_ms": failureAttributes["wall_ms"] ?? "0",
+                                        "was_suspended": failureAttributes["was_suspended"] ?? "false"
+                                    ]
                                 )
                                 AppMetrics.recordHealthKitFailed(
                                     reason: reason,
@@ -775,12 +841,32 @@ enum HealthKitBackgroundSync {
                     }
                 }
             } catch HealthKitRunError.runInProgress {
-                CrashReporting.log("healthkit_bg_sync_skip_run_in_progress")
+                CrashReporting.log(
+                    "healthkit_bg_sync_skip_run_in_progress",
+                    severity: .warn,
+                    attributes: ["reason": reason, "skip_reason": "run_in_progress"]
+                )
                 AppMetrics.recordHealthKitSkip(reason: reason, skipReason: .runInProgress)
                 return
             } catch {
                 outcome = .failed
-                CrashReporting.log("healthkit_observer_sync_timeout \(error.localizedDescription)")
+                let activeSeconds = seconds(clock.now - activeStartedAt)
+                let wallSeconds = Date().timeIntervalSince(wallStartedAt)
+                let accounting = SyncDurationAccounting.account(
+                    activeSeconds: activeSeconds,
+                    wallSeconds: wallSeconds
+                )
+                CrashReporting.log(
+                    "healthkit_observer_sync_timeout",
+                    severity: .warn,
+                    attributes: [
+                        "reason": reason,
+                        "error_code": "sync_timeout",
+                        "active_ms": String(Int(activeSeconds * 1000)),
+                        "wall_ms": String(Int(wallSeconds * 1000)),
+                        "was_suspended": accounting.wasSuspended ? "true" : "false"
+                    ]
+                )
                 return
             }
             outcome = .completed
@@ -815,16 +901,26 @@ enum HealthKitBackgroundSync {
         outcome: String,
         activeSeconds: TimeInterval,
         wallSeconds: TimeInterval
-    ) {
-        let attributes = ["reason": reason, "group": group, "outcome": outcome]
+    ) -> SyncDurationAccounting {
+        let accounting = SyncDurationAccounting.account(
+            activeSeconds: activeSeconds,
+            wallSeconds: wallSeconds
+        )
+        let attributes = [
+            "reason": reason,
+            "group": group,
+            "outcome": outcome,
+            "was_suspended": accounting.wasSuspended ? "true" : "false"
+        ]
         AppMetrics.observeDuration(
             "ios.healthkit.metric.duration.seconds",
             seconds: activeSeconds,
             attributes: attributes
         )
-        let accounting = SyncDurationAccounting.account(
-            activeSeconds: activeSeconds,
-            wallSeconds: wallSeconds
+        AppMetrics.observeDuration(
+            "ios.healthkit.metric.wall_seconds",
+            seconds: wallSeconds,
+            attributes: attributes
         )
         if accounting.wasSuspended {
             AppMetrics.observeDuration(
@@ -833,6 +929,7 @@ enum HealthKitBackgroundSync {
                 attributes: attributes
             )
         }
+        return accounting
     }
 
     /// Pure policy seam for background tests: only already-imported metrics may

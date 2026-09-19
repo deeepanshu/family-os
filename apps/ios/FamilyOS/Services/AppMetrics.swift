@@ -252,6 +252,99 @@ enum AppMetrics {
         storage.histograms[key] = histogram
     }
 
+    /// Sends the current snapshot and waits for the collector response.
+    ///
+    /// Background execution ends as soon as the task completion handler returns;
+    /// a fire-and-forget upload can otherwise be suspended before it reaches the
+    /// collector. Background sync uses this variant before declaring completion.
+    @discardableResult
+    static func flushAndWait(force: Bool = false) async -> Bool {
+        let snapshot: Snapshot
+        while true {
+            switch prepareAwaitedFlush(force: force) {
+            case let .ready(nextSnapshot):
+                snapshot = nextSnapshot
+            case .waiting:
+                guard !Task.isCancelled else { return false }
+                do {
+                    try await Task.sleep(for: .milliseconds(25))
+                } catch {
+                    return false
+                }
+                continue
+            case .unavailable:
+                return false
+            }
+            break
+        }
+
+        guard let body = payload(for: snapshot) else {
+            completeFlush(success: false)
+            return false
+        }
+
+        var request = URLRequest(url: snapshot.configuration.endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 10
+        request.httpBody = body
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (field, value) in snapshot.configuration.headers {
+            request.setValue(value, forHTTPHeaderField: field)
+        }
+
+        if let requestSink = snapshot.configuration.requestSink {
+            requestSink(request)
+            completeFlush(success: true)
+            return true
+        }
+
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            let success = (response as? HTTPURLResponse).map { (200...299).contains($0.statusCode) } == true
+            if !success {
+                logger.error("OTLP metrics flush failed")
+            }
+            completeFlush(success: success)
+            return success
+        } catch {
+            logger.error("OTLP metrics flush failed")
+            completeFlush(success: false)
+            return false
+        }
+    }
+
+    private enum AwaitedFlushPreparation {
+        case ready(Snapshot)
+        case waiting
+        case unavailable
+    }
+
+    private static func prepareAwaitedFlush(force: Bool) -> AwaitedFlushPreparation {
+        storage.lock.lock()
+        defer { storage.lock.unlock() }
+
+        let now = Date()
+        guard let configuration = storage.configuration,
+              (!storage.counters.isEmpty || !storage.histograms.isEmpty),
+              force || now.timeIntervalSince(storage.lastFlush) >= 15 else {
+            return .unavailable
+        }
+        guard !storage.isFlushInFlight else {
+            return .waiting
+        }
+
+        storage.isFlushInFlight = true
+        storage.lastFlush = now
+        return .ready(
+            Snapshot(
+                configuration: configuration,
+                counters: storage.counters,
+                histograms: storage.histograms,
+                capturedAtUnixNanoseconds: unixTimeNanoseconds()
+            )
+        )
+    }
+
     /// Sends cumulative metrics at most once every 15 seconds unless forced.
     static func flush(force: Bool = false) {
         let snapshot: Snapshot
@@ -503,19 +596,21 @@ enum AppMetrics {
         var lastFlush = Date.distantPast
     }
 }
-
-/// Monotonic elapsed seconds. `ContinuousClock` does not advance while the
-/// process is suspended, so this measures work rather than wall time.
+/// Active elapsed seconds. `SuspendingClock` does not advance while the
+/// system is asleep, so this measures work rather than wall time.
 func seconds(_ duration: Duration) -> TimeInterval {
     TimeInterval(duration.components.seconds) + TimeInterval(duration.components.attoseconds) / 1e18
 }
 
-/// Splits a run's elapsed time into work actually performed and time the process
+/// Splits a run's elapsed time into work actually performed and time the system
+/// spent asleep mid-run.
 ///
-/// `Date()` keeps advancing while suspended, so wall time alone cannot tell a
-/// hung HealthKit query from a normal freeze — both looked like hours. `active`
-/// comes from a monotonic clock that stops while suspended, so the difference is
-/// the suspension. Deltas below the skew tolerance are jitter, not suspension.
+/// `Date()` keeps advancing while the system sleeps, so wall time alone cannot
+/// tell a hung HealthKit query from a normal sleep freeze — both looked like
+/// hours. `active` comes from `SuspendingClock`, which stops while the system
+/// is asleep, so the difference is the asleep gap. It does not capture app
+/// process suspension while the system stays awake. Deltas below the skew
+/// tolerance are jitter, not suspension.
 struct SyncDurationAccounting: Sendable, Equatable {
     /// Clock skew between the two clocks that must not read as suspension.
     static let skewTolerance: TimeInterval = 1
