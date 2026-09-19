@@ -207,7 +207,11 @@ enum CrashReporting {
             defaultSeverity = .info
         }
         log(message, severity: severity ?? defaultSeverity, attributes: keys)
-        setCustomValues(keys)
+        // request_id is a per-request identifier: keep it in the OTLP log
+        // attributes and the Crashlytics breadcrumb, never in custom keys.
+        var crashKeys = keys
+        crashKeys.removeValue(forKey: "request_id")
+        setCustomValues(crashKeys)
     }
 
     static func healthKitNonFatal(

@@ -428,6 +428,11 @@ enum HealthKitBackgroundSync {
                     severity: .warn,
                     attributes: ["reason": "bg_task", "error_code": "task_expired"]
                 )
+                // The cancelled work Task is cancellation-poisoned: its own
+                // trailing flushAndWaits return early, so the expired run's
+                // counters would never reach the collector. This Task is not
+                // cancelled, so flush both signals here before completing.
+                _ = await AppMetrics.flushAndWait(force: true)
                 _ = await AppLogs.flushAndWait(force: true, timeout: 1)
                 handle.complete(success: false)
             }
@@ -454,6 +459,8 @@ enum HealthKitBackgroundSync {
                     severity: .warn,
                     attributes: ["reason": "bg_refresh", "error_code": "task_expired"]
                 )
+                // Same cancellation-poisoning note as the processing task above.
+                _ = await AppMetrics.flushAndWait(force: true)
                 _ = await AppLogs.flushAndWait(force: true, timeout: 1)
                 handle.complete(success: false)
             }
@@ -836,10 +843,22 @@ enum HealthKitBackgroundSync {
                 return
             } catch {
                 outcome = .failed
+                let activeSeconds = seconds(clock.now - activeStartedAt)
+                let wallSeconds = Date().timeIntervalSince(wallStartedAt)
+                let accounting = SyncDurationAccounting.account(
+                    activeSeconds: activeSeconds,
+                    wallSeconds: wallSeconds
+                )
                 CrashReporting.log(
                     "healthkit_observer_sync_timeout",
                     severity: .warn,
-                    attributes: ["reason": reason, "error_code": "sync_timeout"]
+                    attributes: [
+                        "reason": reason,
+                        "error_code": "sync_timeout",
+                        "active_ms": String(Int(activeSeconds * 1000)),
+                        "wall_ms": String(Int(wallSeconds * 1000)),
+                        "was_suspended": accounting.wasSuspended ? "true" : "false"
+                    ]
                 )
                 return
             }
