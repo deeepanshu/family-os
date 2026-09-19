@@ -140,7 +140,7 @@
       "gridPos": { "h": 16, "w": 18, "x": 6, "y": 58 },
       "datasource": { "type": "loki", "uid": "loki" },
       "targets": [{
-        "expr": "{service_name=\"family-os-ios\"} |~ \"healthkit_(bg_sync_skip|bg_metric_failed|observer_sync_timeout|run_abandoned|bg_(task|refresh)_expired)\"",
+        "expr": "{service_name=\"family-os-ios\"} |~ \"healthkit_(bg_sync_skip|bg_metric_failed|observer_sync_timeout|run_abandon(ed|_failed|_skipped_no_hook)|bg_(task|refresh)_expired)\"",
         "refId": "A"
       }],
       "options": {

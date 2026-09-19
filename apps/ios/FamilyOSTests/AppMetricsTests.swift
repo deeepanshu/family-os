@@ -5,6 +5,7 @@ import XCTest
 final class AppMetricsTests: XCTestCase {
     override func tearDown() {
         AppMetrics.resetForTesting()
+        AppLogs.resetForTesting()
         super.tearDown()
     }
     func testFlushEmitsCumulativeOperationalCountersAsOTLPHTTP() throws {
@@ -203,6 +204,44 @@ final class AppMetricsTests: XCTestCase {
         XCTAssertEqual(skipped.attributes["skip_reason"], "run_in_progress")
     }
 
+    /// The expiration handler runs in an unstructured Task precisely because the
+    /// cancelled work Task's own trailing flushAndWaits return early. This pins
+    /// the fix: one expired run must deliver both its metrics counters and its
+    /// terminal log before the task completes.
+    func testBackgroundExpirationFlushDeliversMetricsAndLog() async throws {
+        let metricsDelivered = expectation(description: "expiration OTLP metrics request")
+        let metricsRecorder = RequestRecorder(expectation: metricsDelivered)
+        let logsDelivered = expectation(description: "expiration OTLP log request")
+        let logsRecorder = ExpirationLogRecorder(expectation: logsDelivered)
+
+        AppMetrics.configureForTesting(endpoint: try XCTUnwrap(URL(string: "http://telemetry.lab:4318/v1/metrics"))) { request in
+            metricsRecorder.record(request)
+        }
+        AppLogs.configureForTesting(endpoint: try XCTUnwrap(URL(string: "http://telemetry.lab:4318/v1/logs"))) { request in
+            logsRecorder.record(request)
+        }
+        AppMetrics.recordHealthKitSkip(reason: "bg_task", skipReason: .runInProgress)
+
+        await HealthKitBackgroundSync.flushForBackgroundExpiration(
+            reason: "bg_task",
+            message: "healthkit_bg_task_expired"
+        )
+        await fulfillment(of: [metricsDelivered, logsDelivered], timeout: 1)
+
+        let skipped = try counterPoint(named: "ios.healthkit.sync.skips", in: metricsRecorder.request)
+        XCTAssertEqual(skipped.value, 1)
+        XCTAssertEqual(skipped.attributes["skip_reason"], "run_in_progress")
+
+        let body = try XCTUnwrap(logsRecorder.request?.httpBody)
+        let root = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let resourceLogs = try XCTUnwrap((root["resourceLogs"] as? [[String: Any]])?.first)
+        let scopeLogs = try XCTUnwrap((resourceLogs["scopeLogs"] as? [[String: Any]])?.first)
+        let entry = try XCTUnwrap((scopeLogs["logRecords"] as? [[String: Any]])?.first)
+        XCTAssertEqual((entry["body"] as? [String: Any])?["stringValue"] as? String, "healthkit_bg_task_expired")
+        XCTAssertEqual(entry["severityText"] as? String, "WARN")
+        XCTAssertEqual(entry["severityNumber"] as? Int, 13)
+    }
+
     func testHealthAPIErrorMetricCodeAllowlist() {
         XCTAssertEqual(HealthAPIError.missingToken.metricCode, .missingToken)
         XCTAssertEqual(HealthAPIError.badStatus(401, "expired", code: "unauthorized").metricCode, .unauthorized)
@@ -286,6 +325,23 @@ private final class RequestRecorder: @unchecked Sendable {
         expectation.fulfill()
     }
 }
+private final class ExpirationLogRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private let expectation: XCTestExpectation
+    private(set) var request: URLRequest?
+
+    init(expectation: XCTestExpectation) {
+        self.expectation = expectation
+    }
+
+    func record(_ request: URLRequest) {
+        lock.lock()
+        self.request = request
+        lock.unlock()
+        expectation.fulfill()
+    }
+}
+
 
 func counterPoint(named name: String, in request: URLRequest?) throws -> (value: Double, attributes: [String: String]) {
     let body = try XCTUnwrap(request?.httpBody)

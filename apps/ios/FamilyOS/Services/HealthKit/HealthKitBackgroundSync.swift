@@ -423,17 +423,7 @@ enum HealthKitBackgroundSync {
         task.expirationHandler = {
             processingWork.cancel()
             Task {
-                CrashReporting.log(
-                    "healthkit_bg_task_expired",
-                    severity: .warn,
-                    attributes: ["reason": "bg_task", "error_code": "task_expired"]
-                )
-                // The cancelled work Task is cancellation-poisoned: its own
-                // trailing flushAndWaits return early, so the expired run's
-                // counters would never reach the collector. This Task is not
-                // cancelled, so flush both signals here before completing.
-                _ = await AppMetrics.flushAndWait(force: true)
-                _ = await AppLogs.flushAndWait(force: true, timeout: 1)
+                await flushForBackgroundExpiration(reason: "bg_task", message: "healthkit_bg_task_expired")
                 handle.complete(success: false)
             }
         }
@@ -454,14 +444,7 @@ enum HealthKitBackgroundSync {
         task.expirationHandler = {
             refreshWork.cancel()
             Task {
-                CrashReporting.log(
-                    "healthkit_bg_refresh_expired",
-                    severity: .warn,
-                    attributes: ["reason": "bg_refresh", "error_code": "task_expired"]
-                )
-                // Same cancellation-poisoning note as the processing task above.
-                _ = await AppMetrics.flushAndWait(force: true)
-                _ = await AppLogs.flushAndWait(force: true, timeout: 1)
+                await flushForBackgroundExpiration(reason: "bg_refresh", message: "healthkit_bg_refresh_expired")
                 handle.complete(success: false)
             }
         }
@@ -473,6 +456,20 @@ enum HealthKitBackgroundSync {
             handle.complete(success: true)
         }
         refreshWork.replace(work)
+    }
+    /// Terminal flush shared by both BG expiration handlers, extracted so tests
+    /// can exercise it without a BGTask object. The cancelled work Task is
+    /// cancellation-poisoned (its own trailing flushAndWaits return early), so
+    /// this runs in the unstructured expiration Task — which is not cancelled —
+    /// and flushes both signals before completion.
+    static func flushForBackgroundExpiration(reason: String, message: String) async {
+        CrashReporting.log(
+            message,
+            severity: .warn,
+            attributes: ["reason": reason, "error_code": "task_expired"]
+        )
+        _ = await AppMetrics.flushAndWait(force: true)
+        _ = await AppLogs.flushAndWait(force: true, timeout: 1)
     }
 
     /// Lightweight path for leftover outbox (including activity) after incremental sync.
