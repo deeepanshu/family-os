@@ -10,7 +10,7 @@ struct HealthKitActiveRun: Equatable, Sendable {
 
     var productTitle: String {
         switch metric {
-        case .vitals: return "Blood pressure & heart rate"
+        case .vitals: return "Blood pressure, heart rate & blood glucose"
         case .sleep: return "Sleep"
         case .workouts: return "Workouts"
         case .activity: return "Activity"

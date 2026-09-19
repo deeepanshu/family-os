@@ -330,13 +330,18 @@ export const healthBloodGlucoseReadings = pgTable(
     sourceSampleKey: uuid("source_sample_key").notNull(),
     measuredAt: timestamp("measured_at", { withTimezone: true }).notNull(),
     valueMgDl: numeric("value_mg_dl", { precision: 6, scale: 2 }).notNull(),
+    mealTime: text("meal_time"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => [
     uniqueIndex("health_glucose_person_source_sample_idx").on(table.personId, table.sourceSampleKey),
     index("health_glucose_family_person_measured_idx").on(table.familyId, table.personId, table.measuredAt),
-    check("health_glucose_value_check", sql`${table.valueMgDl} between 20 and 700`)
+    check("health_glucose_value_check", sql`${table.valueMgDl} between 20 and 700`),
+    check(
+      "health_glucose_meal_time_check",
+      sql`${table.mealTime} is null or ${table.mealTime} in ('preprandial', 'postprandial')`
+    )
   ]
 );
 

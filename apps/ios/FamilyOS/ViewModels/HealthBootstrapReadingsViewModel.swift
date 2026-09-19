@@ -52,24 +52,36 @@ extension HealthBootstrapViewModel {
                     to: window.to
                 )
             }
+            async let bloodGlucose = optionalList {
+                try await client.listBloodGlucose(
+                    baseURL: connection.baseURL,
+                    accessToken: auth.accessToken,
+                    personId: personId,
+                    from: window.from,
+                    to: window.to
+                )
+            }
             let (
                 bloodPressureReadings,
                 sleepDays,
                 stepDays,
                 workoutReadings,
-                heartRateDays
-            ) = await (bloodPressure, sleep, steps, workouts, heartRate)
+                heartRateDays,
+                bloodGlucoseReadings
+            ) = await (bloodPressure, sleep, steps, workouts, heartRate, bloodGlucose)
             if let bloodPressureReadings { readings.bloodPressureReadings = bloodPressureReadings }
             if let sleepDays { readings.sleepDays = sleepDays }
             if let stepDays { readings.stepDays = stepDays }
             if let workoutReadings { readings.workouts = workoutReadings }
             if let heartRateDays { readings.heartRateDays = heartRateDays }
+            if let bloodGlucoseReadings { readings.bloodGlucoseReadings = bloodGlucoseReadings }
             let loaded =
                 readings.bloodPressureReadings.count
                 + readings.sleepDays.count
                 + readings.stepDays.count
                 + readings.workouts.count
                 + readings.heartRateDays.count
+                + readings.bloodGlucoseReadings.count
             return "Loaded \(loaded) history items."
         }
     }
@@ -85,6 +97,7 @@ extension HealthBootstrapViewModel {
             sleep: readings.sleepDays,
             steps: readings.stepDays,
             workouts: readings.workouts,
+            bloodGlucose: readings.bloodGlucoseReadings,
             filter: filter,
             timeZone: historyTimeZone
         )
