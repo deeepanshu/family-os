@@ -195,7 +195,8 @@ final class AppMetricsTests: XCTestCase {
         }
         AppMetrics.recordHealthKitSkip(reason: "bg_refresh", skipReason: .runInProgress)
 
-        XCTAssertTrue(await AppMetrics.flushAndWait(force: true))
+        let didFlush = await AppMetrics.flushAndWait(force: true)
+        XCTAssertTrue(didFlush)
         await fulfillment(of: [delivered], timeout: 1)
 
         let skipped = try counterPoint(named: "ios.healthkit.sync.skips", in: recorder.request)

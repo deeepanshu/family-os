@@ -139,26 +139,18 @@ enum AppLogs {
     @discardableResult
     static func flushAndWait(force: Bool = false) async -> Bool {
         let snapshot: Snapshot
-
-        storage.lock.lock()
-        let now = Date()
-        guard let configuration = storage.configuration,
-              !storage.isFlushInFlight,
-              !storage.pending.isEmpty,
-              force || now.timeIntervalSince(storage.lastFlush) >= 15 else {
-            storage.lock.unlock()
-            return false
+        while true {
+            switch prepareAwaitedFlush(force: force) {
+            case let .ready(nextSnapshot):
+                snapshot = nextSnapshot
+            case .waiting:
+                try? await Task.sleep(for: .milliseconds(25))
+                continue
+            case .unavailable:
+                return false
+            }
+            break
         }
-
-        storage.isFlushInFlight = true
-        storage.lastFlush = now
-        snapshot = Snapshot(
-            configuration: configuration,
-            entries: storage.pending,
-            capturedAtUnixNanoseconds: unixTimeNanoseconds()
-        )
-        storage.pending.removeAll(keepingCapacity: true)
-        storage.lock.unlock()
 
         guard let body = payload(for: snapshot) else {
             completeFlush()
@@ -193,6 +185,37 @@ enum AppLogs {
             completeFlush()
             return false
         }
+    }
+
+    private enum AwaitedFlushPreparation {
+        case ready(Snapshot)
+        case waiting
+        case unavailable
+    }
+
+    private static func prepareAwaitedFlush(force: Bool) -> AwaitedFlushPreparation {
+        storage.lock.lock()
+        defer { storage.lock.unlock() }
+
+        let now = Date()
+        guard let configuration = storage.configuration,
+              !storage.pending.isEmpty,
+              force || now.timeIntervalSince(storage.lastFlush) >= 15 else {
+            return .unavailable
+        }
+        guard !storage.isFlushInFlight else {
+            return .waiting
+        }
+
+        storage.isFlushInFlight = true
+        storage.lastFlush = now
+        let snapshot = Snapshot(
+            configuration: configuration,
+            entries: storage.pending,
+            capturedAtUnixNanoseconds: unixTimeNanoseconds()
+        )
+        storage.pending.removeAll(keepingCapacity: true)
+        return .ready(snapshot)
     }
 
     /// Sends queued logs at most once every 15 seconds unless forced.

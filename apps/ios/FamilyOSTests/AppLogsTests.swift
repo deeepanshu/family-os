@@ -70,7 +70,8 @@ final class AppLogsTests: XCTestCase {
             ]
         )
 
-        XCTAssertTrue(await AppLogs.flushAndWait(force: true))
+        let didFlush = await AppLogs.flushAndWait(force: true)
+        XCTAssertTrue(didFlush)
         await fulfillment(of: [delivered], timeout: 1)
 
         let body = try XCTUnwrap(recorder.request?.httpBody)

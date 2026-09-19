@@ -260,26 +260,18 @@ enum AppMetrics {
     @discardableResult
     static func flushAndWait(force: Bool = false) async -> Bool {
         let snapshot: Snapshot
-
-        storage.lock.lock()
-        let now = Date()
-        guard let configuration = storage.configuration,
-              !storage.isFlushInFlight,
-              (!storage.counters.isEmpty || !storage.histograms.isEmpty),
-              force || now.timeIntervalSince(storage.lastFlush) >= 15 else {
-            storage.lock.unlock()
-            return false
+        while true {
+            switch prepareAwaitedFlush(force: force) {
+            case let .ready(nextSnapshot):
+                snapshot = nextSnapshot
+            case .waiting:
+                try? await Task.sleep(for: .milliseconds(25))
+                continue
+            case .unavailable:
+                return false
+            }
+            break
         }
-
-        storage.isFlushInFlight = true
-        storage.lastFlush = now
-        snapshot = Snapshot(
-            configuration: configuration,
-            counters: storage.counters,
-            histograms: storage.histograms,
-            capturedAtUnixNanoseconds: unixTimeNanoseconds()
-        )
-        storage.lock.unlock()
 
         guard let body = payload(for: snapshot) else {
             completeFlush(success: false)
@@ -314,6 +306,38 @@ enum AppMetrics {
             completeFlush(success: false)
             return false
         }
+    }
+
+    private enum AwaitedFlushPreparation {
+        case ready(Snapshot)
+        case waiting
+        case unavailable
+    }
+
+    private static func prepareAwaitedFlush(force: Bool) -> AwaitedFlushPreparation {
+        storage.lock.lock()
+        defer { storage.lock.unlock() }
+
+        let now = Date()
+        guard let configuration = storage.configuration,
+              (!storage.counters.isEmpty || !storage.histograms.isEmpty),
+              force || now.timeIntervalSince(storage.lastFlush) >= 15 else {
+            return .unavailable
+        }
+        guard !storage.isFlushInFlight else {
+            return .waiting
+        }
+
+        storage.isFlushInFlight = true
+        storage.lastFlush = now
+        return .ready(
+            Snapshot(
+                configuration: configuration,
+                counters: storage.counters,
+                histograms: storage.histograms,
+                capturedAtUnixNanoseconds: unixTimeNanoseconds()
+            )
+        )
     }
 
     /// Sends cumulative metrics at most once every 15 seconds unless forced.

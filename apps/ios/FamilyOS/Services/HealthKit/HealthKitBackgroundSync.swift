@@ -427,8 +427,9 @@ enum HealthKitBackgroundSync {
         }
         let work = Task {
             await runBoundedSync(reason: "bg_task")
-            handle.complete(success: true)
             CrashReporting.log("healthkit_bg_task_completed")
+            _ = await AppLogs.flushAndWait(force: true)
+            handle.complete(success: true)
         }
         processingWork.replace(work)
     }
@@ -444,8 +445,9 @@ enum HealthKitBackgroundSync {
         }
         let work = Task {
             await runBoundedSync(reason: "bg_refresh")
-            handle.complete(success: true)
             CrashReporting.log("healthkit_bg_refresh_completed")
+            _ = await AppLogs.flushAndWait(force: true)
+            handle.complete(success: true)
         }
         refreshWork.replace(work)
     }

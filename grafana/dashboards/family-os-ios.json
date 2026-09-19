@@ -131,7 +131,7 @@
       "type": "stat",
       "gridPos": { "h": 8, "w": 6, "x": 0, "y": 58 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum(increase(app_ios_healthkit_sync_duration_seconds_count{installation_id=~\"$installation_id\",was_suspended=\"true\"}[24h])) or vector(0)", "refId": "A" }],
+      "targets": [{ "expr": "sum(increase(app_ios_healthkit_sync_duration_seconds_count{installation_id=~\"$installation_id\",reason=~\"bg_task|bg_refresh|observer\",was_suspended=\"true\"}[24h])) or vector(0)", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] } }, "overrides": [] }
     },
     {
