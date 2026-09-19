@@ -530,7 +530,7 @@ enum HealthKitBackgroundSync {
         // Wall clock for the suspension split; monotonic for budget, so time the
         // process spent frozen never counts against the run's own allowance.
         let wallStartedAt = Date()
-        let clock = ContinuousClock()
+        let clock = SuspendingClock()
         let activeStartedAt = clock.now
         var outcome = AppMetrics.SyncRunOutcome.skipped
         defer {
@@ -705,7 +705,7 @@ enum HealthKitBackgroundSync {
                 let waitSeconds = exclusiveWaitSeconds(for: reason)
                 try await HealthKitRunGate.shared.withExclusiveRun(waitSeconds: waitSeconds, reason: reason) {
                     let work: @Sendable () async throws -> Void = {
-                        let loopClock = ContinuousClock()
+                        let loopClock = SuspendingClock()
                         let loopStarted = loopClock.now
                         for metric in eligible {
                             if Task.isCancelled {

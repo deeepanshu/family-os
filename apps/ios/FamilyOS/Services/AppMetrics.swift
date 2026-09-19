@@ -591,9 +591,8 @@ enum AppMetrics {
         var lastFlush = Date.distantPast
     }
 }
-
-/// Monotonic elapsed seconds. `ContinuousClock` does not advance while the
-/// process is suspended, so this measures work rather than wall time.
+/// Active elapsed seconds. `SuspendingClock` does not advance while the
+/// system is asleep, so this measures work rather than wall time.
 func seconds(_ duration: Duration) -> TimeInterval {
     TimeInterval(duration.components.seconds) + TimeInterval(duration.components.attoseconds) / 1e18
 }
