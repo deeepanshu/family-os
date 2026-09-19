@@ -127,7 +127,7 @@
       }]
     },
     {
-      "title": "Suspended background sync runs (24h)",
+      "title": "Background sync runs with system-asleep gap (24h)",
       "type": "stat",
       "gridPos": { "h": 8, "w": 6, "x": 0, "y": 58 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },

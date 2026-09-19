@@ -804,13 +804,23 @@ enum HealthKitBackgroundSync {
                                     break
                                 }
                                 // One metric's failure never stops later eligible metrics.
+                                // Pass only the run-context fields: error codes and
+                                // request_id come from `underlying` inside
+                                // healthKitNonFatal, and `group`/`metric` travel as
+                                // healthkit_group/healthkit_metric params.
                                 CrashReporting.healthKitNonFatal(
                                     .syncFailed,
                                     stage: .syncFailed,
                                     message: "bg_metric_sync_failed_continue",
                                     group: metric.rawValue,
                                     metric: metric.scopeMetricKey,
-                                    underlying: error
+                                    underlying: error,
+                                    extra: [
+                                        "reason": reason,
+                                        "active_ms": failureAttributes["active_ms"] ?? "0",
+                                        "wall_ms": failureAttributes["wall_ms"] ?? "0",
+                                        "was_suspended": failureAttributes["was_suspended"] ?? "false"
+                                    ]
                                 )
                                 AppMetrics.recordHealthKitFailed(
                                     reason: reason,

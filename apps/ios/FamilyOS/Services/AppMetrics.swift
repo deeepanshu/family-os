@@ -602,12 +602,15 @@ func seconds(_ duration: Duration) -> TimeInterval {
     TimeInterval(duration.components.seconds) + TimeInterval(duration.components.attoseconds) / 1e18
 }
 
-/// Splits a run's elapsed time into work actually performed and time the process
+/// Splits a run's elapsed time into work actually performed and time the system
+/// spent asleep mid-run.
 ///
-/// `Date()` keeps advancing while suspended, so wall time alone cannot tell a
-/// hung HealthKit query from a normal freeze — both looked like hours. `active`
-/// comes from a monotonic clock that stops while suspended, so the difference is
-/// the suspension. Deltas below the skew tolerance are jitter, not suspension.
+/// `Date()` keeps advancing while the system sleeps, so wall time alone cannot
+/// tell a hung HealthKit query from a normal sleep freeze — both looked like
+/// hours. `active` comes from `SuspendingClock`, which stops while the system
+/// is asleep, so the difference is the asleep gap. It does not capture app
+/// process suspension while the system stays awake. Deltas below the skew
+/// tolerance are jitter, not suspension.
 struct SyncDurationAccounting: Sendable, Equatable {
     /// Clock skew between the two clocks that must not read as suspension.
     static let skewTolerance: TimeInterval = 1

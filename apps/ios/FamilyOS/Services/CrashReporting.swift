@@ -220,22 +220,26 @@ enum CrashReporting {
         message: String,
         group: String? = nil,
         metric: String? = nil,
-        underlying: Error? = nil
+        underlying: Error? = nil,
+        extra: [String: String] = [:]
     ) {
-        var extra = ["error_code": String(code.rawValue)]
+        var attributes = ["error_code": String(code.rawValue)]
         if let api = underlying as? HealthAPIError {
             if let apiCode = api.errorCode {
-                extra["api_error_code"] = apiCode
+                attributes["api_error_code"] = apiCode
             }
             if let requestID = api.requestId {
-                extra["request_id"] = requestID
+                attributes["request_id"] = requestID
             }
+        }
+        for (key, value) in extra {
+            attributes[key] = value
         }
         healthKit(
             stage,
             group: group,
             metric: metric,
-            extra: extra,
+            extra: attributes,
             severity: .error
         )
         var info: [String: Any] = [
