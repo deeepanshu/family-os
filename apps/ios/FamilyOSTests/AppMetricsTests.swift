@@ -186,6 +186,22 @@ final class AppMetricsTests: XCTestCase {
         XCTAssertEqual(failed.attributes["group"], "vitals")
     }
 
+    func testFlushAndWaitDeliversTerminalMetric() async throws {
+        let delivered = expectation(description: "terminal OTLP metrics request")
+        let recorder = RequestRecorder(expectation: delivered)
+
+        AppMetrics.configureForTesting(endpoint: try XCTUnwrap(URL(string: "http://telemetry.lab:4318/v1/metrics"))) { request in
+            recorder.record(request)
+        }
+        AppMetrics.recordHealthKitSkip(reason: "bg_refresh", skipReason: .runInProgress)
+
+        XCTAssertTrue(await AppMetrics.flushAndWait(force: true))
+        await fulfillment(of: [delivered], timeout: 1)
+
+        let skipped = try counterPoint(named: "ios.healthkit.sync.skips", in: recorder.request)
+        XCTAssertEqual(skipped.attributes["skip_reason"], "run_in_progress")
+    }
+
     func testHealthAPIErrorMetricCodeAllowlist() {
         XCTAssertEqual(HealthAPIError.missingToken.metricCode, .missingToken)
         XCTAssertEqual(HealthAPIError.badStatus(401, "expired", code: "unauthorized").metricCode, .unauthorized)

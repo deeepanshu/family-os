@@ -85,7 +85,11 @@ enum CrashReporting {
 
     /// Breadcrumb-style log. Always writes OSLog; Crashlytics only when collection is on.
     /// Keep messages free of PHI and secrets.
-    static func log(_ message: String, severity: AppLogs.Severity = .info) {
+    static func log(
+        _ message: String,
+        severity: AppLogs.Severity = .info,
+        attributes: [String: String] = [:]
+    ) {
         logger.info("\(message, privacy: .public)")
         #if canImport(FirebaseCrashlytics)
         if isEnabled {
@@ -94,7 +98,7 @@ enum CrashReporting {
         #endif
         // Ship the breadcrumb to the observability stack too, so the client
         // narrative is queryable instead of stranded on the device.
-        AppLogs.record(message, severity: severity)
+        AppLogs.record(message, severity: severity, attributes: attributes)
     }
 
     /// Crash context must be fixed, operational metadata only. Do not pass
@@ -172,25 +176,14 @@ enum CrashReporting {
         case syncFailed = 1011
     }
 
-    /// Breadcrumb + stage key for HealthKit pipeline. Counts only — never sample values.
     static func healthKit(
         _ stage: HealthKitStage,
         group: String? = nil,
         metric: String? = nil,
         count: Int? = nil,
-        extra: [String: String] = [:]
+        extra: [String: String] = [:],
+        severity: AppLogs.Severity? = nil
     ) {
-        var parts = ["healthkit_stage=\(stage.rawValue)"]
-        if let group { parts.append("group=\(group)") }
-        if let metric { parts.append("metric=\(metric)") }
-        if let count { parts.append("count=\(count)") }
-        for (key, value) in extra.sorted(by: { $0.key < $1.key }) {
-            parts.append("\(key)=\(value)")
-        }
-        let message = parts.joined(separator: " ")
-        healthKitLogger.info("\(message, privacy: .public)")
-        log(message)
-
         var keys: [String: String] = ["healthkit_stage": stage.rawValue]
         if let group { keys["healthkit_group"] = group }
         if let metric { keys["healthkit_metric"] = metric }
@@ -198,6 +191,22 @@ enum CrashReporting {
         for (key, value) in extra {
             keys[key] = value
         }
+
+        let message = (
+            ["healthkit_stage=\(stage.rawValue)"]
+                + keys
+                    .filter { $0.key != "healthkit_stage" }
+                    .sorted { $0.key < $1.key }
+                    .map { "\($0.key)=\($0.value)" }
+        ).joined(separator: " ")
+        let defaultSeverity: AppLogs.Severity
+        switch stage {
+        case .syncFailed, .storeOpenFailed, .opRejected:
+            defaultSeverity = .warn
+        default:
+            defaultSeverity = .info
+        }
+        log(message, severity: severity ?? defaultSeverity, attributes: keys)
         setCustomValues(keys)
     }
 
@@ -209,7 +218,22 @@ enum CrashReporting {
         metric: String? = nil,
         underlying: Error? = nil
     ) {
-        healthKit(stage, group: group, metric: metric, extra: ["error_code": String(code.rawValue)])
+        var extra = ["error_code": String(code.rawValue)]
+        if let api = underlying as? HealthAPIError {
+            if let apiCode = api.errorCode {
+                extra["api_error_code"] = apiCode
+            }
+            if let requestID = api.requestId {
+                extra["request_id"] = requestID
+            }
+        }
+        healthKit(
+            stage,
+            group: group,
+            metric: metric,
+            extra: extra,
+            severity: .error
+        )
         var info: [String: Any] = [
             "healthkit_stage": stage.rawValue,
             "healthkit_code": code.rawValue

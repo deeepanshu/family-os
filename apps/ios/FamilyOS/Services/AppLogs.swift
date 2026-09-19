@@ -131,6 +131,70 @@ enum AppLogs {
         )
     }
 
+    /// Sends queued logs and waits for the collector response.
+    ///
+    /// Background execution may be suspended immediately after its completion
+    /// handler returns, so callers reporting a background terminal state use
+    /// this instead of the opportunistic flush below.
+    @discardableResult
+    static func flushAndWait(force: Bool = false) async -> Bool {
+        let snapshot: Snapshot
+
+        storage.lock.lock()
+        let now = Date()
+        guard let configuration = storage.configuration,
+              !storage.isFlushInFlight,
+              !storage.pending.isEmpty,
+              force || now.timeIntervalSince(storage.lastFlush) >= 15 else {
+            storage.lock.unlock()
+            return false
+        }
+
+        storage.isFlushInFlight = true
+        storage.lastFlush = now
+        snapshot = Snapshot(
+            configuration: configuration,
+            entries: storage.pending,
+            capturedAtUnixNanoseconds: unixTimeNanoseconds()
+        )
+        storage.pending.removeAll(keepingCapacity: true)
+        storage.lock.unlock()
+
+        guard let body = payload(for: snapshot) else {
+            completeFlush()
+            return false
+        }
+
+        var request = URLRequest(url: snapshot.configuration.endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 10
+        request.httpBody = body
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (field, value) in snapshot.configuration.headers {
+            request.setValue(value, forHTTPHeaderField: field)
+        }
+
+        if let requestSink = snapshot.configuration.requestSink {
+            requestSink(request)
+            completeFlush()
+            return true
+        }
+
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            let success = (response as? HTTPURLResponse).map { (200...299).contains($0.statusCode) } == true
+            if !success {
+                logger.error("OTLP logs flush failed")
+            }
+            completeFlush()
+            return success
+        } catch {
+            logger.error("OTLP logs flush failed")
+            completeFlush()
+            return false
+        }
+    }
+
     /// Sends queued logs at most once every 15 seconds unless forced.
     static func flush(force: Bool = false) {
         let snapshot: Snapshot
