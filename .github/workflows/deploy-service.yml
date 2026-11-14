@@ -29,6 +29,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
     with:
       stack: family-os
       image_name: deeepanshu/family-os-health-api
@@ -38,4 +39,5 @@ jobs:
       caller_event: ${{ github.event_name }}
       caller_before: ${{ github.event.before }}
       image_tag: ${{ github.event.inputs.image_tag }}
+      github_environment: production
     secrets: inherit
