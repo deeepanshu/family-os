@@ -137,6 +137,30 @@
         "enableLogDetails": true,
         "sortOrder": "Descending"
       }
+    },
+    {
+      "title": "HealthKit failed / abandoned runs",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 40 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{
+        "expr": "sum by (group, abandonment_kind, error_code) (increase(app_healthkit_run_failures_total[24h]))",
+        "legendFormat": "{{group}} · {{abandonment_kind}} · {{error_code}}",
+        "refId": "A"
+      }],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
+    },
+    {
+      "title": "HealthKit run lifecycle request rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 48 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{
+        "expr": "sum by (route, status_class) (rate(app_http_server_requests_total{route=~\"/health/api/v1/healthkit/groups/.*/runs/(begin|complete|fail)\"}[5m]))",
+        "legendFormat": "{{route}} · {{status_class}}",
+        "refId": "A"
+      }],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
     }
   ],
   "schemaVersion": 39,

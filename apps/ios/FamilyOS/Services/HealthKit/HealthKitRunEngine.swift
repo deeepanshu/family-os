@@ -333,7 +333,7 @@ struct HealthKitRunEngine: HealthKitRunning {
         // Measure this run's own clocks so a deadline blown while the process was
         // frozen reports as abandoned rather than as a HealthKit failure.
         let wallStartedAt = Date()
-        let clock = ContinuousClock()
+        let clock = SuspendingClock()
         let activeStartedAt = clock.now
         do {
             return try await finishStartedRun(

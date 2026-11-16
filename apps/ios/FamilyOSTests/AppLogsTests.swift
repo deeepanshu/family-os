@@ -51,6 +51,38 @@ final class AppLogsTests: XCTestCase {
         XCTAssertEqual(values["reason"], "bg_refresh")
     }
 
+    func testFlushAndWaitPreservesTerminalSeverityAndAttributes() async throws {
+        let delivered = expectation(description: "terminal OTLP log request")
+        let recorder = LogRequestRecorder(expectation: delivered)
+
+        AppLogs.configureForTesting(
+            endpoint: try XCTUnwrap(URL(string: "http://telemetry.lab:4318/v1/logs"))
+        ) { request in
+            recorder.record(request)
+        }
+        AppLogs.record(
+            "healthkit_bg_metric_failed",
+            severity: .warn,
+            attributes: [
+                "group": "vitals",
+                "error_code": "sync_timeout",
+                "was_suspended": "true"
+            ]
+        )
+
+        let didFlush = await AppLogs.flushAndWait(force: true)
+        XCTAssertTrue(didFlush)
+        await fulfillment(of: [delivered], timeout: 1)
+
+        let body = try XCTUnwrap(recorder.request?.httpBody)
+        let root = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let resourceLogs = try XCTUnwrap((root["resourceLogs"] as? [[String: Any]])?.first)
+        let scopeLogs = try XCTUnwrap((resourceLogs["scopeLogs"] as? [[String: Any]])?.first)
+        let entry = try XCTUnwrap((scopeLogs["logRecords"] as? [[String: Any]])?.first)
+        XCTAssertEqual(entry["severityText"] as? String, "WARN")
+        XCTAssertEqual(entry["severityNumber"] as? Int, 13)
+    }
+
     func testFlushIncludesServiceIdentityResourceAttributes() throws {
         let delivered = expectation(description: "OTLP log resource")
         let recorder = LogRequestRecorder(expectation: delivered)
