@@ -1,5 +1,6 @@
 import {
   HEALTH_API_PREFIX,
+  bloodGlucoseNaturalKey,
   bloodPressureNaturalKey,
   type HealthKitConsentGroup,
   type HealthKitRunBeginResult,
@@ -186,6 +187,29 @@ export function bloodPressureOp(input: {
       systolic: input.systolic,
       diastolic: input.diastolic,
       pulse: input.pulse
+    }
+  };
+}
+
+export function bloodGlucoseOp(input: {
+  sourceSampleKey?: string;
+  measuredAtUtc: string;
+  valueMgDl: number;
+  mealTime?: "preprandial" | "postprandial";
+}): HealthKitSyncOp {
+  const sourceSampleKey = input.sourceSampleKey ?? crypto.randomUUID();
+  return {
+    opId: crypto.randomUUID(),
+    naturalKey: bloodGlucoseNaturalKey(sourceSampleKey),
+    group: "vitals",
+    scopeKey: "blood_glucose",
+    op: "upsert",
+    payload: {
+      kind: "blood_glucose",
+      sourceSampleKey,
+      measuredAtUtc: input.measuredAtUtc,
+      valueMgDl: input.valueMgDl,
+      ...(input.mealTime ? { mealTime: input.mealTime } : {})
     }
   };
 }

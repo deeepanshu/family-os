@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>History — blood glucose mock</title>
+  <style>
+    :root {
+      --bg: #f2f2f7;
+      --card: #ffffff;
+      --text: #000;
+      --secondary: #6c6c70;
+      --tertiary: #aeaeb2;
+      --blue: #007aff;
+      --sep: rgba(60, 60, 67, 0.12);
+      --phone: 390px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      background: #e5e5ea;
+      color: var(--text);
+      padding: 24px;
+    }
+    h1 { font-size: 20px; margin: 0 0 8px; }
+    .lede { color: #3a3a3c; max-width: 920px; margin: 0 0 20px; line-height: 1.4; }
+    .grid { display: flex; flex-wrap: wrap; gap: 28px; }
+    .phone {
+      width: var(--phone);
+      background: var(--bg);
+      border-radius: 36px;
+      overflow: hidden;
+      box-shadow: 0 12px 40px rgba(0,0,0,.18);
+      display: flex;
+      flex-direction: column;
+      min-height: 760px;
+    }
+    .caption {
+      font-size: 13px;
+      font-weight: 600;
+      margin: 0 0 8px;
+      color: #1c1c1e;
+    }
+    .status {
+      height: 44px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      padding: 0 22px 6px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .profile {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px 0;
+      font-size: 20px;
+      font-weight: 600;
+    }
+    .profile .swap { color: var(--secondary); font-size: 12px; }
+    .seg {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      margin: 10px 16px 8px;
+      background: rgba(118,118,128,.12);
+      border-radius: 9px;
+      padding: 2px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .seg span { text-align: center; padding: 6px 0; border-radius: 7px; color: #000; }
+    .seg .on { background: #fff; box-shadow: 0 0 0 0.5px rgba(0,0,0,.04); }
+    .list { flex: 1; padding: 6px 16px 12px; }
+    .section-title {
+      font-size: 13px;
+      color: var(--secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      padding: 10px 4px 6px;
+      font-weight: 500;
+    }
+    .card {
+      background: var(--card);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .row {
+      padding: 12px 14px;
+      border-bottom: 0.5px solid var(--sep);
+    }
+    .row:last-child { border-bottom: 0; }
+    .row-top {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+    .title { font-size: 17px; font-weight: 600; }
+    .time { margin-left: auto; font-size: 12px; color: var(--secondary); font-variant-numeric: tabular-nums; }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .metric-label {
+      font-size: 9px;
+      font-weight: 600;
+      color: var(--tertiary);
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+    }
+    .metric-value {
+      font-size: 15px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+    .empty { color: var(--secondary); padding: 16px 4px; font-size: 16px; }
+    .look { font-size: 12px; color: var(--secondary); padding: 0 16px 4px; }
+    .tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      border-top: 0.5px solid var(--sep);
+      background: rgba(249,249,249,.94);
+      padding: 6px 0 18px;
+      text-align: center;
+      font-size: 10px;
+      color: var(--secondary);
+    }
+    .tabs .on { color: var(--blue); }
+    .icon { font-size: 18px; line-height: 1.1; }
+  </style>
+</head>
+<body>
+  <h1>History — blood glucose</h1>
+  <p class="lede">
+    Vitals filter. Glucose joins BP and heart rate; no Home tiles, no charts.
+    ≤8 samples in a day: one row each (time + value, meal label only when HealthKit sent it).
+    &gt;8 samples: one summary row (latest, min, max, count). Look-only for household peers via the existing profile switcher.
+  </p>
+  <div class="grid">
+
+    <div>
+      <p class="caption">1. Fingerstick day — meal time present or omitted</p>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>LTE</span></div>
+        <div class="profile"><span class="swap">↕</span> DJDJ</div>
+        <div class="seg"><span>All</span><span class="on">Vitals</span><span>Sleep</span><span>Workouts</span></div>
+        <div class="list">
+          <div class="section-title">Wed, Aug 19</div>
+          <div class="card">
+            <div class="row">
+              <div class="row-top"><div class="title">Blood Pressure</div><div class="time">7:15 AM</div></div>
+              <div class="metrics">
+                <div><div class="metric-label">Reading</div><div class="metric-value">118/76 mmHg</div></div>
+                <div><div class="metric-label">Pulse</div><div class="metric-value">64 bpm</div></div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-top"><div class="title">Blood Glucose</div><div class="time">7:05 AM</div></div>
+              <div class="metrics">
+                <div><div class="metric-label">Reading</div><div class="metric-value">104 mg/dL</div></div>
+                <div><div class="metric-label">Meal</div><div class="metric-value">Before meal</div></div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-top"><div class="title">Blood Glucose</div><div class="time">9:18 AM</div></div>
+              <div class="metrics">
+                <div><div class="metric-label">Reading</div><div class="metric-value">98 mg/dL</div></div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-top"><div class="title">Blood Glucose</div><div class="time">1:40 PM</div></div>
+              <div class="metrics">
+                <div><div class="metric-label">Reading</div><div class="metric-value">132 mg/dL</div></div>
+                <div><div class="metric-label">Meal</div><div class="metric-value">After meal</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="tabs">
+          <div class="on"><div class="icon">♥</div>Health</div>
+          <div><div class="icon">⌂</div>Family</div>
+          <div><div class="icon">●</div>Profile</div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <p class="caption">2. CGM-dense day — one summary row</p>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>LTE</span></div>
+        <div class="profile"><span class="swap">↕</span> DJDJ</div>
+        <div class="seg"><span>All</span><span class="on">Vitals</span><span>Sleep</span><span>Workouts</span></div>
+        <div class="list">
+          <div class="section-title">Tue, Aug 18</div>
+          <div class="card">
+            <div class="row">
+              <div class="row-top"><div class="title">Blood Glucose</div><div class="time">11:56 PM</div></div>
+              <div class="metrics">
+                <div><div class="metric-label">Latest</div><div class="metric-value">112 mg/dL</div></div>
+                <div><div class="metric-label">Min</div><div class="metric-value">72 mg/dL</div></div>
+                <div><div class="metric-label">Max</div><div class="metric-value">186 mg/dL</div></div>
+                <div><div class="metric-label">Readings</div><div class="metric-value">248</div></div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-top"><div class="title">Heart Rate</div></div>
+              <div class="metrics">
+                <div><div class="metric-label">Min</div><div class="metric-value">58 bpm</div></div>
+                <div><div class="metric-label">Avg</div><div class="metric-value">72 bpm</div></div>
+                <div><div class="metric-label">Max</div><div class="metric-value">110 bpm</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="tabs">
+          <div class="on"><div class="icon">♥</div>Health</div>
+          <div><div class="icon">⌂</div>Family</div>
+          <div><div class="icon">●</div>Profile</div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <p class="caption">3. Empty — No vitals yet.</p>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>LTE</span></div>
+        <div class="profile"><span class="swap">↕</span> DJDJ</div>
+        <div class="seg"><span>All</span><span class="on">Vitals</span><span>Sleep</span><span>Workouts</span></div>
+        <div class="list">
+          <div class="empty">No vitals yet.</div>
+        </div>
+        <div class="tabs">
+          <div class="on"><div class="icon">♥</div>Health</div>
+          <div><div class="icon">⌂</div>Family</div>
+          <div><div class="icon">●</div>Profile</div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <p class="caption">4. Other member — look-only via profile switcher</p>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>LTE</span></div>
+        <div class="profile"><span class="swap">↕</span> Jamie</div>
+        <div class="seg"><span>All</span><span class="on">Vitals</span><span>Sleep</span><span>Workouts</span></div>
+        <div class="list">
+          <div class="section-title">Wed, Aug 19</div>
+          <div class="card">
+            <div class="row">
+              <div class="row-top"><div class="title">Blood Pressure</div><div class="time">8:40 AM</div></div>
+              <div class="metrics">
+                <div><div class="metric-label">Reading</div><div class="metric-value">134/84 mmHg</div></div>
+                <div><div class="metric-label">Pulse</div><div class="metric-value">72 bpm</div></div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-top"><div class="title">Blood Glucose</div><div class="time">8:05 AM</div></div>
+              <div class="metrics">
+                <div><div class="metric-label">Reading</div><div class="metric-value">141 mg/dL</div></div>
+                <div><div class="metric-label">Meal</div><div class="metric-value">Before meal</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="tabs">
+          <div class="on"><div class="icon">♥</div>Health</div>
+          <div><div class="icon">⌂</div>Family</div>
+          <div><div class="icon">●</div>Profile</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>

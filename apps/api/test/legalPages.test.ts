@@ -27,11 +27,12 @@ describe("public legal pages", () => {
     expect(html).toContain("step count");
     expect(html).toContain("blood pressure");
     expect(html).toContain("heart rate");
+    expect(html).toContain("blood glucose");
     expect(html).toContain("sleep analysis");
     expect(html).toContain("Workouts");
     expect(html).toContain("exercise names");
     expect(html).toContain("GPS routes");
-    expect(html).toContain("does not request or present glucose");
+    expect(html).not.toContain("does not request or present glucose");
     expect(html).toContain("Sign in with Apple");
     expect(html).toContain("Supabase");
     expect(html).toContain("does not register for remote (APNs)");

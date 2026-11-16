@@ -33,6 +33,7 @@ enum HealthKitOpPayloadWire: Codable, Sendable {
     }
 
     case bloodPressure(sourceObjectKey: String, measuredAtUtc: String, systolic: Int, diastolic: Int, pulse: Int?)
+    case bloodGlucose(sourceSampleKey: String, measuredAtUtc: String, valueMgDl: Double, mealTime: String?)
     case stepsHour(hourStartUtc: String, count: Int)
     case sleepDay(
         sleepDay: String,
@@ -89,7 +90,7 @@ enum HealthKitOpPayloadWire: Codable, Sendable {
         case activeEnergyKcal, distanceMeters, averageHeartRateBpm, maximumHeartRateBpm, minimumHeartRateBpm
         case sourceName, sourceBundleId, deviceName, deviceManufacturer, isIndoor
         case elevationAscendedMeters, averageMETs, swimmingStrokeCount, totalFlightsClimbed
-        case events, activities
+        case events, activities, valueMgDl, mealTime
     }
 
     init(from decoder: Decoder) throws {
@@ -103,6 +104,13 @@ enum HealthKitOpPayloadWire: Codable, Sendable {
                 systolic: try container.decode(Int.self, forKey: .systolic),
                 diastolic: try container.decode(Int.self, forKey: .diastolic),
                 pulse: try container.decodeIfPresent(Int.self, forKey: .pulse)
+            )
+        case "blood_glucose":
+            self = .bloodGlucose(
+                sourceSampleKey: try container.decode(String.self, forKey: .sourceSampleKey),
+                measuredAtUtc: try container.decode(String.self, forKey: .measuredAtUtc),
+                valueMgDl: try container.decode(Double.self, forKey: .valueMgDl),
+                mealTime: try container.decodeIfPresent(String.self, forKey: .mealTime)
             )
         case "steps_hour":
             self = .stepsHour(
@@ -170,6 +178,12 @@ enum HealthKitOpPayloadWire: Codable, Sendable {
             try container.encode(systolic, forKey: .systolic)
             try container.encode(diastolic, forKey: .diastolic)
             try container.encodeIfPresent(pulse, forKey: .pulse)
+        case let .bloodGlucose(sourceSampleKey, measuredAtUtc, valueMgDl, mealTime):
+            try container.encode("blood_glucose", forKey: .kind)
+            try container.encode(sourceSampleKey, forKey: .sourceSampleKey)
+            try container.encode(measuredAtUtc, forKey: .measuredAtUtc)
+            try container.encode(valueMgDl, forKey: .valueMgDl)
+            try container.encodeIfPresent(mealTime, forKey: .mealTime)
         case let .stepsHour(hourStartUtc, count):
             try container.encode("steps_hour", forKey: .kind)
             try container.encode(hourStartUtc, forKey: .hourStartUtc)

@@ -78,6 +78,7 @@ struct HealthKitClient {
         if metrics.contains(.vitals) {
             types.formUnion(bloodPressureReadTypes())
             types.formUnion(pulseReadTypes())
+            types.formUnion(bloodGlucoseReadTypes())
         }
         if metrics.contains(.sleep) {
             types.formUnion(sleepReadTypes())
@@ -114,6 +115,14 @@ struct HealthKitClient {
         }
         if let resting = HKObjectType.quantityType(forIdentifier: .restingHeartRate) {
             types.insert(resting)
+        }
+        return types
+    }
+
+    static func bloodGlucoseReadTypes() -> Set<HKObjectType> {
+        var types = Set<HKObjectType>()
+        if let glucose = HKObjectType.quantityType(forIdentifier: .bloodGlucose) {
+            types.insert(glucose)
         }
         return types
     }

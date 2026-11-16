@@ -134,14 +134,23 @@ describe("local demo seed", () => {
     expect(bloodPressure.data.length).toBeGreaterThan(0);
     expect(bloodPressure.data[0].systolic).toEqual(expect.any(Number));
 
+    const from = "2026-08-10";
+    const to = "2026-08-23";
+    const glucoseQuery = `personId=${first.profileId}&from=${from}&to=${to}`;
+    const glucose = await (
+      await api.request(`${HEALTH_API_PREFIX}/readings/blood-glucose?${glucoseQuery}`, { headers: auth })
+    ).json();
+    expect(glucose.data.length).toBeGreaterThanOrEqual(3);
+    expect(glucose.data.some((row: { mealTime?: string }) => row.mealTime === "preprandial")).toBe(true);
+    expect(glucose.data.some((row: { mealTime?: string }) => row.mealTime === "postprandial")).toBe(true);
+    expect(glucose.data.some((row: { mealTime?: string }) => row.mealTime === undefined)).toBe(true);
+
     const memberBp = await (
       await api.request(`${HEALTH_API_PREFIX}/readings/blood-pressure?personId=${first.memberProfileId}`, { headers: auth })
     ).json();
     expect(memberBp.data.length).toBeGreaterThan(0);
     expect(memberBp.data[0].systolic).toBeGreaterThan(130);
 
-    const from = "2026-08-10";
-    const to = "2026-08-23";
     const query = `personId=${first.profileId}&from=${from}&to=${to}`;
     const sleep = await (await api.request(`${HEALTH_API_PREFIX}/readings/sleep?${query}`, { headers: auth })).json();
     expect(sleep.data).toHaveLength(14);

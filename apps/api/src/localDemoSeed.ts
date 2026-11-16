@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  bloodGlucoseNaturalKey,
   bloodPressureNaturalKey,
   type HealthKitConsentGroup,
   type HealthKitSyncOp
@@ -339,6 +340,22 @@ function buildDemoOps(
     }
   }
 
+  const glucoseDays = [days[days.length - 1], days[days.length - 2], days[days.length - 4]].filter(
+    (day): day is string => Boolean(day)
+  );
+  if (glucoseDays[0]) {
+    vitals.push(
+      glucoseOp(userId, "glu-pre", glucoseDays[0], "07:05:00.000Z", 104, "preprandial"),
+      glucoseOp(userId, "glu-post", glucoseDays[0], "13:40:00.000Z", 132, "postprandial")
+    );
+  }
+  if (glucoseDays[1]) {
+    vitals.push(glucoseOp(userId, "glu-plain", glucoseDays[1], "09:18:00.000Z", 98));
+  }
+  if (glucoseDays[2]) {
+    vitals.push(glucoseOp(userId, "glu-plain-2", glucoseDays[2], "21:10:00.000Z", 110));
+  }
+
   const twoAgo = days[days.length - 3];
   const fiveAgo = days[days.length - 6];
   workouts.push(
@@ -352,6 +369,29 @@ function buildDemoOps(
   }
 
   return { activity, sleep, vitals, workouts };
+}
+
+function glucoseOp(
+  userId: string,
+  tag: string,
+  day: string,
+  time: string,
+  valueMgDl: number,
+  mealTime?: "preprandial" | "postprandial"
+): HealthKitSyncOp {
+  const sourceSampleKey = uuidHash(`local-demo-source:${userId}:${tag}`);
+  return upsertOp(userId, {
+    naturalKey: bloodGlucoseNaturalKey(sourceSampleKey),
+    group: "vitals",
+    scopeKey: "blood_glucose",
+    payload: {
+      kind: "blood_glucose",
+      sourceSampleKey,
+      measuredAtUtc: `${day}T${time}`,
+      valueMgDl,
+      ...(mealTime ? { mealTime } : {})
+    }
+  });
 }
 
 function workoutOp(

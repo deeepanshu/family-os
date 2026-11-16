@@ -468,6 +468,9 @@ function assertPayloadValid(payload: HealthKitOpPayload, op: HealthKitSyncOp): v
       if (payload.valueMgDl < 20 || payload.valueMgDl > 700) {
         throw new HttpError(400, "payload_invalid", "glucose value is out of range.");
       }
+      if (payload.mealTime !== undefined && payload.mealTime !== "preprandial" && payload.mealTime !== "postprandial") {
+        throw new HttpError(400, "payload_invalid", "glucose mealTime must be preprandial or postprandial.");
+      }
       return;
     }
     case "workout": {

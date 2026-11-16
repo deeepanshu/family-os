@@ -176,15 +176,13 @@ export type BloodPressureReading = {
 
 export type BloodGlucoseReading = {
   id: string;
-  familyId: string;
+  familyId: string | null;
   personId: string;
   recordedByUserId: string;
   value: number;
   unit: "mg/dL";
-  /** HealthKit does not attach a meal context to glucose samples. */
-  context?: undefined;
+  mealTime?: "preprandial" | "postprandial";
   measuredAt: string;
-  notes?: string;
   source: "healthkit";
   createdAt: string;
   updatedAt: string;
@@ -435,31 +433,37 @@ export type McpSleepAttributeMetric = (typeof MCP_SLEEP_ATTRIBUTE_METRICS)[numbe
  * from the HealthKit registry: enabling a broad consent group must never
  * advertise unrelated registry metrics.
  */
-export const MCP_HEALTH_METRICS = ["steps", "blood_pressure", "sleep", "workout"] as const satisfies readonly HealthKitMetricKey[];
+export const MCP_HEALTH_METRICS = [
+  "steps",
+  "blood_pressure",
+  "blood_glucose",
+  "sleep",
+  "workout"
+] as const satisfies readonly HealthKitMetricKey[];
 
 export type McpHealthMetric = (typeof MCP_HEALTH_METRICS)[number];
 
 /**
- * Explicit app-toggle → MCP metric mapping. `vitals` means blood pressure only
- * on this product surface; it never advertises heart rate, glucose, or any
- * other broad-registry vital.
+ * Explicit app-toggle → MCP metrics mapping. `vitals` advertises blood
+ * pressure and blood glucose; it never advertises heart rate, oxygen
+ * saturation, temperature, or other broad-registry vitals.
  */
-export const MCP_HEALTH_METRIC_FOR_PRODUCT_GROUP = {
-  activity: "steps",
-  vitals: "blood_pressure",
-  sleep: "sleep",
-  workouts: "workout"
-} as const satisfies Record<string, McpHealthMetric>;
+export const MCP_HEALTH_METRICS_FOR_PRODUCT_GROUP = {
+  activity: ["steps"],
+  vitals: ["blood_pressure", "blood_glucose"],
+  sleep: ["sleep"],
+  workouts: ["workout"]
+} as const satisfies Record<string, readonly McpHealthMetric[]>;
 
-export function mcpHealthMetricForProductGroup(group: HealthKitConsentGroup): McpHealthMetric | null {
-  return (MCP_HEALTH_METRIC_FOR_PRODUCT_GROUP as Record<string, McpHealthMetric>)[group] ?? null;
+export function mcpHealthMetricsForProductGroup(group: HealthKitConsentGroup): McpHealthMetric[] {
+  return [
+    ...((MCP_HEALTH_METRICS_FOR_PRODUCT_GROUP as Record<string, readonly McpHealthMetric[]>)[group] ?? [])
+  ];
 }
 
 /** Runtime filter: the MCP metrics available for a set of enabled app toggles. */
 export function mcpHealthMetricsForEnabledGroups(enabledGroups: readonly HealthKitConsentGroup[]): McpHealthMetric[] {
-  const metrics = enabledGroups
-    .map(mcpHealthMetricForProductGroup)
-    .filter((metric): metric is McpHealthMetric => metric !== null);
+  const metrics = enabledGroups.flatMap(mcpHealthMetricsForProductGroup);
   return MCP_HEALTH_METRICS.filter((metric) => metrics.includes(metric));
 }
 
@@ -542,6 +546,13 @@ export type McpBloodPressureReadingRow = {
   pulse?: number;
 };
 
+export type McpBloodGlucoseReadingRow = {
+  localDate: string;
+  localTime: string;
+  value: number;
+  mealTime?: "preprandial" | "postprandial";
+};
+
 export type McpWorkoutRow = {
   localDate: string;
   localTime: string;
@@ -589,12 +600,21 @@ export type McpDailyDurationSeriesResult = McpHealthDataBase & {
   points: McpSleepPoint[];
 };
 
-export type McpDailyReadingTableResult = McpHealthDataBase & {
+export type McpBloodPressureTableResult = McpHealthDataBase & {
   viewType: "daily_reading_table";
   healthMetric: "blood_pressure";
   readings: McpBloodPressureReadingRow[];
   truncated: boolean;
 };
+
+export type McpBloodGlucoseTableResult = McpHealthDataBase & {
+  viewType: "daily_reading_table";
+  healthMetric: "blood_glucose";
+  readings: McpBloodGlucoseReadingRow[];
+  truncated: boolean;
+};
+
+export type McpDailyReadingTableResult = McpBloodPressureTableResult | McpBloodGlucoseTableResult;
 
 export type McpWorkoutTableResult = McpHealthDataBase & {
   viewType: "workout_table";

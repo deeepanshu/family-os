@@ -112,9 +112,8 @@ export function mapBloodGlucose(row: Row): BloodGlucoseReading {
     recordedByUserId: row.recorded_by_user_id,
     value: Number(row.value_mg_dl),
     unit: "mg/dL",
-    context: undefined,
+    mealTime: row.meal_time === "preprandial" || row.meal_time === "postprandial" ? row.meal_time : undefined,
     measuredAt: toIso(row.measured_at),
-    notes: undefined,
     source: "healthkit",
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at)

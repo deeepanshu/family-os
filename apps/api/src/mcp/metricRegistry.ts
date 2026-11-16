@@ -27,7 +27,7 @@ function entryFor(metric: McpHealthMetric): MetricRegistryEntry {
   if (metric === "steps") {
     return { metric, unit: definition.unit, maxRangeDays: DEFAULT_MAX_DAYS, defaultViewType: "hourly_count_series" };
   }
-  if (definition.storage === "blood_pressure") {
+  if (definition.storage === "blood_pressure" || definition.storage === "blood_glucose") {
     return {
       metric,
       unit: definition.unit,
@@ -46,7 +46,7 @@ function entryFor(metric: McpHealthMetric): MetricRegistryEntry {
 }
 
 /**
- * Built from the fixed product allowlist (blood_pressure, sleep, workout) —
+ * Built from the fixed product allowlist (blood_pressure, blood_glucose, sleep, workout) —
  * never from the broad HealthKit registry (plan §8.2).
  */
 export const MCP_METRIC_REGISTRY: Record<McpHealthMetric, MetricRegistryEntry> = Object.fromEntries(
